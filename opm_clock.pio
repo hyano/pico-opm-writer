@@ -1,0 +1,32 @@
+;
+; OPM (YM2151) のマスタークロック φM 生成
+;
+; SPDX-License-Identifier: MIT
+;
+
+; 1 命令 = 1 SM サイクル = clkdiv 個の sys クロックなので、
+; 2 命令のラップループで 1 周期 = 2 x clkdiv sys クロック、デューティ 50% になる。
+;   φM = sys_clk / (2 x clkdiv)
+
+.program opm_clock
+.wrap_target
+    set pins, 1
+    set pins, 0
+.wrap
+
+% c-sdk {
+
+// φM 出力用のステートマシンを初期化する。
+// div_int / div_frac8 は 16.8 固定小数の分周比（呼び出し側で算出する）。
+static inline void opm_clock_program_init(PIO pio, uint sm, uint offset, uint pin,
+                                          uint32_t div_int, uint8_t div_frac8) {
+    pio_gpio_init(pio, pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+
+    pio_sm_config c = opm_clock_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, pin, 1);
+    sm_config_set_clkdiv_int_frac8(&c, div_int, div_frac8);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
