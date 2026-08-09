@@ -1,0 +1,50 @@
+r
+d 100
+
+w 0f @NFRQ@ # NFRQ (00, 1f)
+w 18 @LFRQ@ # LFRQ (00-ff)
+w 19 @PMD@  # PMD (00, ff)
+w 19 @AMD@  # AMD (00, 7f)
+w 1b @W@    # LFO 波形 W (03=ノイズ)
+
+w 40 @MUL@  # DT1=0 MUL=@MUL@
+w 60 00     # TL=0
+w 80 1f     # AR=31
+w a0 @AMSE@ # D1R=0 (00, 80)
+w c0 00     # D2R=0
+w e0 0f     # D1L=0 RR=15
+
+w 50 @MUL@  # DT1=0 MUL=@MUL@
+w 70 00     # TL=0
+w 90 1f     # AR=31
+w b0 @AMSE@ # D1R=0 (00, 80)
+w d0 00     # D2R=0
+w f0 0f     # D1L=0 RR=15
+
+w 48 @MUL@  # DT1=0 MUL=@MUL@
+w 68 00     # TL=0
+w 88 1f     # AR=31
+w a8 @AMSE@ # D1R=0 (00, 80)
+w c8 00     # D2R=0
+w e8 0f     # D1L=0 RR=15
+
+w 58 @MUL@  # DT1=0 MUL=@MUL@
+w 78 00     # TL=0
+w 98 1f     # AR=31
+w b8 @AMSE@ # D1R=0 (00, 80)
+w d8 00     # D2R=0
+w f8 0f     # D1L=0 RR=15
+
+w 20 c7     # RL=both FL=0 ALG=7
+w 38 @APMS@ # PMS/AMS (70=PMS7 AMS0, 02=PMS0 AMS2)
+
+w 28 @KC@   # KC (オクターブ + 音名。下位ニブルの 3,7,b,f は無効)
+
+w 01 02     # reset LFO
+w 01 00
+w 08 78     # KON ch0
+
+!capture @TIME@
+
+r
+d 100

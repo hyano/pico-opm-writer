@@ -1,0 +1,27 @@
+
+[F] 搬送波を変えた突き合わせ  (wav vs wav_4a_01)
+------------------------------------
+同じ LFO 条件を別の搬送波で撮ったデータと比べる。
+  一致すれば、測った周期が搬送波由来のアーティファクトでないことの裏付けになる。
+  不一致は「その搬送波では測れない条件」を示す（README §4.4）。
+
+am: 一致 501/512  不一致 11
+    不一致条件での wav 側の周期: 128.0 〜 65531.2 samples
+    うち周期が wav_4a_01 の搬送波周期 (127 samples) 未満: 0/11
+    不一致条件の wav_4a_01 側 confidence 中央: 0.316
+      nfrq=00 lfrq=a2  wav=   256.00 (conf 0.61)  wav_4a_01=    32.00 (conf 0.06)
+      nfrq=00 lfrq=a3  wav=   256.01 (conf 0.67)  wav_4a_01=    36.57 (conf 0.25)
+      nfrq=00 lfrq=a4  wav=   255.99 (conf 0.57)  wav_4a_01=    32.00 (conf 0.14)
+      nfrq=00 lfrq=a5  wav=   256.00 (conf 0.62)  wav_4a_01=    51.20 (conf 0.39)
+      nfrq=00 lfrq=a7  wav=   256.00 (conf 0.67)  wav_4a_01=    51.20 (conf 0.33)
+
+pm: 一致 389/512  不一致 123
+    不一致条件での wav 側の周期: 8.0 〜 65535.3 samples
+    うち周期が wav_4a_01 の搬送波周期 (127 samples) 未満: 86/123
+    不一致条件の wav_4a_01 側 confidence 中央: 0.013
+      nfrq=00 lfrq=64  wav=  4096.52 (conf 0.71)  wav_4a_01=  4339.25 (conf 0.00)
+      nfrq=00 lfrq=6f  wav=  4096.52 (conf 0.69)  wav_4a_01=  1962.81 (conf 0.00)
+      nfrq=00 lfrq=7b  wav=  2049.97 (conf 0.76)  wav_4a_01=  2129.26 (conf 0.03)
+      nfrq=00 lfrq=80  wav=  1024.26 (conf 0.75)  wav_4a_01=   520.57 (conf 0.00)
+      nfrq=00 lfrq=8c  wav=  1022.95 (conf 0.75)  wav_4a_01=   515.78 (conf 0.00)
+

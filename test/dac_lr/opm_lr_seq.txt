@@ -1,0 +1,44 @@
+r
+d 100
+
+# LFO は一切使わない。NFRQ / LFRQ / PMD / AMD / W は書かず、リセット直後の 0 のまま。
+
+w 40 @MUL@  # DT1=0 MUL=@MUL@ (+0x00)
+w 60 @TL0@  # TL
+w 80 1f     # AR=31
+w a0 00     # D1R=0 AMS-EN=0
+w c0 00     # D2R=0
+w e0 0f     # D1L=0 RR=15
+
+w 50 @MUL@  # DT1=0 MUL=@MUL@ (+0x10)
+w 70 @TL2@  # TL
+w 90 1f     # AR=31
+w b0 00     # D1R=0 AMS-EN=0
+w d0 00     # D2R=0
+w f0 0f     # D1L=0 RR=15
+
+w 48 @MUL@  # DT1=0 MUL=@MUL@ (+0x08)
+w 68 @TL1@  # TL
+w 88 1f     # AR=31
+w a8 00     # D1R=0 AMS-EN=0
+w c8 00     # D2R=0
+w e8 0f     # D1L=0 RR=15
+
+w 58 @MUL@  # DT1=0 MUL=@MUL@ (+0x18)
+w 78 @TL3@  # TL
+w 98 1f     # AR=31
+w b8 00     # D1R=0 AMS-EN=0
+w d8 00     # D2R=0
+w f8 0f     # D1L=0 RR=15
+
+w 20 @RL@   # RL/FL/ALG (c7=RL both, 47=L のみ, 87=R のみ。いずれも FL=0 ALG=7)
+w 38 00     # PMS=0 AMS=0
+
+w 28 @KC@   # KC (オクターブ + 音名。下位ニブルの 3,7,b,f は無効)
+
+w 08 78     # KON ch0
+
+!capture @TIME@
+
+r
+d 100
