@@ -21,6 +21,7 @@
     [F] 搬送波を変えた別データセットとの突き合わせ（--cross）
     [G] confidence が LFRQ に依存していないかの点検
     [J] NFRQ と値の供給周期（--supply）
+    [N] W≠3（鋸・三角）の段の間隔（--stair）
 
 ## 使い方
 
@@ -42,6 +43,9 @@
 ./analyze_lfo.py --mode am --values wav_value/am_nfrq_00_lfrq_a{0,8}_*.wav.zst
 ./analyze_lfo.py --mode am --period 65536 --dump 24 \
     --values wav_lfrq28/am_nfrq_1f_lfrq_28_*.wav.zst
+
+# W≠3（鋸・三角）の段の間隔を測り、実機モデルと ymfm モデルを判別する
+./analyze_lfo.py --mode am --stair wav_w0/am_*.wav.zst
 ```
 
 `--gaps` は集計ではなく**個別条件の生の中身**を見るためのもの。イベント間隔が推定周期の
@@ -55,6 +59,11 @@
 `--values` はその値を**連に畳まずに列のまま**扱う。`--runs` が答えられない
 「別のキャプチャ / 別の条件で**同じ語の列**を引いているか」を、遅れを総当たりして
 突き合わせる。順位に直して比べるので、モードが違ってもゲインがずれても効く。
+
+`--stair` は W≠3 専用。鋸・三角では LFO 値が単調に動くので、値が独立であることを
+前提にする `--runs` は使えない。代わりに**階段の段差から段の間隔を直接測る**。
+下位ニブルが「更新の間隔」を変えるのか「1 回の更新で進む歩幅」を変えるのかが
+これで判別できる（README §5.7）。矩形波 (W=1) は段が 2 値しかないので測れない。
 
 解析には時間がかかる（`wav/` の 1024 条件で 7 分程度）。集計だけなら一瞬。
 
@@ -126,6 +135,24 @@ VALUE_LUCK = 0.99
 # --values で「一致」と言うのに要求する真の一致の下限。上限を 3σ 超えていても
 # 真の一致が数 % では列が合っているとは言えない
 VALUE_MATCH_MIN = 0.15
+
+# --stair で 1 段を何ブロックに割るか。段の間隔の分解能が ±(段/この値) になる
+STAIR_SUB = 8
+# --stair のブロック長の下限 [samples]。これより短いと 1 ブロックの平均が効かず、
+# 段差（対数振幅で 0.01 前後）が包絡の雑音に埋まる
+STAIR_GRID_MIN = 16
+# --stair で段の境界と見なす閾値。ブロック間差分の絶対値の上位 10% 点に対する比。
+# **1 段ぶんの差分（+1）も 2 段ぶん（+2）も拾える位置**に置く必要がある。
+# 下位ニブルが大きい帯では歩幅が +1 と +2 で交互になるので、閾値が両者の間に
+# 落ちると片方だけを数えて間隔が 2 倍に出る
+STAIR_THR = 0.4
+# --stair が間隔を出すのに要求する境界の数
+STAIR_EDGES_MIN = 5
+# --stair が要求する「1 段あたりのブロック数」の下限。**これが 2 だと結論が歪む**:
+# 滲みをまとめる規則（続いた検出を 1 本にする）が、真の間隔によらず 1 つおきに
+# 境界を落とすので、間隔が必ず 2 ブロックと出てしまう。3 以上あればまとめる規則が
+# 効くのは本当に滲んだ場合だけになる
+STAIR_GAP_MIN = 3
 
 
 def model_period(lfrq):
@@ -744,6 +771,109 @@ def lfo_period(lfrq):
     return 2 ** (18 - (lfrq >> 4))
 
 
+# ---- W≠3 の段の間隔を測る（--stair） ------------------------------------
+
+def stair_period(olp, path, mode, grid):
+    """階段状の LFO 波形（W=0 鋸 / W=2 三角）の段の間隔 [samples] を返す。
+
+    返すのは (段の間隔, 境界の数, 段差の中央値)。
+
+    AM の対数振幅も PM の cos(ω) も LFO 値の単調関数なので、鋸・三角では
+    **階段状のランプ**になる。段の境界はブロック値の 1 階差分に立つので、
+    その間隔を数えれば段の間隔が直接出る。W=3（ノイズ）と違って値が単調に
+    動くため、`--runs` の「同じ語を続けて引いた回数」という測り方は使えない。
+
+    `grid` は段より細かいブロック長。**間隔の分解能は ±grid** になる。
+    1 サンプルずつ見ないのは、1 段ぶんの段差（対数振幅で 0.01 前後）が
+    包絡の雑音より小さく、ブロック内で平均しないと境界が立たないため。
+
+    **grid の選び方は結論を縛らない。**`grid` は測れる間隔の刻みを決めるだけで、
+    どちらのモデルの値も同じ刻みの上に載る（既定では実機モデルの予測が
+    `STAIR_SUB` ブロック、ymfm モデルの予測はその 16/31〜1 倍に当たる）。
+    """
+    x, _ = olp.load_left(path)
+    a = olp.Analyzer(x, mode)
+    v = block_values(a, mode, grid, 0)
+    if len(v) < 4 * STAIR_SUB:
+        raise ValueError(f"ブロックが少なすぎる: {len(v)}")
+
+    d = [v[i + 1] - v[i] for i in range(len(v) - 1)]
+    mag = sorted(abs(y) for y in d)
+    thr = STAIR_THR * mag[int(len(mag) * 0.90)]
+    if thr <= 0.0:
+        raise ValueError("段差が立たない")
+
+    # 境界は 3 サンプルのカーネルで隣のブロックへも滲むので、続いた検出は 1 本に
+    edges = []
+    for i, y in enumerate(d):
+        if abs(y) >= thr and not (edges and i - edges[-1] <= 1):
+            edges.append(i)
+    if len(edges) < STAIR_EDGES_MIN:
+        raise ValueError(f"境界が少なすぎる: {len(edges)}")
+
+    gaps = sorted(b - a2 for a2, b in zip(edges, edges[1:]))
+    med = gaps[len(gaps) // 2]
+    if med < STAIR_GAP_MIN:
+        raise ValueError(f"格子が粗すぎる: 1 段 {med} ブロック")
+    # 鋸の折り返しは段差が桁違いに大きい。間隔の統計には中央値を使うので
+    # 折り返しが混ざっても効かないが、段差の方は上位 10% を落としておく
+    hs = sorted(abs(d[i]) for i in edges)
+    hs = hs[:max(1, int(len(hs) * 0.9))]
+    return med * grid, len(edges), hs[len(hs) // 2]
+
+
+def stair_grid(lfrq):
+    """--stair の既定のブロック長。§2.1 の規則値を `STAIR_SUB` で割る。"""
+    return max(STAIR_GRID_MIN, lfo_period(lfrq) // STAIR_SUB)
+
+
+def report_stair(paths, mode, grid=None):
+    """[N] W≠3 の段の間隔を測り、2 つのモデルの予測と突き合わせる。"""
+    olp = load_analyzer()
+    section(f"[N] W≠3 の段の間隔（--mode {mode}）")
+    print("鋸・三角では LFO 値が単調に動くので、階段の段差から段の間隔を直接測れる。")
+    print("  実機モデル  間隔 = 2^(18-hi)           下位ニブルに依らない")
+    print("  ymfm モデル 間隔 = 2^22/((16+lo)<<hi)  下位ニブルで 16/31 倍まで縮む")
+    print("  **下位ニブル 0 は両モデルが同値なので判別に使えない。**")
+    print()
+    print("  LFRQ   格子   実測 間隔    実機   ymfm    段差  境界  判定")
+
+    tally = Counter()
+    for path in sorted(paths):
+        m = NAME_RE.search(Path(path).name)
+        if not m:
+            print(f"* {Path(path).name}: ファイル名から条件を読めない")
+            continue
+        lfrq = int(m[2], 16)
+        g = grid or stair_grid(lfrq)
+        want_hw, want_ym = lfo_period(lfrq), model_period(lfrq)
+        try:
+            meas, nedge, h = stair_period(olp, path, mode, g)
+        except Exception as e:                        # noqa: BLE001
+            print(f"  {lfrq:02x}   {g:5d}   {e}")
+            tally["測れない"] += 1
+            continue
+        if abs(want_hw - want_ym) / want_hw < AGREE_TOL:
+            verdict = "（両モデル同値）"
+        elif abs(meas - want_hw) / want_hw <= AGREE_TOL * 5:
+            verdict = "実機"
+        elif abs(meas - want_ym) / want_ym <= AGREE_TOL * 5:
+            verdict = "ymfm"
+        else:
+            verdict = "どちらでもない"
+        tally[verdict] += 1
+        print(f"  {lfrq:02x}   {g:5d}  {meas:10d} {want_hw:7d} {want_ym:6.1f} "
+              f"{h:7.3f} {nedge:5d}  {verdict}")
+
+    n = sum(tally.values())
+    dec = n - tally["（両モデル同値）"]
+    print()
+    print(f"  計 {n} 条件 / 判別できる（下位ニブル≠0）{dec} 条件")
+    for k in ("実機", "ymfm", "どちらでもない", "測れない"):
+        if tally[k]:
+            print(f"    {k}: {tally[k]}")
+
+
 def report_supply(wav_dir):
     """[J] NFRQ ごとの「値の供給周期」を全条件で集計する。
 
@@ -876,6 +1006,56 @@ def self_test_values(olp, tg, tmp):
     return results
 
 
+# --stair の段の間隔に許す相対誤差。分解能は ±grid = ±段/STAIR_SUB なので
+# 1 刻みぶんの余裕を見る
+STAIR_TEST_TOL = 1.5 / STAIR_SUB
+
+
+def self_test_stair(olp, tg, tmp):
+    """階段状の値列を入れた人工信号で `--stair` を検証する（実機不要）。
+
+    `synth(..., values=)` に単調なランプを渡せば鋸波そのものになる。要点は
+    **歩幅（1 段で値がいくつ進むか）を変えても間隔が変わらずに戻ること**で、
+    これが実機モデルと ymfm モデルを判別する性質そのものになる。歩幅 1 と 2 が
+    交互になる列（実機の下位ニブル 8 相当）も入れる。ここで間隔が 2 倍に出ると
+    閾値 `STAIR_THR` が高すぎることになり、実機データでも同じ誤りが出る。
+    """
+    cases = (
+        (256, 1, "歩幅 1（下位ニブル 0 相当）"),
+        (256, 2, "歩幅 2（下位ニブル f 相当）"),
+        (256, 3, "歩幅 3（歩幅を変えても間隔は動かない）"),
+        (256, (1, 2), "歩幅 1 と 2 が交互（下位ニブル 8 相当）"),
+        (1024, 2, "段 1024 / 歩幅 2"),
+    )
+
+    results = []
+    for period, step, note in cases:
+        nval = 600
+        walk, val = (step if isinstance(step, tuple) else (step,)), 0
+        values = []
+        for i in range(nval):
+            values.append(val % 256)
+            val += walk[i % len(walk)]
+        length = period * (nval - 2)
+        for mode in MODES:
+            tag = f"{mode}_stair_{period}_{step}".replace(" ", "")
+            path = Path(tmp) / f"{tag}.wav"
+            if not path.exists():
+                tg.write_wav(path, tg.synth(mode, period, length,
+                                            tg.CARRIERS[1], 0, values=values))
+            name = f"{mode} 段の間隔 {period}（{note}）"
+            err = None
+            try:
+                grid = max(STAIR_GRID_MIN, period // STAIR_SUB)
+                meas, _, _ = stair_period(olp, path, mode, grid)
+                if abs(meas - period) / period > STAIR_TEST_TOL:
+                    err = f"間隔 {meas} (期待 {period})"
+            except Exception as e:                    # noqa: BLE001
+                err = str(e)
+            results.append((name, err))
+    return results
+
+
 def self_test():
     """既知の供給周期を入れた人工信号で `--runs` を検証する（実機不要）。
 
@@ -937,6 +1117,7 @@ def self_test():
                 results.append((name, err))
 
         results += self_test_values(olp, tg, tmp)
+        results += self_test_stair(olp, tg, tmp)
 
     ng = 0
     for name, err in results:
@@ -977,6 +1158,12 @@ def main(argv=None):
     parser.add_argument("--period", type=float, default=None,
                         help="--runs / --values で使う更新周期 [samples]。"
                              "省略すると推定する")
+    parser.add_argument("--stair", type=Path, nargs="+", metavar="WAV",
+                        help="[N] W≠3（鋸・三角）の段の間隔を測り、2 つのモデルの"
+                             "予測と突き合わせる（--mode が要る）")
+    parser.add_argument("--grid", type=int, default=None, metavar="N",
+                        help="--stair のブロック長 [samples]。省略すると "
+                             f"2^(18-hi)/{STAIR_SUB} を使う")
     parser.add_argument("--supply", action="store_true",
                         help="[J] --wav-dir の全条件で NFRQ ごとの供給周期を集計する")
     parser.add_argument("--self-test", action="store_true",
@@ -1011,6 +1198,12 @@ def main(argv=None):
             parser.error("--values には --mode が要る")
         report_values(args.values, args.mode, args.period,
                       args.lag_span, args.dump)
+        return 0
+
+    if args.stair:
+        if not args.mode:
+            parser.error("--stair には --mode が要る")
+        report_stair(args.stair, args.mode, args.grid)
         return 0
 
     if args.supply:

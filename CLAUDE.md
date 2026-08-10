@@ -208,7 +208,7 @@ EOF
 ./tools/opm-dac-testgen.py                 # opm-dac2wav.py の回帰テスト（1 秒）
 ./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
-./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出と値列の突き合わせの自己検証（20 ケース）
+./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（30 ケース）
 ./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（9 ケース）
 ```
 
