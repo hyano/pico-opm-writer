@@ -1,0 +1,104 @@
+# 生成:
+#   for R in wav_value wav_value_r2 wav_value_r3; do
+#     ./analyze_lfo.py --mode am --period 256 --values \
+#       $R/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wav.zst \
+#       wav_value{,_r2,_r3}/am_nfrq_00_lfrq_a{0,1,2,4,8,f}_kc_4a_mul_04.wav.zst
+#   done
+# 基準（1 本目）を 3 つのキャプチャで取り替えて全組を出す。
+
+############ 基準 wav_value ############
+  突き合わせ（1 本目を基準）:
+  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
+  wav_value/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wa     0   100.0%        13.0%    100.0%    2050  一致
+  wav_value/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wa   125    13.0%        12.5%      3.4%    1925  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wa  -184    13.2%        12.6%      3.6%    1866  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wa     1    43.2%        11.9%     36.9%    2049  一致
+  wav_value/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wa  -230    12.7%        12.4%      3.1%    1820  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_af_kc_4a_mul_04.wa    -2   100.0%        10.1%     99.9%    2048  一致
+  wav_value_r2/am_nfrq_00_lfrq_a0_kc_4a_mul_04     1    75.5%        11.2%     72.7%    2049  一致
+  wav_value_r2/am_nfrq_00_lfrq_a1_kc_4a_mul_04     2    38.0%        11.2%     31.2%    2048  一致
+  wav_value_r2/am_nfrq_00_lfrq_a2_kc_4a_mul_04  -189    11.9%        11.4%      2.1%    1861  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a4_kc_4a_mul_04   114    13.2%        11.9%      3.5%    1936  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a8_kc_4a_mul_04   121    12.3%        12.1%      2.6%    1929  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_af_kc_4a_mul_04     0    44.4%        11.4%     38.2%    2050  一致
+  wav_value_r3/am_nfrq_00_lfrq_a0_kc_4a_mul_04    -9    11.7%        11.2%      1.9%    2041  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a1_kc_4a_mul_04     1    38.8%        12.3%     32.1%    2049  一致
+  wav_value_r3/am_nfrq_00_lfrq_a2_kc_4a_mul_04     1    45.0%        11.7%     38.9%    2049  一致
+  wav_value_r3/am_nfrq_00_lfrq_a4_kc_4a_mul_04    -4    48.9%        12.3%     43.2%    2046  一致
+  wav_value_r3/am_nfrq_00_lfrq_a8_kc_4a_mul_04    -3    37.4%        12.2%     30.4%    2047  一致
+  wav_value_r3/am_nfrq_00_lfrq_af_kc_4a_mul_04     1   100.0%        11.1%    100.0%    2049  一致
+############ 基準 wav_value_r2 ############
+  突き合わせ（1 本目を基準）:
+  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
+  wav_value/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wa    -1    89.5%        12.5%     88.3%    2049  一致
+  wav_value/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wa  -185    13.0%        11.6%      3.4%    1865  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wa   -82    11.9%        11.5%      2.1%    1968  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wa     0    40.0%        11.9%     33.4%    2050  一致
+  wav_value/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wa   -75    11.8%        11.4%      2.1%    1975  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_af_kc_4a_mul_04.wa    -3    98.2%        12.0%     98.0%    2047  一致
+  wav_value_r2/am_nfrq_00_lfrq_a0_kc_4a_mul_04     0   100.0%        13.3%    100.0%    2050  一致
+  wav_value_r2/am_nfrq_00_lfrq_a1_kc_4a_mul_04     0    58.5%        12.5%     53.9%    2050  一致
+  wav_value_r2/am_nfrq_00_lfrq_a2_kc_4a_mul_04   131    12.8%        11.8%      3.1%    1919  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a4_kc_4a_mul_04   137    12.7%        12.4%      3.0%    1913  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a8_kc_4a_mul_04   115    12.5%        11.8%      2.8%    1935  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_af_kc_4a_mul_04    -2    14.8%        12.4%      5.4%    2048  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a0_kc_4a_mul_04    61    12.6%        12.0%      2.9%    1989  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a1_kc_4a_mul_04    -1    62.0%        11.9%     57.8%    2049  一致
+  wav_value_r3/am_nfrq_00_lfrq_a2_kc_4a_mul_04     0    39.8%        12.0%     33.1%    2050  一致
+  wav_value_r3/am_nfrq_00_lfrq_a4_kc_4a_mul_04    -6    13.8%        11.4%      4.2%    2044  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a8_kc_4a_mul_04    -5    42.6%        11.3%     36.3%    2045  一致
+  wav_value_r3/am_nfrq_00_lfrq_af_kc_4a_mul_04     0   100.0%        13.2%    100.0%    2050  一致
+############ 基準 wav_value_r3 ############
+  突き合わせ（1 本目を基準）:
+  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
+  wav_value/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wa  -146    12.0%        11.5%      2.2%    1904  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wa  -143    12.5%        11.9%      2.8%    1907  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wa   141    12.2%        11.9%      2.5%    1909  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wa    66    12.0%        11.5%      2.3%    1984  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wa   148    12.1%        11.8%      2.4%    1902  偶然と同程度
+  wav_value/am_nfrq_00_lfrq_af_kc_4a_mul_04.wa     7    12.1%        11.5%      2.3%    2043  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a0_kc_4a_mul_04   -61    12.0%        11.6%      2.2%    1989  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a1_kc_4a_mul_04    67    12.2%        11.4%      2.4%    1983  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a2_kc_4a_mul_04    19    12.3%        12.0%      2.5%    2031  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a4_kc_4a_mul_04  -130    11.9%        11.7%      2.1%    1920  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_a8_kc_4a_mul_04   -65    12.1%        11.8%      2.3%    1985  偶然と同程度
+  wav_value_r2/am_nfrq_00_lfrq_af_kc_4a_mul_04   -62    11.8%        11.6%      2.0%    1988  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a0_kc_4a_mul_04     0   100.0%        11.8%    100.0%    2050  一致
+  wav_value_r3/am_nfrq_00_lfrq_a1_kc_4a_mul_04    66    12.1%        11.1%      2.4%    1984  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a2_kc_4a_mul_04    70    11.9%        11.4%      2.1%    1980  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a4_kc_4a_mul_04   -96    11.6%        11.1%      1.7%    1954  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_a8_kc_4a_mul_04    62    13.1%        12.2%      3.4%    1988  偶然と同程度
+  wav_value_r3/am_nfrq_00_lfrq_af_kc_4a_mul_04  -187    12.9%        12.5%      3.2%    1863  偶然と同程度
+
+############ 参考: NFRQ=1f では揃わない ############
+# 生成: 上と同じ形で --values の NFRQ を 1f に替えたもの（lfrq a0/a4/a8/af）。
+# 真の一致は最大 37% で、有意な組もごく一部。NFRQ=00 はノイズ語が 16 サンプルに 1 回、
+# 1f は 0.5 サンプルに 1 回なので、値列が揃うのに要る位相精度が 32 倍きびしい。
+  突き合わせ（1 本目を基準）:
+  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
+  wav_value/am_nfrq_1f_lfrq_a0_kc_4a_mul_04.wa     0   100.0%        13.0%    100.0%    2050  一致
+  wav_value/am_nfrq_1f_lfrq_a4_kc_4a_mul_04.wa    40    11.9%        11.2%      2.1%    2010  偶然と同程度
+  wav_value/am_nfrq_1f_lfrq_a8_kc_4a_mul_04.wa   116    12.5%        11.3%      2.7%    1934  偶然と同程度
+  wav_value/am_nfrq_1f_lfrq_af_kc_4a_mul_04.wa   129    13.7%        12.0%      4.2%    1921  偶然と同程度
+  wav_value_r2/am_nfrq_1f_lfrq_a0_kc_4a_mul_04    99    12.3%        11.7%      2.5%    1951  偶然と同程度
+  wav_value_r2/am_nfrq_1f_lfrq_a4_kc_4a_mul_04     1    19.6%        12.3%     10.7%    2049  偶然と同程度
+  wav_value_r2/am_nfrq_1f_lfrq_a8_kc_4a_mul_04   -62    12.3%        11.8%      2.6%    1988  偶然と同程度
+  wav_value_r2/am_nfrq_1f_lfrq_af_kc_4a_mul_04   242    12.5%        11.0%      2.8%    1808  偶然と同程度
+  wav_value_r3/am_nfrq_1f_lfrq_a0_kc_4a_mul_04   -20    15.4%        12.2%      6.0%    2030  偶然と同程度
+  wav_value_r3/am_nfrq_1f_lfrq_a4_kc_4a_mul_04   227    11.8%        11.5%      2.0%    1823  偶然と同程度
+  wav_value_r3/am_nfrq_1f_lfrq_a8_kc_4a_mul_04  -213    11.9%        11.1%      2.1%    1837  偶然と同程度
+  wav_value_r3/am_nfrq_1f_lfrq_af_kc_4a_mul_04   242    13.1%        11.1%      3.4%    1808  偶然と同程度
+  突き合わせ（1 本目を基準）:
+  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
+  wav_value/pm_nfrq_1f_lfrq_a0_kc_4a_mul_04.wa     0   100.0%        12.6%    100.0%    2050  一致
+  wav_value/pm_nfrq_1f_lfrq_a4_kc_4a_mul_04.wa  -114    12.1%        11.7%      2.3%    1936  偶然と同程度
+  wav_value/pm_nfrq_1f_lfrq_a8_kc_4a_mul_04.wa   -76    15.6%        13.6%      6.2%    1974  偶然と同程度
+  wav_value/pm_nfrq_1f_lfrq_af_kc_4a_mul_04.wa   211    14.6%        12.7%      5.1%    1839  偶然と同程度
+  wav_value_r2/pm_nfrq_1f_lfrq_a0_kc_4a_mul_04    82    15.2%        13.3%      5.8%    1968  偶然と同程度
+  wav_value_r2/pm_nfrq_1f_lfrq_a4_kc_4a_mul_04   -77    14.5%        13.6%      5.0%    1973  偶然と同程度
+  wav_value_r2/pm_nfrq_1f_lfrq_a8_kc_4a_mul_04  -172    13.1%        12.2%      3.4%    1878  偶然と同程度
+  wav_value_r2/pm_nfrq_1f_lfrq_af_kc_4a_mul_04  -217    12.2%        11.3%      2.4%    1833  偶然と同程度
+  wav_value_r3/pm_nfrq_1f_lfrq_a0_kc_4a_mul_04  -162    11.8%        11.4%      2.0%    1888  偶然と同程度
+  wav_value_r3/pm_nfrq_1f_lfrq_a4_kc_4a_mul_04    -2    12.8%        12.0%      3.2%    2048  偶然と同程度
+  wav_value_r3/pm_nfrq_1f_lfrq_a8_kc_4a_mul_04   101    14.3%        11.4%      4.7%    1949  偶然と同程度
+  wav_value_r3/pm_nfrq_1f_lfrq_af_kc_4a_mul_04   -74    12.7%        12.1%      2.9%    1976  偶然と同程度
