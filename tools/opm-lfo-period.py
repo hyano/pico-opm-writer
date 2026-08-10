@@ -489,7 +489,7 @@ def analyze(path, mode, log):
     near = round(ratio * 2.0) / 2.0
     if 0.5 <= near <= RESONANCE_MAX and abs(ratio - near) < RESONANCE_TOL:
         log(f"! {path}: 周期が搬送波の {near:g} 倍に近い。"
-            f"別の KC/MUL で撮り直して確認すること", err=True)
+            f"別の KC/MUL でキャプチャし直して確認すること", err=True)
 
     return {
         "file": str(path),

@@ -14,8 +14,8 @@ KC / NFRQ、LFRQ を最内で掃引する。LFRQ は大きい方から回す（�
 短い条件から先にファイルが揃う）。既に .wav.zst がある場合は、最初の欠番の 1 つ手前を
 上書きするところから再開する。
 
-失敗した条件はその場で撮り直す（`--retry`）。sigrok-cli はキャプチャが途中で死んでも
-終了コード 0 を返すので、`opm-writer.py` のエラーだけでなく**撮れた .wav.zst が要求より
+失敗した条件はその場でキャプチャし直す（`--retry`）。sigrok-cli はキャプチャが途中で死んでも
+終了コード 0 を返すので、`opm-writer.py` のエラーだけでなく**キャプチャできた .wav.zst が要求より
 短いかどうか**もリトライの判定に使う。使い切ったら中断する。
 
 搬送波 (KC / MUL) は既定では LFRQ ごとに自動で選ぶ。刻みが短い条件ほど短い搬送波が
@@ -242,7 +242,7 @@ def wav_seconds(path):
 
 
 def verify_capture(task):
-    """撮れた .wav.zst が使い物になるかを見る。エラーなら理由の文字列。
+    """キャプチャできた .wav.zst が使い物になるかを見る。エラーなら理由の文字列。
 
     キャプチャが途中で死んでも sigrok-cli は終了コード 0 で終わるので、
     opm-writer.py の終了コードだけでは短いファイルを弾けない。掃引中はここで拾い、
@@ -263,15 +263,15 @@ def verify_capture(task):
         return got
     if got < want * CHECK_SHORT_RATIO:
         return (f"{got:.3f}s / 要求 {want:.3f}s "
-                f"({100.0 * got / want:.1f}%) しか撮れていない")
+                f"({100.0 * got / want:.1f}%) しかキャプチャできていない")
     return None
 
 
 def check_wav_dir(args, sample_rate):
-    """--wav-dir 以下の .wav.zst が要求どおりの長さで撮れているかを見る。
+    """--wav-dir 以下の .wav.zst が要求どおりの長さでキャプチャできているかを見る。
 
     キャプチャが途中で死んでも sigrok-cli は終了コード 0 で終わるため、この検査を
-    入れる前に撮ったファイルには短いものが混ざっている。撮り直しは --delete で
+    入れる前にキャプチャしたファイルには短いものが混ざっている。キャプチャし直しは --delete で
     消してから同じ掃引をもう一度回す。
     """
     if ZstdFile is None:
@@ -311,7 +311,7 @@ def check_wav_dir(args, sample_rate):
     if args.delete:
         for path in short:
             path.unlink()
-        print(f"* 短い {len(short)} 件を消した。同じ掃引をもう一度回せば撮り直す",
+        print(f"* 短い {len(short)} 件を消した。同じ掃引をもう一度回せばキャプチャし直す",
               flush=True)
 
     tail = f" / 検査できず {skipped} 件" if skipped else ""
@@ -335,7 +335,7 @@ class Task:
         # 測定モードが先頭、掃引の主パラメータ (NFRQ / LFRQ) が次、搬送波の条件
         # (KC / MUL) が後。こうすると ls がモード → NFRQ → LFRQ の順に並び、
         # 同じ条件で搬送波だけ変えた追試が隣り合う。
-        # W は既定の 3（ノイズ）のときだけ名前に出さない。W=3 で撮った既存の
+        # W は既定の 3（ノイズ）のときだけ名前に出さない。W=3 でキャプチャした既存の
         # データセット（wav/ wav_4a_01/）のファイル名をそのまま保つため
         wave = "" if w == DEFAULT_W else f"_w_{w:02x}"
         self.name = (f"{mode.name}{wave}_nfrq_{nfrq:02x}_lfrq_{lfrq:02x}"
@@ -348,10 +348,10 @@ def build_tasks(args, sample_rate):
     # 途中で止めても 1 本は揃う。その次が KC で、先頭の KC のデータセットが
     # 先に完成し、残りの KC は追試として後から積み上がる。
     # LFRQ は降順。LFRQ が大きいほど LFO の周期が短く、キャプチャ時間も短いので、
-    # 速く撮れる条件から先にファイルが揃う。
+    # 速くキャプチャできる条件から先にファイルが揃う。
     #
     # KC / MUL を指定しなかった側は LFRQ ごとに choose_carrier が決める。両方
-    # 指定すれば直積を掃く（同じ条件を別の搬送波で撮り直す追試用）。
+    # 指定すれば直積を掃く（同じ条件を別の搬送波でキャプチャし直す追試用）。
     tasks = []
     for mode in args.mode:
         for kc in (args.kc or [None]):
@@ -389,8 +389,8 @@ def resume_index(tasks):
     """再開位置。.wav.zst が無い最初のタスクの 1 つ手前。
 
     直前の実行が途中で切れていると最後のファイルが不完全な可能性があるので、
-    そこを撮り直すために 1 つ戻す。歯抜けがあっても最初の穴より先には進まない。
-    全部揃っているときは最後の 1 件を上書き再撮する。
+    そこをキャプチャし直すために 1 つ戻す。歯抜けがあっても最初の穴より先には進まない。
+    全部揃っているときは最後の 1 件を上書きしてもう一度キャプチャする。
     """
     for i, task in enumerate(tasks):
         if not task.zst.exists():
@@ -493,7 +493,7 @@ def execute(tasks, start, args):
               f"残り約 {fmt_duration(eta)}", flush=True)
 
         # 失敗の実体はシリアルのタイムアウトや USB CDC の再列挙といった一過性の
-        # 事象がほとんどなので、少し待って撮り直す。t0/t1 をループの内側で取るのは、
+        # 事象がほとんどなので、少し待ってキャプチャし直す。t0/t1 をループの内側で取るのは、
         # overhead に成功した試行のぶんだけを積んで ETA を狂わせないため
         for attempt in range(args.retry + 1):
             if attempt:
@@ -514,9 +514,9 @@ def execute(tasks, start, args):
             print(f"! {task.name}: {err}", file=sys.stderr, flush=True)
         else:
             # 短い / 壊れたものを残すと --check が後から拾うことになる。消しておけば
-            # 再開はここ（の 1 つ手前）から素直に撮り直す
+            # 再開はここ（の 1 つ手前）から素直にキャプチャし直す
             task.zst.unlink(missing_ok=True)
-            print(f"! {i + 1} 件目を {args.retry + 1} 回試して撮れなかったので中断した。"
+            print(f"! {i + 1} 件目を {args.retry + 1} 回試してキャプチャできなかったので中断した。"
                   "同じコマンドで再実行すればここから再開する。",
                   file=sys.stderr, flush=True)
             return 1
@@ -621,12 +621,12 @@ def parse_mode_list(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="YM2151 の LFO パラメータを掃引して AM / PM 測定のキャプチャを撮る")
+        description="YM2151 の LFO パラメータを掃引して AM / PM 測定のキャプチャをキャプチャする")
     parser.add_argument("--seq", type=Path, default=SCRIPT_DIR / "opm_seq.txt",
                         help="シーケンスファイル（既定 %(default)s）")
     parser.add_argument("--mode", type=parse_mode_list,
                         default=list(MODES.values()), metavar="MODE[,MODE...]",
-                        help=f"撮る測定モード（{'/'.join(MODES)}、既定は両方）")
+                        help=f"キャプチャする測定モード（{'/'.join(MODES)}、既定は両方）")
     parser.add_argument("--wav-dir", type=Path, default=SCRIPT_DIR / "wav",
                         help="出力先。.wav.zst だけが置かれる（既定 %(default)s）")
     parser.add_argument("--kc", type=parse_kc_list, default=None,
@@ -667,7 +667,7 @@ def main(argv=None):
     parser.add_argument("--no-resume", action="store_true",
                         help="既存の .wav.zst を無視して先頭からやり直す")
     parser.add_argument("--check", action="store_true",
-                        help="撮らずに、--wav-dir の .wav.zst が要求どおりの長さかを"
+                        help="キャプチャせずに、--wav-dir の .wav.zst が要求どおりの長さかを"
                              "検査する。短いものがあれば終了コード 1")
     parser.add_argument("--delete", action="store_true",
                         help="--check で見つかった短い .wav.zst を消す")

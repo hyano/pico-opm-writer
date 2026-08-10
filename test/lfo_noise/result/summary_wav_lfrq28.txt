@@ -4,7 +4,7 @@
         > result/wav_lfrq28_{am,pm}.tsv
         ./analyze_lfo.py --mode {am,pm} --gaps wav_lfrq28/*_nfrq_{00,1f}_lfrq_2*.wav.zst
 
-I-1. 3 回撮影ぶんの推定周期 (NFRQ=1f)
+I-1. 3 回のキャプチャぶんの推定周期 (NFRQ=1f)
 
   NFRQ=1f
   lfrq mode       周期 / conf       周期 / conf       周期 / conf
@@ -95,5 +95,5 @@ I-2. 更新イベント間隔のヒストグラム（1x = 毎回変化が見え�
     lfrq=2c	    0.5x1, 1x56, 1.5x1, 2x26, 3x1
 
 読み: NFRQ=1f では lfrq=28 を頂点に「変化が見えない更新」の割合が対称に増える。
-      28 では 2 回に 1 回になり、格子そのものが 131072 に見える（conf 1.00、3 回とも / AM PM 独立に一致）。
+      28 では 2 回に 1 回になり、更新周期そのものが 131072 に見える（conf 1.00、3 回とも / AM PM 独立に一致）。
       NFRQ=00 には同じ構造が無く、帯全体で 1x が大半を占める。

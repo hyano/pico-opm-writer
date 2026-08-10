@@ -84,11 +84,11 @@ def build_argv(case, out, args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="DAC の 2 スロットの関係を調べるキャプチャ一式を撮る")
+        description="DAC の 2 スロットの関係を調べる全条件をキャプチャする")
     parser.add_argument("--wav-dir", type=Path, default=SCRIPT_DIR / "wav",
                         help="出力先（既定 ./wav）")
     parser.add_argument("--only", metavar="SUBSTR",
-                        help="名前にこの文字列を含む条件だけ撮る")
+                        help="名前にこの文字列を含む条件だけキャプチャする")
     parser.add_argument("--time-ms", type=int, default=500, metavar="MS",
                         help="1 条件のキャプチャ長 [ms]（既定 500）")
     parser.add_argument("--device", default=None,
@@ -100,7 +100,7 @@ def main(argv=None):
     parser.add_argument("--zstd-level", type=int, default=22, metavar="N",
                         help="zstd の圧縮レベル（既定 22）")
     parser.add_argument("--analyze", action="store_true",
-                        help="撮り終えたあと lr_relation.py で判定まで行う")
+                        help="キャプチャし終えたあと lr_relation.py で判定まで行う")
     parser.add_argument("-n", "--dry-run", action="store_true",
                         help="実機にもロジアナにも触らず、コマンドラインを表示するだけ")
     args = parser.parse_args(argv)

@@ -2,8 +2,8 @@
 """
 掃引した `.wav.zst` を解析して、`LFRQ` と実測 LFO 更新周期の対応を集計する。
 
-[README.md](README.md) §6 / §7 に書いてある結論はすべてこのスクリプトの出力が根拠。
-**README の数値を確かめたい / 撮り直したデータで検証し直したいときはこれを実行する。**
+[README.md](README.md) §1〜§3 に書いてある結論はすべてこのスクリプトの出力が根拠。
+**README の数値を確かめたい / キャプチャし直したデータで検証し直したいときはこれを実行する。**
 
 ## やること
 
@@ -29,12 +29,12 @@
 ./analyze_lfo.py --summary-only       # 解析はせず result/ の TSV から集計だけやり直す
 ./analyze_lfo.py --cross              # wav/ と wav_4a_01/ を突き合わせる（[F]）
 
-# 個別条件の中身を見る: 更新イベントの間隔が周期の格子に乗っているかを直接確かめる
+# 個別条件の中身を見る: 更新イベントの間隔が更新周期の整数倍に揃っているかを直接確かめる
 ./analyze_lfo.py --mode am --gaps wav/am_nfrq_1f_lfrq_2{0,4,8,f}_kc_4a_mul_04.wav.zst
 ```
 
 `--gaps` は集計ではなく**個別条件の生の中身**を見るためのもの。イベント間隔が推定周期の
-整数倍に揃っていれば「更新の格子は一定で、値が変わらなかった回がある」と読める。
+整数倍に揃っていれば「更新周期は一定で、値が変わらなかった回がある」と読める。
 `[B]` の外れ値がどこから来ているかはこれで確かめる。
 
 解析には時間がかかる（`wav/` の 1024 条件で 7 分程度）。集計だけなら一瞬。
@@ -59,7 +59,7 @@ ANALYZER = SCRIPT_DIR.parent.parent / "tools" / "opm-lfo-period.py"
 MODES = ("am", "pm")
 NFRQS = (0x00, 0x1F)
 
-# ファイル名から条件を取り出す（README §4.3）
+# ファイル名から条件を取り出す（README 付録 B.3）
 NAME_RE = re.compile(r"_nfrq_([0-9a-f]{2})_lfrq_([0-9a-f]{2})"
                      r"_kc_([0-9a-f]{2})_mul_([0-9a-f]{2})")
 
@@ -77,7 +77,7 @@ LOWNIBBLE_TOL = 0.35
 
 
 def model_period(lfrq):
-    """ymfm が採っている想定モデルでの 1 段の長さ [samples]（README §5）。"""
+    """ymfm が採っている想定モデルでの 1 段の長さ [samples]（README §4.1）。"""
     return 2 ** 22 / ((16 + (lfrq & 0x0F)) << (lfrq >> 4))
 
 
@@ -227,9 +227,9 @@ def report_model(sets, label):
 
 def report_cross(a_sets, b_sets, a_label, b_label):
     section(f"[F] 搬送波を変えた突き合わせ  ({a_label} vs {b_label})")
-    print("同じ LFO 条件を別の搬送波で撮ったデータと比べる。")
+    print("同じ LFO 条件を別の搬送波でキャプチャしたデータと比べる。")
     print("  一致すれば、測った周期が搬送波由来のアーティファクトでないことの裏付けになる。")
-    print("  不一致は「その搬送波では測れない条件」を示す（README §4.4）。")
+    print("  不一致は「その搬送波では測れない条件」を示す（README 付録 B.4）。")
     print()
     for mode in MODES:
         a, b = a_sets.get(mode) or {}, b_sets.get(mode) or {}
@@ -318,7 +318,7 @@ def report_gaps(paths, mode):
         if not d:
             print(f"* {Path(path).name}: 特徴量が取れない")
             continue
-        # 期待される更新回数から閾値を決める。2 つの更新が 1 格子より近づくことは
+        # 期待される更新回数から閾値を決める。2 つの更新が 1 周期より近づくことは
         # 無いので、ピークの間隔は周期の半分以上を要求する。
         slots = max(4, int(len(d) * s / period))
         rank = min(len(d) - 1, int(slots * GAP_CANDIDATES))
