@@ -122,17 +122,25 @@ def lfo_values_iid(count, seed):
 
 
 def synth(mode, period, length, carrier, seed, close=False, noise_period=None,
-          iid=False):
+          iid=False, values=None):
     """更新周期 period の人工信号を作って array('h') で返す。
 
     noise_period を渡すと、値の供給側（ノイズ発生器）が period とは別の周期で走る
     実機の構造を再現する。段 i が引く語は `int(i * period / noise_period)` 番目に
     なるので、noise_period > period では同じ語を続けて引く段が出る。
+
+    values に 0-255 の列を渡すと、seed からの生成の代わりにその列をそのまま使う。
+    **値列そのものを突き合わせる解析**（`analyze_lfo.py --values`）の検証で、
+    「同じ列」「ずらした列」「既知の割合だけ差し替えた列」を作るために要る。
     """
     nseg = int(math.ceil(length / period)) + 1
     nval = nseg if noise_period is None \
         else int(nseg * period / noise_period) + 2
-    if iid:
+    if values is not None:
+        if len(values) < nval:
+            raise ValueError(f"values が短い: {len(values)} < {nval}")
+        src = list(values)
+    elif iid:
         src = lfo_values_iid(nval, seed)
     else:
         src = lfo_values_close(nval, seed) if close else lfo_values(nval, seed)

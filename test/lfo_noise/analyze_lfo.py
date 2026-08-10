@@ -30,13 +30,18 @@
 ./analyze_lfo.py --summary-only       # 解析はせず result/ の TSV から集計だけやり直す
 ./analyze_lfo.py --cross              # wav/ と wav_4a_01/ を突き合わせる（[F]）
 ./analyze_lfo.py --supply --wav-dir ./wav_nfrq_5a09    # [J]
-./analyze_lfo.py --self-test          # --runs を人工信号で検証する（実機不要）
+./analyze_lfo.py --self-test          # --runs / --values を人工信号で検証（実機不要）
 
 # 個別条件の中身を見る: 更新イベントの間隔が更新周期の整数倍に揃っているかを直接確かめる
 ./analyze_lfo.py --mode am --gaps wav/am_nfrq_1f_lfrq_2{0,4,8,f}_kc_4a_mul_04.wav.zst
 
 # 段ごとの LFO 値を取り出し、同じ語を続けて引いた回数から値の供給周期を出す
 ./analyze_lfo.py --mode am --period 8 --runs wav_nfrq_5a09/am_nfrq_00_lfrq_ff_*.wav.zst
+
+# 値列そのものを見て、キャプチャ間・条件間で突き合わせる
+./analyze_lfo.py --mode am --values wav_value/am_nfrq_00_lfrq_a{0,8}_*.wav.zst
+./analyze_lfo.py --mode am --period 65536 --dump 24 \
+    --values wav_lfrq28/am_nfrq_1f_lfrq_28_*.wav.zst
 ```
 
 `--gaps` は集計ではなく**個別条件の生の中身**を見るためのもの。イベント間隔が推定周期の
@@ -46,6 +51,10 @@
 `--runs` は更新の**タイミング**ではなく**値そのもの**を見る。`--period` で更新周期を
 渡せるのが要で、値が 1 回おきにしか変わらない条件（`NFRQ=0x00` の `f` 帯）でも
 「LFO が本当は何サンプルごとにラッチしているか」を仮定して問い直せる。
+
+`--values` はその値を**連に畳まずに列のまま**扱う。`--runs` が答えられない
+「別のキャプチャ / 別の条件で**同じ語の列**を引いているか」を、遅れを総当たりして
+突き合わせる。順位に直して比べるので、モードが違ってもゲインがずれても効く。
 
 解析には時間がかかる（`wav/` の 1024 条件で 7 分程度）。集計だけなら一瞬。
 
@@ -91,6 +100,32 @@ LOWNIBBLE_TOL = 0.35
 BLOCK_GUARD = 2
 # --runs で独立ペアの分布のどこを基準点に取るか（下側の分位）
 FAR_Q = 0.10
+# changed_fraction が要求する最小の段数と、独立ペアを取る間隔
+BLOCKS_MIN = 256
+FAR_STEP = 7
+
+# --values で無関係な 2 列が偶然一致してしまう確率。一致の閾値をここから決める
+VALUE_CHANCE = 0.10
+# --values の遅れ探索の既定幅 [段] と、突き合わせに要求する重なりの段数
+VALUE_LAG = 256
+VALUE_OVERLAP_MIN = 64
+# --values で統計に要求する最小の段数。段数が数百本しか取れない条件
+# （P が大きいキャプチャ）でも値列を出せるように BLOCKS_MIN より下げる
+VALUE_BLOCKS_MIN = 32
+# --values で格子の位相を総当たりする更新周期の上限 [samples]。これより長い段では
+# 位相のずれ（最大でも 1 段の頭 P サンプル）が段の長さに対して十分小さく、
+# 隣の語が混ざらないので探索が要らない
+VALUE_PHASE_MAX = 64
+# --values で独立ペアをこの本数くらい取るように間隔を決める
+VALUE_FAR_PAIRS = 4096
+# --values で段の末尾も捨てる更新周期の下限 [samples]。これより短い段では
+# 捨てる余地が無い（P=8 なら頭 2 + 尻 2 で 4 サンプルしか残らない）
+VALUE_TAIL_MIN = 16
+# --values の「偶然の上限」を、外れた遅れでの一致率の分布のどこに取るか（上側）
+VALUE_LUCK = 0.99
+# --values で「一致」と言うのに要求する真の一致の下限。上限を 3σ 超えていても
+# 真の一致が数 % では列が合っているとは言えない
+VALUE_MATCH_MIN = 0.15
 
 
 def model_period(lfrq):
@@ -370,8 +405,8 @@ def load_analyzer():
     return olp
 
 
-def block_values(a, mode, period, off, guard=BLOCK_GUARD):
-    """ラッチ格子 [off + iP + guard, off + (i+1)P) ごとの LFO 値を返す。
+def block_values(a, mode, period, off, guard=BLOCK_GUARD, tail=0):
+    """ラッチ格子 [off + iP + guard, off + (i+1)P - tail) ごとの LFO 値を返す。
 
     `build_sums` が作った累積和からブロックの値を復元するだけ。AM は
     `0.5 log Σenv²`（= 対数振幅）、PM は最小二乗の cos(ω)（= 搬送波の周波数）で、
@@ -382,27 +417,34 @@ def block_values(a, mode, period, off, guard=BLOCK_GUARD):
     （`x[j-1], x[j], x[j+1]`）で作るので、段の境界をまたぐ 2 サンプルは前後の段の
     値が混ざる。P=8 では 8 サンプル中 2 なので効きが大きく、捨てないと隣り合う段の
     値が引き寄せ合って「変わっていない」側に倒れる。
+
+    `tail` は段の末尾を捨てる幅で、既定は 0（`[J]` を出したときと同じ）。
+    **AM では次の語との振幅の段差でカーネルが跳ね、その大きさが段差の位置での
+    搬送波位相に依存する。**同じ語でもキャプチャが違えば位相が違うので、
+    値をキャプチャ間で突き合わせるときはここも捨てる（`--values`）。
+    段が短い条件では捨てる余地が無いので既定は 0 のままにしてある。
     """
     nb = (a.m - off) // period
-    if nb < 4 or period - guard < 2:
+    if nb < 4 or period - guard - tail < 2:
         return []
     if mode == "am":
         acc = a.sums[0]
         out = []
         for i in range(nb):
-            v = acc[off + (i + 1) * period] - acc[off + i * period + guard]
+            v = (acc[off + (i + 1) * period - tail]
+                 - acc[off + i * period + guard])
             out.append(0.5 * math.log(v) if v > 0.0 else 0.0)
         return out
     p, q = a.sums
     out = []
     for i in range(nb):
-        lo, hi = off + i * period + guard, off + (i + 1) * period
+        lo, hi = off + i * period + guard, off + (i + 1) * period - tail
         den = q[hi] - q[lo]
         out.append((p[hi] - p[lo]) / (2.0 * den) if den > 0.0 else 0.0)
     return out
 
 
-def changed_fraction(v):
+def changed_fraction(v, min_blocks=BLOCKS_MIN, far_step=FAR_STEP):
     """「値が変わった段の割合 c」を、隣接ペアと遠いペアの分布の比から出す。
 
     連長が 1 か 2 しか出ない帯（`P_lfo <= P_n <= 2 P_lfo`）では、隣り合う段の
@@ -418,14 +460,18 @@ def changed_fraction(v):
 
     となり、測定誤差の大きさにも LFO 値の分布の形にも依存しない。閾値を手で
     与えないので、結論が閾値の選び方に左右されない。
+
+    `min_blocks` / `far_step` は既定のままなら `[J]` を出したときと同じ挙動。
+    段数が少ない条件（`P` が大きいキャプチャ）で `--values` から呼ぶときだけ、
+    要求段数を下げて独立ペアを密に取る。
     """
     n = len(v)
-    if n < 256:
+    if n < min_blocks:
         return None, None
     d1 = sorted(abs(b - c) for c, b in zip(v, v[1:]))
     far = sorted(abs(v[i + k] - v[i])
-                 for k in range(5, 21) for i in range(0, n - k, 7))
-    if len(far) < 256:
+                 for k in range(5, 21) for i in range(0, n - k, far_step))
+    if len(far) < min_blocks:
         return None, None
     t = far[int(len(far) * FAR_Q)]
     if t <= 0.0:
@@ -433,6 +479,29 @@ def changed_fraction(v):
     f1 = bisect.bisect_left(d1, t) / len(d1)
     c = (1.0 - f1) / (1.0 - FAR_Q)
     return min(1.0, max(1e-6, c)), t
+
+
+def align_values(a, mode, p, offsets=None, min_blocks=BLOCKS_MIN,
+                 far_step=FAR_STEP, tail=0):
+    """格子の位相を決めて (位相, 値列, 変化した割合 c, 閾値 t) を返す。
+
+    位相は総当たりで決める（候補は p 通りしかない）。ずれていると 1 つの
+    ブロックが 2 つの語にまたがり、変わっていない段まで変わって見えるので、
+    **c が最小になる位相**が正しい整列。`offsets` に候補を絞って渡せば
+    そのなかから選ぶ（段が長ければ位相はほとんど効かないので 1 通りで足りる）。
+    """
+    best = None
+    for off in (range(p) if offsets is None else offsets):
+        v = block_values(a, mode, p, off, tail=tail)
+        c, t = changed_fraction(v, min_blocks, far_step)
+        if c is None:
+            continue
+        if best is None or c < best[0]:
+            best = (c, t, off, v)
+    if best is None:
+        raise ValueError("段が足りない")
+    c, t, off, v = best
+    return off, v, c, t
 
 
 def step_runs(olp, path, mode, period=None):
@@ -451,20 +520,7 @@ def step_runs(olp, path, mode, period=None):
     if p < 2 or abs(period - p) > 0.05 * p:
         raise ValueError(f"格子にできる整数周期でない: {period:.3f}")
 
-    # 格子の位相は総当たりで決める（候補は p 通りしかない）。ずれていると 1 つの
-    # ブロックが 2 つの語にまたがり、変わっていない段まで変わって見えるので、
-    # **c が最小になる位相**が正しい整列。
-    best = None
-    for off in range(p):
-        v = block_values(a, mode, p, off)
-        c, t = changed_fraction(v)
-        if c is None:
-            continue
-        if best is None or c < best[0]:
-            best = (c, t, off, v)
-    if best is None:
-        raise ValueError("段が足りない")
-    frac, thr, off, v = best
+    off, v, frac, thr = align_values(a, mode, p)
 
     at = [i for i, (c, b) in enumerate(zip(v, v[1:])) if abs(b - c) >= thr]
     runs = [b - c for c, b in zip(at, at[1:])]
@@ -498,6 +554,189 @@ def report_runs(paths, mode, period=None):
               + ", ".join(f"{g}x{n}" for g, n in sorted(hist.items())[:8])
               + f" / 奇数 {odd / len(runs) * 100:.1f}%")
         print(f"    変化した段 {frac * 100:.1f}% -> 供給周期 {p / frac:.2f} samples")
+
+
+# ---- 段ごとの値列そのものを見る（--values） ----------------------------
+
+def value_series(olp, path, mode, period=None):
+    """1 条件の段ごとの LFO 値列を取り出す。
+
+    返すのは (更新周期, 位相, 値列, 変化した割合 c, 閾値 t)。`--runs` と違って
+    連の長さには畳まず、**値列そのもの**を返す。段数が少ない条件（`P` が大きい
+    キャプチャ）でも使えるように、統計に要求する段数を下げ、独立ペアを密に取る。
+    """
+    x, _ = olp.load_left(path)
+    a = olp.Analyzer(x, mode)
+    if period is None:
+        period, _ = a.run(lambda msg: None)
+    p = int(round(period))
+    if p < 2 or abs(period - p) > 0.05 * p:
+        raise ValueError(f"格子にできる整数周期でない: {period:.3f}")
+
+    nb = max(1, a.m // p)
+    far_step = max(1, nb * 16 // VALUE_FAR_PAIRS)
+    # 段が長ければ位相のずれは段の長さに対して十分小さく、隣の語が混ざらない。
+    # 総当たりは段が短いときだけやる（P=256 で 256 通り × 全段の統計は重い）
+    offsets = None if p <= VALUE_PHASE_MAX else (0,)
+    tail = BLOCK_GUARD if p >= VALUE_TAIL_MIN else 0
+    off, v, c, t = align_values(a, mode, p, offsets, VALUE_BLOCKS_MIN,
+                                far_step, tail)
+    return p, off, v, c, t
+
+
+def value_center(v):
+    """値列から中央値を引く。
+
+    AM の値は `0.5 log Σenv²` なので、キャプチャ間でゲインが g 倍ずれると
+    `log g` の**定数**だけ平行移動する。中央値を引けばこれが落ちる。
+    順位に直す手もあるが、順位は母集団が変われば `1/sqrt(n)` のオーダーで動き、
+    それが下の閾値と同じ大きさになってしまうので使わない。
+    """
+    s = sorted(v)
+    med = s[len(s) // 2]
+    return [x - med for x in v]
+
+
+def match_threshold(va, vb):
+    """「無関係な段どうし」の |差| の下側 VALUE_CHANCE 点を閾値にする。
+
+    こう決めると **無関係な 2 列なら一致率がちょうど VALUE_CHANCE になる**ので、
+    そこからの上振れがそのまま「本当に同じ語だった割合」になる。閾値を手で
+    与えない決め方は changed_fraction と同じ考え方。
+
+    無関係なペアは、片方を列の 1/3・1/2・2/3 だけ巡回させて作る。ノイズ語は
+    互いに独立なので、この程度ずらせば必ず別の語どうしになる。
+    """
+    n = min(len(va), len(vb))
+    if n < VALUE_OVERLAP_MIN:
+        return None
+    far = sorted(abs(va[(i + s) % n] - vb[i])
+                 for s in (n // 3, n // 2, 2 * n // 3) for i in range(n))
+    t = far[int(len(far) * VALUE_CHANCE)]
+    return t if t > 0.0 else None
+
+
+def match_rate(va, vb, lag, t):
+    """遅れ lag での一致率と、重なった段数。重ならなければ (None, 0)。"""
+    lo, hi = max(0, -lag), min(len(vb), len(va) - lag)
+    n = hi - lo
+    if n < VALUE_OVERLAP_MIN:
+        return None, 0
+    m = sum(1 for i in range(lo, hi) if abs(va[i + lag] - vb[i]) < t)
+    return m / n, n
+
+
+def best_match(va, vb, span):
+    """一致率が最大になる遅れを総当たりで探す。
+
+    返すのは (一致率, 遅れ, 段数, 偶然の上限)。実機はハードウェアリセットから
+    レジスタ書き込みまでの時間がホスト側の都合で揺れるので、2 本のキャプチャで
+    値列の開始位置が揃う保証が無い。定数の遅れを許さないと「列が合っているか
+    どうか」自体を判定できない。
+
+    **総当たりの最大値には選択バイアスが乗る。**遅れを数百通り試せば、無関係な
+    2 列でもどれかは偶然よく一致する。そこで外れた遅れでの一致率の分布から
+    上側 VALUE_LUCK 点を「偶然の上限」として一緒に返す。**最良がこれを超えて
+    いなければ、その一致は偶然と区別が付かない。**
+    探索幅は段数の 1/4 で頭打ちにする（候補が多いほど上限が上がるだけなので）。
+    """
+    t = match_threshold(va, vb)
+    if t is None:
+        return (None, 0, 0, None)
+    n_all = min(len(va), len(vb))
+    span = max(1, min(span, n_all // 4))
+    rates = []
+    best = (None, 0, 0)
+    for lag in range(-span, span + 1):
+        r, n = match_rate(va, vb, lag, t)
+        if r is None:
+            continue
+        rates.append((r, lag))
+        if best[0] is None or r > best[0]:
+            best = (r, lag, n)
+    if best[0] is None:
+        return (None, 0, 0, None)
+    # 最良の遅れの近傍は本物の一致なら道連れで高くなるので、上限の推定から外す
+    other = sorted(r for r, lag in rates if abs(lag - best[1]) > 1)
+    luck = other[int(len(other) * VALUE_LUCK)] if other else None
+    return best + (luck,)
+
+
+def true_fraction(rate):
+    """一致率から「本当に同じ語だった段の割合」を出す。
+
+    無関係な 2 列でも順位差の閾値の内側に入る確率が VALUE_CHANCE あるので、
+    その下駄を外す。1.0 なら完全一致、0.0 なら無関係。
+    """
+    return (rate - VALUE_CHANCE) / (1.0 - VALUE_CHANCE)
+
+
+def report_values(paths, mode, period=None, span=VALUE_LAG, dump=0):
+    """段ごとの値列を出し、2 本目以降を 1 本目と突き合わせる。"""
+    olp = load_analyzer()
+    section(f"段ごとの LFO 値列（--mode {mode}）")
+    print("ラッチ格子ごとの LFO 値を取り出し、連に畳まず値列のまま見る。")
+    print("  段境界の変化率を偶数・奇数に分けて出す。")
+    print("    片方だけ高い -> 1 段おきにしか変わっていない（同じ語を 2 回引いている）")
+    print("    両方とも同じ -> どの段でも変わりうる")
+    print("  突き合わせの一致率は無関係な 2 列でも "
+          f"{VALUE_CHANCE * 100:.0f}% 出る。下駄を外したものが「真の一致」。")
+    print("  遅れは総当たりなので最良値には選択バイアスが乗る。")
+    print("  **「偶然の上限」を超えていない一致率は偶然と区別が付かない。**")
+    print()
+
+    got = []
+    for path in paths:
+        # 同じ条件を別のディレクトリで撮り直したものを並べるので、親も出す
+        name = f"{Path(path).parent.name}/{Path(path).name}"
+        try:
+            p, off, v, c, t = value_series(olp, path, mode, period)
+        except Exception as e:                        # noqa: BLE001
+            print(f"* {name}: {e}")
+            continue
+        nb = len(v) - 1
+        chg = [abs(x1 - x0) >= t for x0, x1 in zip(v, v[1:])]
+        ne = sum(1 for i in range(0, nb, 2) if chg[i])
+        no = sum(1 for i in range(1, nb, 2) if chg[i])
+        de, do = max(1, len(range(0, nb, 2))), max(1, len(range(1, nb, 2)))
+        print(f"* {name}")
+        print(f"    更新周期 {p} samples / 位相 {off} / 段 {len(v)} / "
+              f"変化した段 {c * 100:.1f}%")
+        print(f"    段境界の変化率: 偶数 {ne}/{de} = {ne / de * 100:.0f}% / "
+              f"奇数 {no}/{do} = {no / do * 100:.0f}%")
+        if dump:
+            order = sorted(range(len(v)), key=lambda i: v[i])
+            rank = [0] * len(v)
+            for k, i in enumerate(order):
+                rank[i] = round(k * 255 / max(1, len(v) - 1))
+            print(f"    値列（順位を 0-255 に直したもの、先頭 {dump} 段）:")
+            print("     " + "".join(f"{r:4d}" for r in rank[:dump]))
+        got.append((name, value_center(v)))
+
+    if len(got) < 2:
+        return
+    print()
+    print("  突き合わせ（1 本目を基準）:")
+    print("  相手                                          遅れ   一致率"
+          "  偶然の上限   真の一致  重なり  判定")
+    base = got[0][1]
+    for name, vb in got[1:]:
+        rate, lag, n, luck = best_match(base, vb, span)
+        if rate is None:
+            print(f"  {name[:44]:44s}     -       -           -         -"
+                  "       0  -")
+            continue
+        # 偶然の上限を 3σ 超えたときだけ「一致」と言う。上限そのものも
+        # 有限個の遅れから推定した値なので、ぎりぎり超えただけでは足りない
+        ok = "偶然と同程度"
+        if luck is not None:
+            sigma = math.sqrt(max(luck * (1.0 - luck), 1e-9) / n)
+            if rate > luck + 3.0 * sigma \
+                    and true_fraction(rate) >= VALUE_MATCH_MIN:
+                ok = "一致"
+        lk = f"{luck * 100:6.1f}%" if luck is not None else "     -"
+        print(f"  {name[:44]:44s} {lag:5d}  {rate * 100:6.1f}%      {lk}  "
+              f"{true_fraction(rate) * 100:7.1f}%  {n:6d}  {ok}")
 
 
 def lfo_period(lfrq):
@@ -558,6 +797,83 @@ def report_supply(wav_dir):
 RUNS_TOL = 0.03
 # 飽和側（変化した段の割合 c が 1 に近い）で許す相対誤差
 RUNS_SAT_TOL = 0.08
+# --values の「真の一致」に許す絶対誤差。段数 600 の標本ゆらぎ（約 2%）と
+# 値の取り出し誤差を見込む
+VALUE_TEST_TOL = 0.10
+
+
+def self_test_values(olp, tg, tmp):
+    """既知の値列を入れた人工信号で `--values` を検証する（実機不要）。
+
+    `synth(..., values=)` に列を直接渡せるので、「同じ列」「ずらした列」
+    「既知の割合だけ差し替えた列」「無関係な列」を作って、突き合わせが
+    その割合を戻すかを見る。最後の 1 件は 1-c で使う判別器
+    （1 段おきにしか変わらないと境界のパリティが片側に寄る）の検証。
+    """
+    period, nseg = 256, 600
+    length = period * nseg
+    nval = nseg + 2
+    base = tg.lfo_values_iid(nval, 4200)
+    other = tg.lfo_values_iid(nval, 4201)
+    # 1 段おきに差し替える。残る一致は 50%
+    half = [other[i] if i % 2 else base[i] for i in range(nval)]
+
+    # (名前, B の値列, B の遅れ, 期待する真の一致)
+    cases = (
+        ("同じ列", base, 0, 1.0),
+        ("5 段ずらした列", base[5:] + base[:5], 5, 1.0),
+        ("1 段おきに差し替えた列", half, 0, 0.5),
+        ("無関係な列", other, 0, 0.0),
+    )
+
+    results = []
+    for mode in MODES:
+        pa = Path(tmp) / f"{mode}_values_a.wav"
+        if not pa.exists():
+            tg.write_wav(pa, tg.synth(mode, period, length, tg.CARRIERS[2],
+                                      0, values=base))
+        _, _, va, _, _ = value_series(olp, pa, mode, period)
+        va = value_center(va)
+        for note, vals, lag_want, want in cases:
+            pb = Path(tmp) / f"{mode}_values_{note}.wav"
+            if not pb.exists():
+                tg.write_wav(pb, tg.synth(mode, period, length, tg.CARRIERS[2],
+                                          0, values=vals))
+            name = f"{mode} 値列の突き合わせ（{note}）"
+            err = None
+            try:
+                _, _, vb, _, _ = value_series(olp, pb, mode, period)
+                rate, lag, _, _ = best_match(va, value_center(vb), 32)
+                got = true_fraction(rate) if rate is not None else None
+                if got is None:
+                    err = "突き合わせできない"
+                elif abs(got - want) > VALUE_TEST_TOL:
+                    err = f"真の一致 {got * 100:.1f}% (期待 {want * 100:.0f}%)"
+                elif want > 0.9 and lag != lag_want:
+                    err = f"遅れ {lag} (期待 {lag_want})"
+            except Exception as e:                    # noqa: BLE001
+                err = str(e)
+            results.append((name, err))
+
+        # 1 段おきにしか変わらない列。境界のパリティが片側に寄るのが署名
+        pp = Path(tmp) / f"{mode}_values_pair.wav"
+        if not pp.exists():
+            tg.write_wav(pp, tg.synth(mode, period, length, tg.CARRIERS[2],
+                                      4300, noise_period=2 * period, iid=True))
+        name = f"{mode} 同じ語を 2 回引く列（境界のパリティ）"
+        err = None
+        try:
+            _, _, v, _, t = value_series(olp, pp, mode, period)
+            at = [i for i, (x0, x1) in enumerate(zip(v, v[1:]))
+                  if abs(x1 - x0) >= t]
+            even = sum(1 for i in at if i % 2 == 0)
+            odd = len(at) - even
+            if min(even, odd) > 0.05 * max(even, odd):
+                err = f"パリティが偏らない: 偶数 {even} / 奇数 {odd}"
+        except Exception as e:                        # noqa: BLE001
+            err = str(e)
+        results.append((name, err))
+    return results
 
 
 def self_test():
@@ -620,6 +936,8 @@ def self_test():
                     err = str(e)
                 results.append((name, err))
 
+        results += self_test_values(olp, tg, tmp)
+
     ng = 0
     for name, err in results:
         if err is None:
@@ -649,8 +967,16 @@ def main(argv=None):
     parser.add_argument("--runs", type=Path, nargs="+", metavar="WAV",
                         help="段ごとの LFO 値を取り出して連の長さを数える"
                              "（--mode が要る）")
+    parser.add_argument("--values", type=Path, nargs="+", metavar="WAV",
+                        help="段ごとの LFO 値列を出し、2 本目以降を 1 本目と"
+                             "突き合わせる（--mode が要る）")
+    parser.add_argument("--dump", type=int, default=0, metavar="N",
+                        help="--values で値列の先頭 N 段を表示する")
+    parser.add_argument("--lag-span", type=int, default=VALUE_LAG, metavar="N",
+                        help=f"--values で探す遅れの幅 [段]（既定 {VALUE_LAG}）")
     parser.add_argument("--period", type=float, default=None,
-                        help="--runs で使う更新周期 [samples]。省略すると推定する")
+                        help="--runs / --values で使う更新周期 [samples]。"
+                             "省略すると推定する")
     parser.add_argument("--supply", action="store_true",
                         help="[J] --wav-dir の全条件で NFRQ ごとの供給周期を集計する")
     parser.add_argument("--self-test", action="store_true",
@@ -678,6 +1004,13 @@ def main(argv=None):
         if not args.mode:
             parser.error("--runs には --mode が要る")
         report_runs(args.runs, args.mode, args.period)
+        return 0
+
+    if args.values:
+        if not args.mode:
+            parser.error("--values には --mode が要る")
+        report_values(args.values, args.mode, args.period,
+                      args.lag_span, args.dump)
         return 0
 
     if args.supply:
