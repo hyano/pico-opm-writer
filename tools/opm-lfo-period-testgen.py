@@ -111,10 +111,33 @@ def lfo_values_close(count, seed):
     return vals
 
 
-def synth(mode, period, length, carrier, seed, close=False):
-    """更新周期 period の人工信号を作って array('h') で返す。"""
+def lfo_values_iid(count, seed):
+    """繰り返しも近い値も混ぜない独立同分布の列。
+
+    「同じ語を続けて引いたか」を測る側の検証で使う。`lfo_values` は repeat を
+    わざと混ぜてあるので、真の連の長さが供給周期だけでは決まらなくなる。
+    """
+    rng = random.Random(seed)
+    return [rng.randrange(256) for _ in range(count)]
+
+
+def synth(mode, period, length, carrier, seed, close=False, noise_period=None,
+          iid=False):
+    """更新周期 period の人工信号を作って array('h') で返す。
+
+    noise_period を渡すと、値の供給側（ノイズ発生器）が period とは別の周期で走る
+    実機の構造を再現する。段 i が引く語は `int(i * period / noise_period)` 番目に
+    なるので、noise_period > period では同じ語を続けて引く段が出る。
+    """
     nseg = int(math.ceil(length / period)) + 1
-    vals = lfo_values_close(nseg, seed) if close else lfo_values(nseg, seed)
+    nval = nseg if noise_period is None \
+        else int(nseg * period / noise_period) + 2
+    if iid:
+        src = lfo_values_iid(nval, seed)
+    else:
+        src = lfo_values_close(nval, seed) if close else lfo_values(nval, seed)
+    vals = src if noise_period is None \
+        else [src[int(i * period / noise_period)] for i in range(nseg)]
     w0 = 2.0 * math.pi / carrier
 
     out = array.array("h")
@@ -267,6 +290,35 @@ def test_close_values(outdir, mode, verbose):
     return out
 
 
+def test_noise_hold(outdir, mode, verbose):
+    """値の供給が更新より遅いときに推定周期がどうなるか。
+
+    test/lfo_noise/README.md §2.2 の機構。供給が段のちょうど 2 倍遅いと 2 段に 1 回しか
+    値が変わらず、推定周期は 2 倍になる。整数比から外れると 1 段ぶんの間隔が混じるので、
+    推定周期は段の周期そのものに戻る。**この 2 つを取り違えないことが要点**で、
+    「速い側の頭打ち」と「供給側との噛み合わせ」を実測で区別できる根拠になる。
+    """
+    period = 64
+    length = 1 << 18                            # 4096 段
+    out = []
+    for pn, want, note in (
+            (period * 2.0000, period * 2, "ちょうど 2 倍でロック"),
+            (period * 1.9375, period, "2 倍からわずかに外れる"),
+            (period * 1.0625, period, "1 倍からわずかに外れる"),
+            (period * 0.5000, period, "供給の方が速い")):
+        path = outdir / f"{mode}_hold{pn:g}.wav"
+        write_wav(path, synth(mode, period, length, CARRIER_DEFAULT,
+                              606, noise_period=pn))
+        try:
+            rows, _ = run_analyzer([path], mode, verbose)
+            err = check_period(rows[0], want)
+        except AssertionError as e:
+            err = str(e)
+        out.append((f"{mode} 供給周期 {pn:g} / 段 {period} -> P={want}（{note}）", err))
+        path.unlink()
+    return out
+
+
 def test_left_only(outdir, mode, verbose):
     """R チャネルを別物に差し替えても結果が変わらないか。"""
     period = 512
@@ -387,6 +439,7 @@ def main(argv=None):
             results += test_carriers(outdir, mode, args.verbose)
             results += test_fractional(outdir, mode, args.verbose)
             results += test_close_values(outdir, mode, args.verbose)
+            results += test_noise_hold(outdir, mode, args.verbose)
             results += test_left_only(outdir, mode, args.verbose)
         results += test_io(outdir, args.verbose)
 

@@ -205,8 +205,9 @@ EOF
 
 ```bash
 ./tools/opm-dac-testgen.py                 # opm-dac2wav.py の回帰テスト（1 秒）
-./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（25 秒 / 39 ケース）
+./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
+./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出の自己検証（10 ケース）
 ```
 
 出力が変わらない機能を触ったときは、**その回だけ判別できる文字列**（`__DATE__` / `__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を出力だけで切り分けられる。2026-08-08 にこの手順で書き込み〜確認まで一巡することを実機で確認済み。

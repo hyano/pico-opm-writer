@@ -16,10 +16,11 @@
     [A] 掃引の完了度と confidence
     [B] 周期は LFRQ の上位ニブルだけで決まるか（下位ニブルを振ったときの散らばり）
     [C] AM 測定と PM 測定が独立に一致するか
-    [D] NFRQ が決めるのは何か（速い側の頭打ち）
+    [D] NFRQ ごとに「値が変わる間隔」が最短でいくつになるか
     [E] ymfm の想定モデルとの比較
     [F] 搬送波を変えた別データセットとの突き合わせ（--cross）
     [G] confidence が LFRQ に依存していないかの点検
+    [J] NFRQ と値の供給周期（--supply）
 
 ## 使い方
 
@@ -28,14 +29,23 @@
 ./analyze_lfo.py --wav-dir ./wav_4a_01
 ./analyze_lfo.py --summary-only       # 解析はせず result/ の TSV から集計だけやり直す
 ./analyze_lfo.py --cross              # wav/ と wav_4a_01/ を突き合わせる（[F]）
+./analyze_lfo.py --supply --wav-dir ./wav_nfrq_5a09    # [J]
+./analyze_lfo.py --self-test          # --runs を人工信号で検証する（実機不要）
 
 # 個別条件の中身を見る: 更新イベントの間隔が更新周期の整数倍に揃っているかを直接確かめる
 ./analyze_lfo.py --mode am --gaps wav/am_nfrq_1f_lfrq_2{0,4,8,f}_kc_4a_mul_04.wav.zst
+
+# 段ごとの LFO 値を取り出し、同じ語を続けて引いた回数から値の供給周期を出す
+./analyze_lfo.py --mode am --period 8 --runs wav_nfrq_5a09/am_nfrq_00_lfrq_ff_*.wav.zst
 ```
 
 `--gaps` は集計ではなく**個別条件の生の中身**を見るためのもの。イベント間隔が推定周期の
 整数倍に揃っていれば「更新周期は一定で、値が変わらなかった回がある」と読める。
 `[B]` の外れ値がどこから来ているかはこれで確かめる。
+
+`--runs` は更新の**タイミング**ではなく**値そのもの**を見る。`--period` で更新周期を
+渡せるのが要で、値が 1 回おきにしか変わらない条件（`NFRQ=0x00` の `f` 帯）でも
+「LFO が本当は何サンプルごとにラッチしているか」を仮定して問い直せる。
 
 解析には時間がかかる（`wav/` の 1024 条件で 7 分程度）。集計だけなら一瞬。
 
@@ -45,16 +55,19 @@ SPDX-License-Identifier: MIT
 """
 
 import argparse
+import bisect
 import importlib.util
 import math
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ANALYZER = SCRIPT_DIR.parent.parent / "tools" / "opm-lfo-period.py"
+TESTGEN = SCRIPT_DIR.parent.parent / "tools" / "opm-lfo-period-testgen.py"
 
 MODES = ("am", "pm")
 NFRQS = (0x00, 0x1F)
@@ -74,6 +87,10 @@ GAP_CANDIDATES = 1.5
 NIBBLE_HI_MAX = 0x0D
 # [G] で「下位ニブルに依存していない」と見なす confidence のずれ
 LOWNIBBLE_TOL = 0.35
+# --runs で段の頭を捨てる幅 [samples]（特徴量のカーネルが 3 サンプル幅なので 2）
+BLOCK_GUARD = 2
+# --runs で独立ペアの分布のどこを基準点に取るか（下側の分位）
+FAR_Q = 0.10
 
 
 def model_period(lfrq):
@@ -187,10 +204,12 @@ def report_agreement(sets, label):
 
 
 def report_floor(sets, label):
-    section(f"[D] NFRQ が決めるのは何か  ({label})")
-    print("速い側で周期が頭打ちになる値と、頭打ちが始まる LFRQ。")
+    section(f"[D] NFRQ ごとに値が変わる間隔の最小値  ({label})")
+    print("値が変わる間隔が最短でいくつになるかと、そこに達する LFRQ。")
+    print("  これは LFO の更新周期の頭打ちではなく、ノイズ語の供給周期との合成の結果。")
+    print("  供給周期そのものは [J] (--supply) で測る。")
     print()
-    print("mode nfrq   下限 [samples]   頭打ちが始まる LFRQ")
+    print("mode nfrq   最小 [samples]   そこに達する LFRQ")
     for mode in MODES:
         for nfrq in NFRQS:
             d = sets.get(mode) or {}
@@ -298,10 +317,7 @@ def report_lownibble_conf(sets, label):
 
 def report_gaps(paths, mode):
     """個別条件の更新イベント間隔を推定周期で正規化して並べる。"""
-    spec = importlib.util.spec_from_file_location("opm_lfo_period", ANALYZER)
-    olp = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(olp)
-
+    olp = load_analyzer()
     section(f"更新イベントの間隔（--mode {mode}）")
     print("推定周期を 1 として、隣り合う更新イベントの間隔を数える。")
     print("  1.0 に揃う  -> 毎回の更新が見えている")
@@ -344,6 +360,277 @@ def report_gaps(paths, mode):
               f" ({integral/len(gaps)*100:.0f}%)")
 
 
+# ---- 段ごとの LFO 値と連の長さ -----------------------------------------
+
+def load_analyzer():
+    """tools/opm-lfo-period.py をモジュールとして読む。"""
+    spec = importlib.util.spec_from_file_location("opm_lfo_period", ANALYZER)
+    olp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(olp)
+    return olp
+
+
+def block_values(a, mode, period, off, guard=BLOCK_GUARD):
+    """ラッチ格子 [off + iP + guard, off + (i+1)P) ごとの LFO 値を返す。
+
+    `build_sums` が作った累積和からブロックの値を復元するだけ。AM は
+    `0.5 log Σenv²`（= 対数振幅）、PM は最小二乗の cos(ω)（= 搬送波の周波数）で、
+    どちらもその段の LFO 値の単調関数になる。`level_feature` はこの 1 階差分しか
+    返さないので、値そのものはここで作る。
+
+    `guard` は段の頭を捨てる幅。包絡も cos(ω) も 3 サンプルのカーネル
+    （`x[j-1], x[j], x[j+1]`）で作るので、段の境界をまたぐ 2 サンプルは前後の段の
+    値が混ざる。P=8 では 8 サンプル中 2 なので効きが大きく、捨てないと隣り合う段の
+    値が引き寄せ合って「変わっていない」側に倒れる。
+    """
+    nb = (a.m - off) // period
+    if nb < 4 or period - guard < 2:
+        return []
+    if mode == "am":
+        acc = a.sums[0]
+        out = []
+        for i in range(nb):
+            v = acc[off + (i + 1) * period] - acc[off + i * period + guard]
+            out.append(0.5 * math.log(v) if v > 0.0 else 0.0)
+        return out
+    p, q = a.sums
+    out = []
+    for i in range(nb):
+        lo, hi = off + i * period + guard, off + (i + 1) * period
+        den = q[hi] - q[lo]
+        out.append((p[hi] - p[lo]) / (2.0 * den) if den > 0.0 else 0.0)
+    return out
+
+
+def changed_fraction(v):
+    """「値が変わった段の割合 c」を、隣接ペアと遠いペアの分布の比から出す。
+
+    連長が 1 か 2 しか出ない帯（`P_lfo <= P_n <= 2 P_lfo`）では、隣り合う段の
+    `|Δ値|` は 2 つの分布の混合になる。
+
+        F1(t) = (1-c) · F0(t) + c · Fk(t)
+
+    `F0` は「値が変わらなかった段」の分布で、正しく整列していれば測定誤差だけの
+    幅しか持たない。`Fk` は 3 段以上離れたペア（必ず別の語）の分布で、**同じ
+    データから実測できる**。基準点 `t` を `Fk` の下側 10% 点に取れば `F0(t) ≈ 1` なので
+
+        c = (1 - F1(t)) / (1 - Fk(t))
+
+    となり、測定誤差の大きさにも LFO 値の分布の形にも依存しない。閾値を手で
+    与えないので、結論が閾値の選び方に左右されない。
+    """
+    n = len(v)
+    if n < 256:
+        return None, None
+    d1 = sorted(abs(b - c) for c, b in zip(v, v[1:]))
+    far = sorted(abs(v[i + k] - v[i])
+                 for k in range(5, 21) for i in range(0, n - k, 7))
+    if len(far) < 256:
+        return None, None
+    t = far[int(len(far) * FAR_Q)]
+    if t <= 0.0:
+        return None, None
+    f1 = bisect.bisect_left(d1, t) / len(d1)
+    c = (1.0 - f1) / (1.0 - FAR_Q)
+    return min(1.0, max(1e-6, c)), t
+
+
+def step_runs(olp, path, mode, period=None):
+    """段ごとの LFO 値を取り出し、同じ値が続く連の長さを数える。
+
+    返すのは (period, conf, 連長のリスト, 変化した割合 c, 格子の位相)。
+    **`period / c` が値の供給側の周期**（ノイズ発生器が新しい語を出す周期）になる。
+    `c` は閾値を通さないモーメント法で出し、連長のヒストグラムは 3σ 判定で作る。
+    """
+    x, _ = olp.load_left(path)
+    a = olp.Analyzer(x, mode)
+    conf = None
+    if period is None:
+        period, conf = a.run(lambda msg: None)
+    p = int(round(period))
+    if p < 2 or abs(period - p) > 0.05 * p:
+        raise ValueError(f"格子にできる整数周期でない: {period:.3f}")
+
+    # 格子の位相は総当たりで決める（候補は p 通りしかない）。ずれていると 1 つの
+    # ブロックが 2 つの語にまたがり、変わっていない段まで変わって見えるので、
+    # **c が最小になる位相**が正しい整列。
+    best = None
+    for off in range(p):
+        v = block_values(a, mode, p, off)
+        c, t = changed_fraction(v)
+        if c is None:
+            continue
+        if best is None or c < best[0]:
+            best = (c, t, off, v)
+    if best is None:
+        raise ValueError("段が足りない")
+    frac, thr, off, v = best
+
+    at = [i for i, (c, b) in enumerate(zip(v, v[1:])) if abs(b - c) >= thr]
+    runs = [b - c for c, b in zip(at, at[1:])]
+    return p, conf, runs, frac, off
+
+
+def report_runs(paths, mode, period=None):
+    """個別条件の連の長さを並べ、値の供給周期を出す。"""
+    olp = load_analyzer()
+    section(f"段ごとの LFO 値と連の長さ（--mode {mode}）")
+    print("ラッチ格子ごとの LFO 値を取り出し、同じ値が続く連の長さを数える。")
+    print("  供給周期 = 更新周期 / 変化した段の割合。割合は閾値を通さずに出す")
+    print("  連長が全部 1 -> 毎回新しい語を引いている")
+    print("  連長に奇数が無い -> 供給が更新のちょうど 2 倍遅く、位相が噛み合っている")
+    print()
+    for path in paths:
+        name = Path(path).name
+        try:
+            p, conf, runs, frac, off = step_runs(olp, path, mode, period)
+        except Exception as e:                        # noqa: BLE001
+            print(f"* {name}: {e}")
+            continue
+        hist = Counter(runs)
+        cs = f" / confidence {conf:.3f}" if conf is not None else ""
+        odd = sum(n for g, n in hist.items() if g % 2)
+        print(f"* {name}")
+        print(f"    更新周期 {p} samples{cs} / 位相 {off} / 連 {len(runs)} 本")
+        # ヒストグラムの閾値は独立ペアの下側 10% 点なので、真の変化の 1 割は
+        # 取りこぼす。連の本数ではなく**長さの分布の形**を読むためのもの。
+        print("    連長のヒストグラム: "
+              + ", ".join(f"{g}x{n}" for g, n in sorted(hist.items())[:8])
+              + f" / 奇数 {odd / len(runs) * 100:.1f}%")
+        print(f"    変化した段 {frac * 100:.1f}% -> 供給周期 {p / frac:.2f} samples")
+
+
+def lfo_period(lfrq):
+    """§2.1 の規則で決まる LFO の更新周期 [samples]。上位ニブルだけで決まる。"""
+    return 2 ** (18 - (lfrq >> 4))
+
+
+def report_supply(wav_dir):
+    """[J] NFRQ ごとの「値の供給周期」を全条件で集計する。
+
+    更新周期は推定させず **§2.1 の規則値を渡す**。`NFRQ=0x00` の `f` 帯では
+    値が 1 回おきにしか変わらないため周期推定が 16 を返してしまい、そのままでは
+    「LFO が 8 でラッチしているか」を問えないため。
+    """
+    olp = load_analyzer()
+    files = sorted(wav_dir.glob("*.wav.zst"))
+    got = {}
+    for path in files:
+        m = NAME_RE.search(path.name)
+        if not m:
+            continue
+        nfrq, lfrq = int(m[1], 16), int(m[2], 16)
+        mode = path.name.split("_")[0]
+        if mode not in MODES:
+            continue
+        try:
+            p, _, runs, frac, _ = step_runs(olp, path, mode, lfo_period(lfrq))
+        except Exception as e:                    # noqa: BLE001
+            print(f"! {path.name}: {e}", file=sys.stderr)
+            continue
+        odd = sum(1 for r in runs if r % 2) / len(runs) if runs else float("nan")
+        got[(mode, lfrq, nfrq)] = (p / frac, odd)
+
+    section(f"[J] NFRQ と値の供給周期  ({wav_dir.name})")
+    print("段ごとの LFO 値を取り出し、同じ語を続けて引いた回数から供給周期を出す。")
+    print("  予測は P_n = (32 - NFRQ) / 2 [samples]")
+    print("  奇数連% は「連の長さが奇数だった割合」。ちょうど 2 倍でロックしていれば 0")
+    print("  変化した段の割合が 1 に近い側（NFRQ が大きい側）は原理的に飽和する")
+    lfrqs = sorted({k[1] for k in got})
+    for mode in MODES:
+        for lfrq in lfrqs:
+            rows = [(nf, got[(mode, lfrq, nf)])
+                    for nf in range(32) if (mode, lfrq, nf) in got]
+            if not rows:
+                continue
+            p = lfo_period(lfrq)
+            print(f"\n  [{mode}] LFRQ={lfrq:02x}  更新周期 {p} samples")
+            print("  nfrq   予測 P_n   実測 供給周期   実測/予測   奇数連%")
+            for nf, (sup, odd) in rows:
+                want = (32 - nf) / 2
+                print(f"    {nf:02x}   {want:8.1f}   {sup:12.2f}   "
+                      f"{sup/want:9.3f}   {odd*100:6.1f}")
+
+
+# ---- 自己検証 -----------------------------------------------------------
+
+# 供給周期の推定に許す相対誤差
+RUNS_TOL = 0.03
+# 飽和側（変化した段の割合 c が 1 に近い）で許す相対誤差
+RUNS_SAT_TOL = 0.08
+
+
+def self_test():
+    """既知の供給周期を入れた人工信号で `--runs` を検証する（実機不要）。
+
+    `tools/opm-lfo-period-testgen.py` の `synth(..., noise_period=)` が
+    「段は period ごとに来るが、値の供給は noise_period ごと」という実機の構造を
+    そのまま作れるので、連の平均長 × period がその noise_period に戻るかを見る。
+
+    実機データで使う自己校正の 2 点（供給が 2 倍ちょうど遅いと連長は全部 2 /
+    供給の方が速いと全部 1）もここで確かめる。
+    """
+    olp = load_analyzer()
+    spec = importlib.util.spec_from_file_location("testgen", TESTGEN)
+    tg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tg)
+
+    period, length = 8, 1 << 19                   # 8 サンプル段 = 実機の f 帯と同じ
+
+    # (供給周期, 許容, 適用するモード, 説明)。tol=None は「値は当てにせず、
+    # 8 を下回らないことだけ見る」= 飽和側の性質だけを確かめるケース。
+    cases = (
+        (16.0, RUNS_TOL, MODES, "ちょうど 2 倍でロック（NFRQ=0x00 相当）"),
+        (15.5, RUNS_TOL, MODES, "NFRQ=0x01 相当"),
+        (12.0, RUNS_TOL, MODES, "NFRQ=0x08 相当"),
+        (8.5, RUNS_SAT_TOL, ("pm",), "NFRQ=0x0f 相当"),
+        (8.0, RUNS_SAT_TOL, ("pm",), "供給の方が速い（NFRQ>=0x10 相当）"),
+        (8.5, None, ("am",), "AM は c が 1 に近い側で飽和する"),
+        (8.0, None, ("am",), "AM は c が 1 に近い側で飽和する"),
+    )
+
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for pn, tol, modes, note in cases:
+            for mode in modes:
+                path = Path(tmp) / f"{mode}_pn{pn:g}.wav"
+                if not path.exists():
+                    tg.write_wav(path, tg.synth(mode, period, length,
+                                                tg.CARRIERS[0], 4200,
+                                                noise_period=pn, iid=True))
+                name = f"{mode} 供給周期 {pn:g} / 段 {period}（{note}）"
+                try:
+                    p, _, runs, frac, _ = step_runs(olp, path, mode, period)
+                    got = p / frac
+                    err = None
+                    if tol is None:
+                        if got < period:
+                            err = f"供給周期 {got:.3f} が段 {period} を下回った"
+                    elif abs(got - pn) / pn > tol:
+                        err = f"供給周期 {got:.3f} (期待 {pn:g})"
+                    elif pn == 16.0 and any(r % 2 for r in runs):
+                        # ちょうど 2 倍でロックしていれば、値が変わるのは 1 段おき
+                        # だけ。閾値は独立ペアの下側 10% 点なので真の変化の 1 割は
+                        # 取りこぼすが、そのぶんは連が 4, 6 と伸びるだけで、
+                        # **奇数の連は 1 本も出ない**のが 2:1 ロックの署名になる。
+                        odd = {r: n for r, n in sorted(Counter(runs).items())
+                               if r % 2}
+                        err = f"奇数の連が出た: {dict(list(odd.items())[:4])}"
+                except Exception as e:            # noqa: BLE001
+                    err = str(e)
+                results.append((name, err))
+
+    ng = 0
+    for name, err in results:
+        if err is None:
+            print(f"PASS {name}")
+        else:
+            print(f"FAIL {name}: {err}")
+            ng += 1
+    print(f"--- {len(results)} ケース / NG {ng}")
+    return 1 if ng else 0
+
+
 # ---- エントリポイント ---------------------------------------------------
 
 def main(argv=None):
@@ -359,8 +646,17 @@ def main(argv=None):
                         help="wav/ と wav_4a_01/ を突き合わせる（[F]）")
     parser.add_argument("--gaps", type=Path, nargs="+", metavar="WAV",
                         help="個別条件の更新イベント間隔を見る（--mode が要る）")
+    parser.add_argument("--runs", type=Path, nargs="+", metavar="WAV",
+                        help="段ごとの LFO 値を取り出して連の長さを数える"
+                             "（--mode が要る）")
+    parser.add_argument("--period", type=float, default=None,
+                        help="--runs で使う更新周期 [samples]。省略すると推定する")
+    parser.add_argument("--supply", action="store_true",
+                        help="[J] --wav-dir の全条件で NFRQ ごとの供給周期を集計する")
+    parser.add_argument("--self-test", action="store_true",
+                        help="--runs を人工信号で自己検証する（実機不要）")
     parser.add_argument("--mode", choices=MODES,
-                        help="--gaps で使う解析モード")
+                        help="--gaps / --runs で使う解析モード")
     parser.add_argument("--quiet", action="store_true",
                         help="解析器の警告を捨てる")
     args = parser.parse_args(argv)
@@ -369,10 +665,23 @@ def main(argv=None):
         print(f"! 解析器が見つからない: {ANALYZER}", file=sys.stderr)
         return 1
 
+    if args.self_test:
+        return self_test()
+
     if args.gaps:
         if not args.mode:
             parser.error("--gaps には --mode が要る")
         report_gaps(args.gaps, args.mode)
+        return 0
+
+    if args.runs:
+        if not args.mode:
+            parser.error("--runs には --mode が要る")
+        report_runs(args.runs, args.mode, args.period)
+        return 0
+
+    if args.supply:
+        report_supply(args.wav_dir)
         return 0
 
     def gather(wav_dir):
