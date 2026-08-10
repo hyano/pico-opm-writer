@@ -24,7 +24,8 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 
 | ディレクトリ | 内容 |
 | --- | --- |
-| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`。`wav_value/` と `wav_w0,1,2/` だけは**一次データのみで解析は未了**（README §5.6） |
+| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`。`wav_w0,1,2/` だけは**一次データのみで解析は未了**（README §5.6） |
+| [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのものの調査。NE (`0x0F` bit7) でノイズを ch7 の C2 に直接出すと **DAC 出力が 2 値**になり、符号列がノイズ発生器のビット列そのものになる |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係。**L と R は同一にならない**ので、波形解析には片側だけを使う |
 
 ## 開発上の約束
@@ -207,7 +208,8 @@ EOF
 ./tools/opm-dac-testgen.py                 # opm-dac2wav.py の回帰テスト（1 秒）
 ./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
-./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出の自己検証（10 ケース）
+./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出と値列の突き合わせの自己検証（20 ケース）
+./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（9 ケース）
 ```
 
 出力が変わらない機能を触ったときは、**その回だけ判別できる文字列**（`__DATE__` / `__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を出力だけで切り分けられる。2026-08-08 にこの手順で書き込み〜確認まで一巡することを実機で確認済み。

@@ -411,8 +411,14 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 | `tools/opm-lfo-period.py` | 実機キャプチャから LFO の更新周期をサンプル数で測る（`--mode am` / `--mode pm`）。結果は 1 ファイル 1 行の TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
-`test/lfo_noise/` は、これらを使って YM2151 の LFO ノイズ波形を調べるための一次データ
-生成環境。掃引スクリプトと測定条件は [test/lfo_noise/README.md](test/lfo_noise/README.md) にまとめてある。
+`test/` 以下は、これらを使った実機調査の一次データ生成環境。掃引スクリプトと測定条件は
+それぞれの README にまとめてある。
+
+| ディレクトリ | 調べていること |
+| --- | --- |
+| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形（`LFRQ` / `NFRQ` の掃引） |
+| [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのもの（NE でノイズを直接 DAC へ出す） |
+| [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係 |
 
 ## 8. 動作確認手順
 
@@ -426,6 +432,8 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
    | `./tools/opm-dac-testgen.py` | DAC デコーダ (`opm-dac2wav.py`) | 1 秒 |
    | `./tools/opm-lfo-period-testgen.py` | LFO 周期解析 (`opm-lfo-period.py`) | 25 秒 |
    | `./test/dac_lr/lr_relation.py --self-test` | L/R 判定器 | 1 秒 |
+   | `./test/lfo_noise/analyze_lfo.py --self-test` | 段ごとの LFO 値と値列の突き合わせ | 10 秒 |
+   | `./test/noise_period/analyze_noise.py --self-test` | ノイズ発生器の周期推定 | 10 秒 |
 
 2. **単体（OPM 未接続）**: 書き込み後にシリアル接続し、起動バナーが出ることと `i` の表示が
    期待どおりであることを確認する。

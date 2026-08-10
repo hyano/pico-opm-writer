@@ -1,0 +1,55 @@
+r
+d 100
+
+# ノイズを LFO に通さず直接 DAC へ出す。
+# NE (0x0F の bit7) を立てるとチャネル 7 の C2 の出力がノイズに差し替わる。
+# @NFRQ@ には bit7 を含めた値（0x80 | NFRQ）を渡す。
+w 0f @NFRQ@ # NE=1 + NFRQ (80-9f)
+
+# LFO は使わない
+w 18 00     # LFRQ=0
+w 19 00     # AMD=0 (bit7=0 側)
+w 19 80     # PMD=0 (bit7=1 側)
+w 1b 00     # W=0
+
+w 27 c7     # ch7: RL=both FL=0 ALG=7（4 op すべてキャリア）
+w 2f 4a     # ch7: KC。ノイズに差し替わる C2 では使われない
+w 30 00     # ch7: KF=0
+w 3f 00     # ch7: PMS=0 AMS=0
+
+# ch7 の 4 オペレータ。レジスタは ch0 の並び (40/50/48/58) に +7。
+# C2 (+0x18 = 5f/7f/9f/bf/df/ff) だけ TL=0 で鳴らし、他の 3 個は TL=127 で黙らせる。
+w 47 01     # M1: DT1=0 MUL=1
+w 67 7f     # M1: TL=127（無音）
+w 87 1f     # M1: AR=31
+w a7 00     # M1: D1R=0
+w c7 00     # M1: D2R=0
+w e7 0f     # M1: D1L=0 RR=15
+
+w 57 01     # C1
+w 77 7f
+w 97 1f
+w b7 00
+w d7 00
+w f7 0f
+
+w 4f 01     # M2
+w 6f 7f
+w 8f 1f
+w af 00
+w cf 00
+w ef 0f
+
+w 5f 01     # C2 = ノイズが出るオペレータ
+w 7f 00     # C2: TL=0（フルスケール）
+w 9f 1f     # C2: AR=31
+w bf 00     # C2: D1R=0
+w df 00     # C2: D2R=0
+w ff 0f     # C2: D1L=0 RR=15
+
+w 08 7f     # KON ch7 全スロット
+
+!capture @TIME@
+
+r
+d 100
