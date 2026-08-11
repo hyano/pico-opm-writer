@@ -627,18 +627,16 @@ def report_runs(paths, mode, period=None):
 
 # ---- 段ごとの値列そのものを見る（--values） ----------------------------
 
-def value_series(olp, path, mode, period=None, full_phase=False):
+def value_series(olp, path, mode, period=None):
     """1 条件の段ごとの LFO 値列を取り出す。
 
     返すのは (更新周期, 位相, 値列, 変化した割合 c, 閾値 t)。`--runs` と違って
     連の長さには畳まず、**値列そのもの**を返す。段数が少ない条件（`P` が大きい
     キャプチャ）でも使えるように、統計に要求する段数を下げ、独立ペアを密に取る。
 
-    `full_phase` を立てると、段が長くても格子の位相を総当たりする。
-    **キャプチャどうしを突き合わせるときはこれが要る。**格子が段の境界から
-    ずれていると 1 ブロックが 2 つの語にまたがって値が混ざり、その混ざり方は
-    キャプチャ開始の位相で決まる。同じ語の列でも位相が違えば違う列に見えるので、
-    合わせずに比べると「一致率が中途半端な組」が量産される（[§5.9](README.md)）。
+    **キャプチャどうしを突き合わせるときは位相を合わせないといけない**（格子が
+    段の境界からずれると 1 ブロックが 2 つの語にまたがって値が混ざる）。それを
+    やるのは `bits_series`（`--bits`）で、位相の決め方もそちらは別にしてある。
     """
     x, _ = olp.load_left(path)
     a = olp.Analyzer(x, mode)
@@ -652,7 +650,7 @@ def value_series(olp, path, mode, period=None, full_phase=False):
     far_step = max(1, nb * 16 // VALUE_FAR_PAIRS)
     # 段が長ければ位相のずれは段の長さに対して十分小さく、隣の語が混ざらない。
     # 総当たりは段が短いときだけやる（P=256 で 256 通り × 全段の統計は重い）
-    offsets = None if full_phase or p <= VALUE_PHASE_MAX else (0,)
+    offsets = None if p <= VALUE_PHASE_MAX else (0,)
     tail = BLOCK_GUARD if p >= VALUE_TAIL_MIN else 0
     off, v, c, t = align_values(a, mode, p, offsets, VALUE_BLOCKS_MIN,
                                 far_step, tail)
@@ -878,6 +876,43 @@ def series_bits(v):
     return [1 if x >= med else 0 for x in v]
 
 
+def bits_series(olp, path, mode, period=None):
+    """`--bits` 用に、格子の位相を合わせた段ごとの値列を取り出す。
+
+    返すのは (更新周期, 位相, 値列)。
+
+    位相の決め方が [§4.7](README.md) の `align_values` と違う。あちらは
+    **変化した段の割合 `c` が最小になる位相**を採るが、これは値列の構造に
+    引きずられる（1 段おきにしか変わらない列では、ずれた位相の方が `c` を
+    小さくできてしまう）。ここでは代わりに **ブロック値の散らばりが最大に
+    なる位相**を採る。格子が段の境界からずれると 1 ブロックが 2 つの語の
+    混合になり、値は必ず中央へ寄るので、散らばりが最大なのが混ざっていない
+    位相になる。**この判定は値列の構造に依らない。**
+    """
+    x, _ = olp.load_left(path)
+    a = olp.Analyzer(x, mode)
+    if period is None:
+        period, _ = a.run(lambda msg: None)
+    p = int(round(period))
+    if p < 2 or abs(period - p) > 0.05 * p:
+        raise ValueError(f"格子にできる整数周期でない: {period:.3f}")
+    tail = BLOCK_GUARD if p >= VALUE_TAIL_MIN else 0
+
+    best = None
+    for off in range(p):
+        v = block_values(a, mode, p, off, tail=tail)
+        if len(v) < VALUE_BLOCKS_MIN:
+            continue
+        s = sorted(v)
+        # 外れ値に引きずられないように 10-90% 点の幅で散らばりを測る
+        spread = s[int(len(s) * 0.9)] - s[int(len(s) * 0.1)]
+        if best is None or spread > best[0]:
+            best = (spread, off, v)
+    if best is None:
+        raise ValueError("段が足りない")
+    return p, best[1], best[2]
+
+
 def pack_bits(b):
     """2 値列を 1 個の整数に詰める。先頭の段が最上位ビット。"""
     n = 0
@@ -940,7 +975,7 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
 
     1. 値を中央値で 2 値化する（ゲインのずれに左右されない）
     2. 遅れを全域で探す（`--values` の 256 段では足りない）
-    3. 格子の位相を段が長くても総当たりする（`value_series(full_phase=True)`）
+    3. 格子の位相を、値列の構造に依らない基準で合わせる（`bits_series`）
 
     出力は 1 本ずつの素性と、`BITS_MATCH` 以上で結ばれる組を連結成分に
     まとめたもの。**同じ下位ニブルどうしが同じ成分に入りやすいかどうか**が
@@ -961,8 +996,7 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
         m = NAME_RE.search(Path(path).name)
         key = m[2] if m else "??"
         try:
-            p, off, v, c, t = value_series(olp, path, mode, period,
-                                           full_phase=True)
+            p, off, v = bits_series(olp, path, mode, period)
         except Exception as e:                        # noqa: BLE001
             print(f"* {name}: {e}")
             continue
@@ -1373,7 +1407,9 @@ def self_test_values(olp, tg, tmp):
                     err = "突き合わせできない"
                 elif abs(got - want) > VALUE_TEST_TOL:
                     err = f"真の一致 {got * 100:.1f}% (期待 {want * 100:.0f}%)"
-                elif want > 0.9 and lag != lag_want:
+                elif want > 0.9 and abs(lag - lag_want) > 1:
+                    # ±1 は許す。格子の位相合わせ（`bits_series`）が採る位相が
+                    # 2 本で違うと、ブロックの番号づけが 1 段ぶんずれうる
                     err = f"遅れ {lag} (期待 {lag_want})"
             except Exception as e:                    # noqa: BLE001
                 err = str(e)
@@ -1439,7 +1475,7 @@ def self_test_bits(olp, tg, tmp):
         if not pa.exists():
             tg.write_wav(pa, tg.synth(mode, period, length, tg.CARRIERS[2],
                                       0, values=base))
-        _, _, va, _, _ = value_series(olp, pa, mode, period, full_phase=True)
+        _, _, va = bits_series(olp, pa, mode, period)
         pka = pack_bits(series_bits(va))
         for note, vals, lag_want, want in cases:
             pb = Path(tmp) / f"{mode}_bits_{lag_want}_{want}.wav"
@@ -1449,8 +1485,7 @@ def self_test_bits(olp, tg, tmp):
             name = f"{mode} 2 値化した値列（{note}）"
             err = None
             try:
-                _, _, vb, _, _ = value_series(olp, pb, mode, period,
-                                              full_phase=True)
+                _, _, vb = bits_series(olp, pb, mode, period)
                 lag, r, n, luck = bit_match(pka, pack_bits(series_bits(vb)))
                 if lag is None:
                     err = "突き合わせできない"
@@ -1464,7 +1499,9 @@ def self_test_bits(olp, tg, tmp):
                         err = f"一致率 {r * 100:.1f}% が偶然の上限 {luck} から離れた"
                 elif abs(r - want) > BITS_TEST_TOL:
                     err = f"一致率 {r * 100:.1f}% (期待 {want * 100:.0f}%)"
-                elif want > 0.9 and lag != lag_want:
+                elif want > 0.9 and abs(lag - lag_want) > 1:
+                    # ±1 は許す。格子の位相合わせ（`bits_series`）が採る位相が
+                    # 2 本で違うと、ブロックの番号づけが 1 段ぶんずれうる
                     err = f"遅れ {lag} (期待 {lag_want})"
                 elif want > 0.9 and (luck is None or luck > 0.7):
                     err = f"偶然の上限が高すぎる: {luck}"
