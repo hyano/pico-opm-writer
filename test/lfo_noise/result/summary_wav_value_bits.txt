@@ -9,116 +9,116 @@
   遅れの探索幅 ±2048 段（--values の 256 段では足りない）。
 
 * wav_value/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 89 / 段 2050 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 56 / 段 2050 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 94 / 段 2050 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a3_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 120 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 214 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a5_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 145 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a6_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 74 / 段 2050 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a7_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 222 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 93 / 段 2050 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_a9_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 255 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_aa_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 164 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_ab_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 226 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_ac_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 137 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_ad_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 233 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_ae_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 198 / 段 2049 / 1 の割合 50.0%
 * wav_value/am_nfrq_00_lfrq_af_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 67 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 36 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 225 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 91 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a3_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 104 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 255 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a5_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 152 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a6_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 10 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a7_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 236 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 218 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_a9_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 148 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_aa_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 221 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_ab_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 87 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_ac_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 210 / 段 2049 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_ad_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 11 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_ae_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 2 / 段 2050 / 1 の割合 50.0%
 * wav_value_r2/am_nfrq_00_lfrq_af_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 163 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a0_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 77 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a1_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 228 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a2_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 201 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a3_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 82 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a4_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 145 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a5_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 53 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a6_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 115 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a7_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 13 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a8_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 231 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_a9_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 26 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_aa_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 135 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_ab_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 2 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_ac_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 51 / 段 2050 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_ad_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 152 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_ae_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 253 / 段 2049 / 1 の割合 50.0%
 * wav_value_r3/am_nfrq_00_lfrq_af_kc_4a_mul_04.wav.zst
-    更新周期 256 samples / 位相 0 / 段 2050 / 1 の割合 50.0%
+    更新周期 256 samples / 位相 57 / 段 2050 / 1 の割合 50.0%
 
   突き合わせ（48 本の総当たり 1128 組）:
-    偶然の上限（外れた遅れでの一致率の上側 99% 点）の最大 56.0%
+    偶然の上限（外れた遅れでの一致率の上側 99% 点）の最大 56.3%
+    閾値以上の 379 組: 一致率 97.3〜100.0% / 遅れ -13〜8 段
+    閾値未満の 749 組: 一致率 56.8〜61.1%
 
   同じ値列でまとまった組（連結成分）:
   組   本数  LFRQ の種類  内訳
    1     24         14    a0 a1 a2 a3 a4 a5 a7 a8 aa ab ac ad ae af
    2     14         11    a1 a2 a3 a4 a5 a6 a8 a9 aa ab ad
-   3      3          3    a0 a9 ae
-   4      3          3    a6 a7 aa
-   5      2          2    a7 ab
-   6      1          1    ac
-   7      1          1    a6
+   3      4          4    a6 a7 ab ac
+   4      3          3    a0 a9 ae
+   5      3          3    a6 a7 aa
 
   同じ組に入る確率:
     同じ LFRQ どうし  14/48 = 29.2%
-    違う LFRQ どうし  360/1080 = 33.3%
+    違う LFRQ どうし  365/1080 = 33.8%
   **前者が後者を上回らなければ、値列は LFRQ では決まっていない。**

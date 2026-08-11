@@ -627,12 +627,18 @@ def report_runs(paths, mode, period=None):
 
 # ---- 段ごとの値列そのものを見る（--values） ----------------------------
 
-def value_series(olp, path, mode, period=None):
+def value_series(olp, path, mode, period=None, full_phase=False):
     """1 条件の段ごとの LFO 値列を取り出す。
 
     返すのは (更新周期, 位相, 値列, 変化した割合 c, 閾値 t)。`--runs` と違って
     連の長さには畳まず、**値列そのもの**を返す。段数が少ない条件（`P` が大きい
     キャプチャ）でも使えるように、統計に要求する段数を下げ、独立ペアを密に取る。
+
+    `full_phase` を立てると、段が長くても格子の位相を総当たりする。
+    **キャプチャどうしを突き合わせるときはこれが要る。**格子が段の境界から
+    ずれていると 1 ブロックが 2 つの語にまたがって値が混ざり、その混ざり方は
+    キャプチャ開始の位相で決まる。同じ語の列でも位相が違えば違う列に見えるので、
+    合わせずに比べると「一致率が中途半端な組」が量産される（[§5.9](README.md)）。
     """
     x, _ = olp.load_left(path)
     a = olp.Analyzer(x, mode)
@@ -646,7 +652,7 @@ def value_series(olp, path, mode, period=None):
     far_step = max(1, nb * 16 // VALUE_FAR_PAIRS)
     # 段が長ければ位相のずれは段の長さに対して十分小さく、隣の語が混ざらない。
     # 総当たりは段が短いときだけやる（P=256 で 256 通り × 全段の統計は重い）
-    offsets = None if p <= VALUE_PHASE_MAX else (0,)
+    offsets = None if full_phase or p <= VALUE_PHASE_MAX else (0,)
     tail = BLOCK_GUARD if p >= VALUE_TAIL_MIN else 0
     off, v, c, t = align_values(a, mode, p, offsets, VALUE_BLOCKS_MIN,
                                 far_step, tail)
@@ -934,6 +940,7 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
 
     1. 値を中央値で 2 値化する（ゲインのずれに左右されない）
     2. 遅れを全域で探す（`--values` の 256 段では足りない）
+    3. 格子の位相を段が長くても総当たりする（`value_series(full_phase=True)`）
 
     出力は 1 本ずつの素性と、`BITS_MATCH` 以上で結ばれる組を連結成分に
     まとめたもの。**同じ下位ニブルどうしが同じ成分に入りやすいかどうか**が
@@ -954,7 +961,8 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
         m = NAME_RE.search(Path(path).name)
         key = m[2] if m else "??"
         try:
-            p, off, v, c, t = value_series(olp, path, mode, period)
+            p, off, v, c, t = value_series(olp, path, mode, period,
+                                           full_phase=True)
         except Exception as e:                        # noqa: BLE001
             print(f"* {name}: {e}")
             continue
@@ -971,6 +979,7 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
     print(f"  突き合わせ（{n} 本の総当たり {n * (n - 1) // 2} 組）:")
     adj = [set() for _ in range(n)]
     luckmax = 0.0
+    hit, miss, lags = [], [], []
     for i in range(n):
         for j in range(i + 1, n):
             lag, r, ov, luck = bit_match(got[i][2], got[j][2], span)
@@ -980,8 +989,20 @@ def report_bits(paths, mode, period=None, span=BITS_LAG):
             if r >= BITS_MATCH:
                 adj[i].add(j)
                 adj[j].add(i)
+                hit.append(r)
+                lags.append(lag)
+            else:
+                miss.append(r)
     print(f"    偶然の上限（外れた遅れでの一致率の上側 "
           f"{BITS_LUCK * 100:.0f}% 点）の最大 {luckmax * 100:.1f}%")
+    # **一致した組と外れた組が分離しているか**が読みどころ。閾値の近くに
+    # 溜まっていれば閾値の置き方が結論を左右していることになる
+    if hit:
+        print(f"    閾値以上の {len(hit)} 組: 一致率 {min(hit) * 100:.1f}"
+              f"〜{max(hit) * 100:.1f}% / 遅れ {min(lags)}〜{max(lags)} 段")
+    if miss:
+        print(f"    閾値未満の {len(miss)} 組: 一致率 {min(miss) * 100:.1f}"
+              f"〜{max(miss) * 100:.1f}%")
 
     seen, comps = set(), []
     for i in range(n):
@@ -1418,7 +1439,7 @@ def self_test_bits(olp, tg, tmp):
         if not pa.exists():
             tg.write_wav(pa, tg.synth(mode, period, length, tg.CARRIERS[2],
                                       0, values=base))
-        _, _, va, _, _ = value_series(olp, pa, mode, period)
+        _, _, va, _, _ = value_series(olp, pa, mode, period, full_phase=True)
         pka = pack_bits(series_bits(va))
         for note, vals, lag_want, want in cases:
             pb = Path(tmp) / f"{mode}_bits_{lag_want}_{want}.wav"
@@ -1428,7 +1449,8 @@ def self_test_bits(olp, tg, tmp):
             name = f"{mode} 2 値化した値列（{note}）"
             err = None
             try:
-                _, _, vb, _, _ = value_series(olp, pb, mode, period)
+                _, _, vb, _, _ = value_series(olp, pb, mode, period,
+                                              full_phase=True)
                 lag, r, n, luck = bit_match(pka, pack_bits(series_bits(vb)))
                 if lag is None:
                     err = "突き合わせできない"
