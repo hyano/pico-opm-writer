@@ -22,6 +22,8 @@
     [G] confidence が LFRQ に依存していないかの点検
     [J] NFRQ と値の供給周期（--supply）
     [N] W≠3（鋸・三角）の段の間隔（--stair）
+    [P] 2 値化した値列の突き合わせ（--bits）
+    [R] 鋸 (W=0) の 1 周期あたりの段数と歩幅（--cycle）
 
 ## 使い方
 
@@ -46,6 +48,12 @@
 
 # W≠3（鋸・三角）の段の間隔を測り、実機モデルと ymfm モデルを判別する
 ./analyze_lfo.py --mode am --stair wav_w0/am_*.wav.zst
+
+# 値列を 2 値化し、遅れを全域で探して総当たりで突き合わせる（同じ列どうしを組にする）
+./analyze_lfo.py --mode am --period 256 --bits wav_value{,_r2,_r3}/am_*_lfrq_a?_*.wav.zst
+
+# 鋸 (W=0) の 1 周期の段数を数えて歩幅を出す
+./analyze_lfo.py --mode am --cycle wav_w0/am_*.wav.zst
 ```
 
 `--gaps` は集計ではなく**個別条件の生の中身**を見るためのもの。イベント間隔が推定周期の
@@ -60,10 +68,18 @@
 「別のキャプチャ / 別の条件で**同じ語の列**を引いているか」を、遅れを総当たりして
 突き合わせる。順位に直して比べるので、モードが違ってもゲインがずれても効く。
 
+`--bits` は `--values` の 2 点を差し替えたもの。値を**中央値で 2 値化**するので
+キャプチャ間のゲインのずれに左右されず、**遅れを全域で探す**ので開始位置が数百段
+ずれていても見つかる。`--values` の探索幅（256 段）ではこれを取り逃がしていた
+（README §5.9）。
+
 `--stair` は W≠3 専用。鋸・三角では LFO 値が単調に動くので、値が独立であることを
 前提にする `--runs` は使えない。代わりに**階段の段差から段の間隔を直接測る**。
 下位ニブルが「更新の間隔」を変えるのか「1 回の更新で進む歩幅」を変えるのかが
-これで判別できる（README §5.7）。矩形波 (W=1) は段が 2 値しかないので測れない。
+これで判別できる（README §5.7）。
+
+`--cycle` はその後半、**歩幅そのもの**を数値にする。鋸の折り返しで 1 周期を切り出し、
+そのあいだの段数を数えると平均の歩幅が `256 / 段数` として出る（README §5.8）。
 
 解析には時間がかかる（`wav/` の 1024 条件で 7 分程度）。集計だけなら一瞬。
 
@@ -135,6 +151,32 @@ VALUE_LUCK = 0.99
 # --values で「一致」と言うのに要求する真の一致の下限。上限を 3σ 超えていても
 # 真の一致が数 % では列が合っているとは言えない
 VALUE_MATCH_MIN = 0.15
+
+# --bits で「同じ値列」と言える一致率の下限。2 値化した列どうしのハミング距離は
+# 無関係なら 50%、同じ列なら値の取り出し誤差ぶんだけ 100% から落ちる（実測 99% 台）。
+# 両者の隔たりが大きいので、閾値の置き場所は結論を変えない
+BITS_MATCH = 0.90
+# --bits の遅れ探索の既定幅 [段]。**--values の VALUE_LAG より桁で広く取る。**
+# リセットからキャプチャ開始までの揺れは段の数百本ぶんに達しうる
+BITS_LAG = 2048
+# --bits が突き合わせに要求する重なりの段数
+BITS_OVERLAP_MIN = 400
+# --bits の「偶然の上限」を、外れた遅れでの一致率の分布のどこに取るか（上側）
+BITS_LUCK = 0.99
+
+# --cycle で折り返しと見なす段差の、通常の段差の中央値に対する比。鋸の折り返しは
+# 全振幅ぶん動くので 1 段ぶんの数十倍になる。8 倍は十分に余裕のある置き場所
+CYCLE_WRAP_RATIO = 8.0
+# --cycle で折り返しの滲みを 1 本にまとめる幅 [block]
+CYCLE_WRAP_MERGE = 4
+# --cycle が捨てるキャプチャ頭のブロック数（KEY ON の立ち上がりを折り返しと
+# 取り違えないため）
+CYCLE_SKIP = 32
+# --cycle で「2 段ぶんの段差」と見なす、1 段ぶんの段差に対する比
+CYCLE_BIG_RATIO = 1.5
+# --cycle が段差の大小を出すのに要求する「1 段あたりのブロック数」。これを
+# 切ると段差がブロックの平均に丸められ、+1 と +2 を区別できなくなる
+CYCLE_BIG_MIN = 16
 
 # --stair で 1 段を何ブロックに割るか。段の間隔の分解能が ±(段/この値) になる
 STAIR_SUB = 8
@@ -766,6 +808,225 @@ def report_values(paths, mode, period=None, span=VALUE_LAG, dump=0):
               f"{true_fraction(rate) * 100:7.1f}%  {n:6d}  {ok}")
 
 
+# ---- 追加の取り込みが入る位置の予測（--bits / --values の照合用） -----------
+#
+# Nuked-OPM `opm.c:1607-1622`（if/else 連鎖）と YM2151-LLE `fmopm.c:1001-1010`
+# （OR 形式。条件が排他なので等価）が同じデコード論理を持つ。粗い更新の回数を
+# 数える 4bit カウンタ `cnt` を見て、LFRQ の下位ニブルの各ビットが立っていれば
+# 追加のパルスを 1 発差し込む。**本レポートの実測ではなく、エミュレータ実装から
+# 読んだ仮説**であることに注意（README §6.3）。
+
+def extra_pulse(cnt, lo):
+    """粗い更新 `cnt` 回目に追加のパルスが入るか（デコード表）。"""
+    return bool((cnt % 2 == 0 and lo & 8)
+                or (cnt & 3) == 1 and lo & 4
+                or (cnt & 7) == 3 and lo & 2
+                or (cnt & 15) == 7 and lo & 1)
+
+
+def pair_positions(lo):
+    """値が変わらない段境界の位置（`cnt` の 0-15）。
+
+    追加のパルスがある段では取り込みが 2 回起き、観測に残るのは 2 回目の語。
+    段 `k` の 2 回目と段 `k+1` の 1 回目が同じ語になる条件が満たされていれば
+    （README §6.2 の条件 1・2）、**「追加あり」の直後に「追加なし」が来る境界**
+    だけが「値が変わらない境界」になる。
+    """
+    return [k for k in range(16)
+            if extra_pulse(k, lo) and not extra_pulse((k + 1) % 16, lo)]
+
+
+def pair_fraction(lo):
+    """値が変わらない段境界の割合。デコード表から `min(lo, 16-lo) / 16` になる。"""
+    return len(pair_positions(lo)) / 16.0
+
+
+def pair_parity(lo):
+    """値が変わらない段境界が寄るパリティ。`lo<=7` は奇数 / `lo>=8` は偶数。
+
+    **どちらの側が高く出るかは格子の切り方で決まるので、絶対的なラベルには
+    意味がない。**意味があるのは `lo` を振ったときに反転する位置の方で、
+    デコード表はそれを `7` と `8` の間だと予測する。
+    """
+    par = {k % 2 for k in pair_positions(lo)}
+    return {frozenset(): "-", frozenset({0}): "偶数",
+            frozenset({1}): "奇数"}.get(frozenset(par), "混在")
+
+
+# ---- 2 値化した値列の突き合わせ（--bits） --------------------------------
+
+def series_bits(v):
+    """値列を中央値で 2 値化する。
+
+    `--values` は値の差を閾値と比べるので、キャプチャ間でゲインがずれると
+    その差そのものが動く。**中央値で 2 値化してハミング距離で比べれば、
+    値を単調に歪める要因（ゲイン・オフセット・対数の底）が全部落ちる。**
+    落とすのは分解能で、無関係な 2 列の一致率が 50% に上がる代わりに、
+    同じ列なら値の取り出し誤差ぶんしか落ちない（実機で 99% 台）。
+
+    LFO のノイズ値は 0-255 がほぼ一様なので、中央値での分割は
+    **値の最上位ビット**を取り出すことに当たる。
+    """
+    s = sorted(v)
+    med = s[len(s) // 2]
+    return [1 if x >= med else 0 for x in v]
+
+
+def pack_bits(b):
+    """2 値列を 1 個の整数に詰める。先頭の段が最上位ビット。"""
+    n = 0
+    for x in b:
+        n = (n << 1) | x
+    return n, len(b)
+
+
+def _popcount(n):
+    try:
+        return n.bit_count()                       # Python 3.10 以降
+    except AttributeError:                         # pragma: no cover
+        return bin(n).count("1")
+
+
+def bit_match(pa, pb, span=BITS_LAG, minov=BITS_OVERLAP_MIN):
+    """2 値列どうしの一致率が最大になる遅れを総当たりで探す。
+
+    返すのは (遅れ, 一致率, 重なった段数, 偶然の上限)。整数に詰めて
+    XOR + popcount で比べるので、遅れを数千通り試しても実用的な速さになる。
+    **これが要点で、`--values` の探索幅（VALUE_LAG）では足りない。**実機は
+    リセットからレジスタ書き込みまでの時間がホスト側の都合で揺れ、その揺れは
+    段の数百本ぶんに達しうる。狭い幅で探すと「一致しない」と「探し損ねた」を
+    区別できない。
+    """
+    # 遅れの向きは `best_match` に合わせる（**pa[i+lag] と pb[i] を比べる**）。
+    # 中の畳み込みは「第 1 引数の i と 第 2 引数の i+lag」なので、引数を
+    # 入れ替えて回すとこの向きになる
+    X, nx = pb
+    Y, ny = pa
+    best = (None, 0.0, 0)
+    rates = []
+    lo = max(-span, -(ny - minov))
+    hi = min(span, nx - minov)
+    for lag in range(lo, hi + 1):
+        s, e = max(0, -lag), min(nx, ny - lag)
+        n = e - s
+        if n < minov:
+            continue
+        mask = (1 << n) - 1
+        xs = (X >> (nx - e)) & mask
+        ys = (Y >> (ny - (e + lag))) & mask
+        r = 1.0 - _popcount(xs ^ ys) / n
+        rates.append((r, lag))
+        if r > best[1]:
+            best = (lag, r, n)
+    if best[0] is None:
+        return (None, 0.0, 0, None)
+    other = sorted(r for r, lag in rates if abs(lag - best[0]) > 1)
+    luck = other[int(len(other) * BITS_LUCK)] if other else None
+    return best + (luck,)
+
+
+def report_bits(paths, mode, period=None, span=BITS_LAG):
+    """[P] 2 値化した値列を総当たりで突き合わせ、同じ列どうしを組にまとめる。
+
+    `--values` が答えられなかった「中間の下位ニブルが同じ値列を出すのか」を
+    決めるためのもの。`--values` との違いは 2 点だけで、どちらも
+    **条件の効果と測り方の限界を分けるため**に入れてある。
+
+    1. 値を中央値で 2 値化する（ゲインのずれに左右されない）
+    2. 遅れを全域で探す（`--values` の 256 段では足りない）
+
+    出力は 1 本ずつの素性と、`BITS_MATCH` 以上で結ばれる組を連結成分に
+    まとめたもの。**同じ下位ニブルどうしが同じ成分に入りやすいかどうか**が
+    「値列が下位ニブルで決まるか」の判別になる。
+    """
+    olp = load_analyzer()
+    section(f"[P] 2 値化した値列の突き合わせ（--mode {mode}）")
+    print("段ごとの LFO 値を中央値で 2 値化し、遅れを全域で探して突き合わせる。")
+    print("  無関係な 2 列なら一致率は 50%、同じ列なら値の取り出し誤差ぶんしか")
+    print("  落ちない。閾値は "
+          f"{BITS_MATCH * 100:.0f}% で、両者の隔たりが大きいので置き場所は結論を変えない。")
+    print(f"  遅れの探索幅 ±{span} 段（--values の {VALUE_LAG} 段では足りない）。")
+    print()
+
+    got = []
+    for path in sorted(paths):
+        name = f"{Path(path).parent.name}/{Path(path).name}"
+        m = NAME_RE.search(Path(path).name)
+        key = m[2] if m else "??"
+        try:
+            p, off, v, c, t = value_series(olp, path, mode, period)
+        except Exception as e:                        # noqa: BLE001
+            print(f"* {name}: {e}")
+            continue
+        b = series_bits(v)
+        got.append((name, key, pack_bits(b)))
+        print(f"* {name}")
+        print(f"    更新周期 {p} samples / 位相 {off} / 段 {len(v)} / "
+              f"1 の割合 {sum(b) / len(b) * 100:.1f}%")
+
+    n = len(got)
+    if n < 2:
+        return
+    print()
+    print(f"  突き合わせ（{n} 本の総当たり {n * (n - 1) // 2} 組）:")
+    adj = [set() for _ in range(n)]
+    luckmax = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            lag, r, ov, luck = bit_match(got[i][2], got[j][2], span)
+            if lag is None:
+                continue
+            luckmax = max(luckmax, luck or 0.0)
+            if r >= BITS_MATCH:
+                adj[i].add(j)
+                adj[j].add(i)
+    print(f"    偶然の上限（外れた遅れでの一致率の上側 "
+          f"{BITS_LUCK * 100:.0f}% 点）の最大 {luckmax * 100:.1f}%")
+
+    seen, comps = set(), []
+    for i in range(n):
+        if i in seen:
+            continue
+        stack, comp = [i], []
+        while stack:
+            u = stack.pop()
+            if u in seen:
+                continue
+            seen.add(u)
+            comp.append(u)
+            stack.extend(adj[u] - seen)
+        comps.append(sorted(comp))
+    comps.sort(key=len, reverse=True)
+
+    print()
+    print("  同じ値列でまとまった組（連結成分）:")
+    print("  組   本数  LFRQ の種類  内訳")
+    for ci, comp in enumerate(comps, 1):
+        keys = sorted({got[k][1] for k in comp})
+        print(f"  {ci:2d}  {len(comp):5d}  {len(keys):9d}    {' '.join(keys)}")
+
+    # 「値列が LFRQ で決まる」なら、同じ LFRQ どうしが同じ組に入りやすいはず
+    cl = {k: ci for ci, comp in enumerate(comps) for k in comp}
+    ss = sh = ds = dh = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            same = got[i][1] == got[j][1]
+            hit = cl[i] == cl[j]
+            if same:
+                ss += 1
+                sh += hit
+            else:
+                ds += 1
+                dh += hit
+    print()
+    print("  同じ組に入る確率:")
+    print(f"    同じ LFRQ どうし  {sh}/{ss} = "
+          f"{sh / ss * 100 if ss else 0:.1f}%")
+    print(f"    違う LFRQ どうし  {dh}/{ds} = "
+          f"{dh / ds * 100 if ds else 0:.1f}%")
+    print("  **前者が後者を上回らなければ、値列は LFRQ では決まっていない。**")
+
+
 def lfo_period(lfrq):
     """§2.1 の規則で決まる LFO の更新周期 [samples]。上位ニブルだけで決まる。"""
     return 2 ** (18 - (lfrq >> 4))
@@ -791,25 +1052,7 @@ def stair_period(olp, path, mode, grid):
     どちらのモデルの値も同じ刻みの上に載る（既定では実機モデルの予測が
     `STAIR_SUB` ブロック、ymfm モデルの予測はその 16/31〜1 倍に当たる）。
     """
-    x, _ = olp.load_left(path)
-    a = olp.Analyzer(x, mode)
-    v = block_values(a, mode, grid, 0)
-    if len(v) < 4 * STAIR_SUB:
-        raise ValueError(f"ブロックが少なすぎる: {len(v)}")
-
-    d = [v[i + 1] - v[i] for i in range(len(v) - 1)]
-    mag = sorted(abs(y) for y in d)
-    thr = STAIR_THR * mag[int(len(mag) * 0.90)]
-    if thr <= 0.0:
-        raise ValueError("段差が立たない")
-
-    # 境界は 3 サンプルのカーネルで隣のブロックへも滲むので、続いた検出は 1 本に
-    edges = []
-    for i, y in enumerate(d):
-        if abs(y) >= thr and not (edges and i - edges[-1] <= 1):
-            edges.append(i)
-    if len(edges) < STAIR_EDGES_MIN:
-        raise ValueError(f"境界が少なすぎる: {len(edges)}")
+    d, edges, _, _ = stair_edges(olp, path, mode, grid)
 
     gaps = sorted(b - a2 for a2, b in zip(edges, edges[1:]))
     med = gaps[len(gaps) // 2]
@@ -823,8 +1066,138 @@ def stair_period(olp, path, mode, grid):
 
 
 def stair_grid(lfrq):
-    """--stair の既定のブロック長。§2.1 の規則値を `STAIR_SUB` で割る。"""
+    """--stair / --cycle の既定のブロック長。§2.1 の規則値を `STAIR_SUB` で割る。"""
     return max(STAIR_GRID_MIN, lfo_period(lfrq) // STAIR_SUB)
+
+
+def stair_edges(olp, path, mode, grid):
+    """段の境界（ブロック番号）と、そのブロック間差分を返す。
+
+    `stair_period` が中でやっていることを、`--cycle` からも使えるように
+    切り出したもの。返すのは (差分列, 境界のブロック番号, 段差の中央値,
+    段が増える向きか)。
+    """
+    x, _ = olp.load_left(path)
+    a = olp.Analyzer(x, mode)
+    v = block_values(a, mode, grid, 0)
+    if len(v) < 4 * STAIR_SUB:
+        raise ValueError(f"ブロックが少なすぎる: {len(v)}")
+
+    d = [v[i + 1] - v[i] for i in range(len(v) - 1)]
+    mag = sorted(abs(y) for y in d)
+    thr = STAIR_THR * mag[int(len(mag) * 0.90)]
+    if thr <= 0.0:
+        raise ValueError("段差が立たない")
+
+    edges = []
+    for i, y in enumerate(d):
+        if abs(y) >= thr and not (edges and i - edges[-1] <= 1):
+            edges.append(i)
+    if len(edges) < STAIR_EDGES_MIN:
+        raise ValueError(f"境界が少なすぎる: {len(edges)}")
+
+    hs = sorted(abs(d[i]) for i in edges)
+    up = sum(1 for i in edges if d[i] > 0) > len(edges) // 2
+    return d, edges, hs[len(hs) // 2], up
+
+
+def stair_cycle(olp, path, mode, grid, period):
+    """鋸 (W=0) の 1 周期を折り返しで切り出し、そのあいだの段数を数える。
+
+    返すのは (1 周期の長さ [samples], 折り返しの位置, 1 周期の段数,
+    2 段ぶんの段差の割合)。
+
+    **これが「歩幅」の測定そのもの。**`--stair` は段の**間隔**しか測らないので、
+    「下位ニブルは間隔ではなく歩幅を変える」の後半を数値にできない。段差の
+    中央値は `+1` 段ぶんと `+2` 段ぶんが混ざるので当てにならない。そこで
+    **1 周期あたりの段数**を数える。LFO 値が 1 周期で 256 進む以上、
+    1 周期の段数 `N` が分かれば平均の歩幅は `256 / N` になる。
+
+    折り返しは鋸が全振幅ぶん戻る 1 点なので、段差が 1 段ぶんの
+    `CYCLE_WRAP_RATIO` 倍を超え、かつ普段と逆符号の点として拾える。
+    滲みは `CYCLE_WRAP_MERGE` ブロック以内をまとめて 1 本にする。
+    キャプチャ頭の `CYCLE_SKIP` ブロックは KEY ON の立ち上がりが折り返しに
+    化けるので捨てる。
+    """
+    d, edges, hmed, up = stair_edges(olp, path, mode, grid)
+
+    rev = [(-y if up else y) for y in d]
+    wraps = []
+    for i in range(CYCLE_SKIP, len(rev)):
+        if rev[i] <= CYCLE_WRAP_RATIO * hmed:
+            continue
+        if wraps and i - wraps[-1] <= CYCLE_WRAP_MERGE:
+            if rev[i] > rev[wraps[-1]]:
+                wraps[-1] = i
+        else:
+            wraps.append(i)
+    if len(wraps) < 2:
+        raise ValueError(f"折り返しが {len(wraps)} 本しか無い")
+
+    gaps = sorted((wraps[j + 1] - wraps[j]) * grid
+                  for j in range(len(wraps) - 1))
+    cyc = gaps[len(gaps) // 2]
+    nsteps = cyc / period
+
+    # 段差を 1 段ぶん / 2 段ぶんに分ける。1 段ぶんの大きさは「段差の平均が
+    # 平均の歩幅（256/N 段ぶん）に当たる」ことから逆算する。段差の分布そのものに
+    # 閾値を置く（中央値など）と、2 段ぶんが多数派になる下位ニブルで破綻する
+    #
+    # **1 段が `CYCLE_BIG_MIN` ブロックを切ると出さない。**段差そのものが
+    # ブロックの平均に丸められてしまい、`+1` と `+2` の区別が付かなくなる。
+    # 段の間隔や 1 周期の長さは折り返しの位置だけで決まるのでこの制約を受けない
+    inner = [abs(d[i]) for i in edges
+             if (d[i] > 0) == up and abs(d[i]) < CYCLE_WRAP_RATIO * hmed]
+    big = None
+    if inner and nsteps > 0 and period // grid >= CYCLE_BIG_MIN:
+        unit = sum(inner) / len(inner) * nsteps / 256.0
+        big = sum(1 for h in inner if h > CYCLE_BIG_RATIO * unit) / len(inner)
+    return cyc, wraps, nsteps, big
+
+
+def report_cycle(paths, mode, grid=None):
+    """[R] 鋸 (W=0) の 1 周期の段数を数え、歩幅を数値にする。"""
+    olp = load_analyzer()
+    section(f"[R] 鋸 (W=0) の 1 周期あたりの段数と歩幅（--mode {mode}）")
+    print("折り返しで 1 周期を切り出し、そのあいだの段数を数える。")
+    print("  1 周期で LFO 値は 256 進むので、平均の歩幅 = 256 / 1 周期の段数。")
+    print("  デコード表の予測: 1 周期の段数 = 4096/(16+lo) / 歩幅 = (16+lo)/16")
+    print("  **上位ニブルには依らない。**")
+    print()
+    print("  LFRQ  格子  1周期[samples]      予測      比   段数   予測   "
+          "歩幅   予測   2段ぶんの段差  予測 lo/16")
+
+    dev = []
+    for path in sorted(paths):
+        m = NAME_RE.search(Path(path).name)
+        if not m:
+            print(f"* {Path(path).name}: ファイル名から条件を読めない")
+            continue
+        lfrq = int(m[2], 16)
+        hi, lo = lfrq >> 4, lfrq & 0x0F
+        g = grid or stair_grid(lfrq)
+        period = lfo_period(lfrq)
+        want_cyc = 2 ** 30 / ((16 + lo) * 2 ** hi)
+        want_n = 4096 / (16 + lo)
+        try:
+            cyc, wraps, nsteps, big = stair_cycle(olp, path, mode, g, period)
+        except Exception as e:                        # noqa: BLE001
+            print(f"  {lfrq:02x}  {g:4d}   {e}")
+            continue
+        # 折り返しの位置はブロック単位でしか決まらないので、2 本ぶんで
+        # ±2 grid サンプル = ±2 grid / period 段のぶれが乗る
+        dev.append((nsteps - want_n, 2.0 * g / period))
+        bs = f"{big * 100:11.0f}%" if big is not None else "          -"
+        print(f"  {lfrq:02x}  {g:4d}  {cyc:12d} {want_cyc:9.0f}  {cyc / want_cyc:6.3f} "
+              f"{nsteps:6.1f} {want_n:6.1f} {256 / nsteps:6.3f} "
+              f"{(16 + lo) / 16:6.3f} {bs}  {lo / 16 * 100:7.0f}%")
+
+    if dev:
+        print()
+        print(f"  計 {len(dev)} 条件 / 段数の予測とのずれ 最大 "
+              f"{max(abs(x) for x, _ in dev):.2f} 段 "
+              f"（折り返しの位置の分解能から来るぶれは最大 "
+              f"±{max(r for _, r in dev):.2f} 段）")
 
 
 def report_stair(paths, mode, grid=None):
@@ -1006,9 +1379,137 @@ def self_test_values(olp, tg, tmp):
     return results
 
 
+# --bits の一致率に許す絶対誤差。2 値化しているので標本ゆらぎは
+# sqrt(0.25/600) = 2% 程度
+BITS_TEST_TOL = 0.06
+
+
+def self_test_bits(olp, tg, tmp):
+    """既知の値列を入れた人工信号で `--bits` を検証する（実機不要）。
+
+    `--values` の自己検証と同じ人工信号を使うが、見るのは 2 値化した列の
+    ハミング距離。**要点は「遅れが VALUE_LAG より大きくても見つかること」**で、
+    これが実機データで中間の下位ニブルを判定できなかった原因そのもの
+    （README §5.6.1 / §5.9）。
+    """
+    period = 256
+    # 遅れ 300 段（VALUE_LAG=256 より大きい）を試せる長さにする
+    nseg = 1200
+    length = period * nseg
+    nval = nseg + 2
+    base = tg.lfo_values_iid(nval, 5200)
+    other = tg.lfo_values_iid(nval, 5201)
+    half = [other[i] if i % 2 else base[i] for i in range(nval)]
+    shift = 300
+
+    # (名前, B の値列, 期待する遅れ, 期待する一致率)。一致率 None は
+    # 「BITS_MATCH を超えず、偶然の上限のあたりに収まること」だけを見るケース
+    cases = (
+        ("同じ列", base, 0, 1.0),
+        (f"{shift} 段ずらした列（VALUE_LAG={VALUE_LAG} を超える遅れ）",
+         base[shift:] + base[:shift], shift, 1.0),
+        ("1 段おきに差し替えた列", half, 0, 0.75),
+        ("無関係な列", other, None, None),
+    )
+
+    results = []
+    for mode in MODES:
+        pa = Path(tmp) / f"{mode}_bits_a.wav"
+        if not pa.exists():
+            tg.write_wav(pa, tg.synth(mode, period, length, tg.CARRIERS[2],
+                                      0, values=base))
+        _, _, va, _, _ = value_series(olp, pa, mode, period)
+        pka = pack_bits(series_bits(va))
+        for note, vals, lag_want, want in cases:
+            pb = Path(tmp) / f"{mode}_bits_{lag_want}_{want}.wav"
+            if not pb.exists():
+                tg.write_wav(pb, tg.synth(mode, period, length, tg.CARRIERS[2],
+                                          0, values=vals))
+            name = f"{mode} 2 値化した値列（{note}）"
+            err = None
+            try:
+                _, _, vb, _, _ = value_series(olp, pb, mode, period)
+                lag, r, n, luck = bit_match(pka, pack_bits(series_bits(vb)))
+                if lag is None:
+                    err = "突き合わせできない"
+                elif want is None:
+                    # 無関係な列。遅れを数千通り試した最良値には選択バイアスが
+                    # 乗るので 50% ちょうどにはならない。**閾値を超えないこと**と、
+                    # 偶然の上限のあたりに収まっていることだけを見る
+                    if r >= BITS_MATCH:
+                        err = f"無関係な列が閾値を超えた: {r * 100:.1f}%"
+                    elif luck is None or r > luck + BITS_TEST_TOL:
+                        err = f"一致率 {r * 100:.1f}% が偶然の上限 {luck} から離れた"
+                elif abs(r - want) > BITS_TEST_TOL:
+                    err = f"一致率 {r * 100:.1f}% (期待 {want * 100:.0f}%)"
+                elif want > 0.9 and lag != lag_want:
+                    err = f"遅れ {lag} (期待 {lag_want})"
+                elif want > 0.9 and (luck is None or luck > 0.7):
+                    err = f"偶然の上限が高すぎる: {luck}"
+            except Exception as e:                    # noqa: BLE001
+                err = str(e)
+            results.append((name, err))
+
+    # デコード表の予測は純関数なので、実機も人工信号も要らずに検算できる
+    want_frac = {lo: min(lo, 16 - lo) / 16 for lo in range(16)}
+    bad = [lo for lo in range(16) if pair_fraction(lo) != want_frac[lo]]
+    results.append(("デコード表の予測 min(lo,16-lo)/16",
+                    None if not bad else f"外れた lo: {bad}"))
+    want_par = ["-"] + ["奇数"] * 7 + ["偶数"] * 8
+    bad = [lo for lo in range(16) if pair_parity(lo) != want_par[lo]]
+    results.append(("デコード表の予測 パリティが 7 と 8 の間で反転",
+                    None if not bad else f"外れた lo: {bad}"))
+    return results
+
+
 # --stair の段の間隔に許す相対誤差。分解能は ±grid = ±段/STAIR_SUB なので
 # 1 刻みぶんの余裕を見る
 STAIR_TEST_TOL = 1.5 / STAIR_SUB
+
+# --cycle の 1 周期の段数に許す相対誤差。折り返しの位置がブロック単位でしか
+# 決まらないぶんのぶれを見込む
+CYCLE_TEST_TOL = 0.04
+
+
+def self_test_cycle(olp, tg, tmp):
+    """既知の歩幅の鋸を入れた人工信号で `--cycle` を検証する（実機不要）。
+
+    `synth(..., values=)` に 256 で折り返すランプを渡せば鋸そのものになる。
+    **歩幅を変えると 1 周期の段数がその逆数で動く**のが測りたい性質なので、
+    歩幅 1 / 2 / 1.5（1 と 2 が交互）の 3 通りで段数が戻るかを見る。
+    """
+    period, grid = 256, 32
+    cases = (
+        ((1,), 256.0, "歩幅 1（下位ニブル 0 相当）"),
+        ((2,), 128.0, "歩幅 2（下位ニブル f に近い）"),
+        ((1, 2), 256.0 / 1.5, "歩幅 1 と 2 が交互（下位ニブル 8 相当）"),
+    )
+
+    results = []
+    for walk, want, note in cases:
+        # 折り返しが 2 本以上入る長さにする
+        nval = int(want * 3) + 8
+        values, val = [], 0
+        for i in range(nval):
+            values.append(val % 256)
+            val += walk[i % len(walk)]
+        length = period * (nval - 2)
+        for mode in MODES:
+            path = Path(tmp) / f"{mode}_cycle_{'_'.join(map(str, walk))}.wav"
+            if not path.exists():
+                tg.write_wav(path, tg.synth(mode, period, length,
+                                            tg.CARRIERS[1], 0, values=values))
+            name = f"{mode} 1 周期の段数 {want:.1f}（{note}）"
+            err = None
+            try:
+                cyc, wraps, n, big = stair_cycle(olp, path, mode, grid, period)
+                if abs(n - want) / want > CYCLE_TEST_TOL:
+                    err = (f"段数 {n:.1f} (期待 {want:.1f}) / "
+                           f"折り返し {len(wraps)} 本")
+            except Exception as e:                    # noqa: BLE001
+                err = str(e)
+            results.append((name, err))
+    return results
 
 
 def self_test_stair(olp, tg, tmp):
@@ -1117,7 +1618,9 @@ def self_test():
                 results.append((name, err))
 
         results += self_test_values(olp, tg, tmp)
+        results += self_test_bits(olp, tg, tmp)
         results += self_test_stair(olp, tg, tmp)
+        results += self_test_cycle(olp, tg, tmp)
 
     ng = 0
     for name, err in results:
@@ -1158,9 +1661,17 @@ def main(argv=None):
     parser.add_argument("--period", type=float, default=None,
                         help="--runs / --values で使う更新周期 [samples]。"
                              "省略すると推定する")
+    parser.add_argument("--bits", type=Path, nargs="+", metavar="WAV",
+                        help="[P] 段ごとの値列を 2 値化し、遅れを全域で探して"
+                             "総当たりで突き合わせる（--mode が要る）")
+    parser.add_argument("--bits-lag", type=int, default=BITS_LAG, metavar="N",
+                        help=f"--bits で探す遅れの幅 [段]（既定 {BITS_LAG}）")
     parser.add_argument("--stair", type=Path, nargs="+", metavar="WAV",
                         help="[N] W≠3（鋸・三角）の段の間隔を測り、2 つのモデルの"
                              "予測と突き合わせる（--mode が要る）")
+    parser.add_argument("--cycle", type=Path, nargs="+", metavar="WAV",
+                        help="[R] 鋸 (W=0) の 1 周期の段数を数えて歩幅を出す"
+                             "（--mode が要る）")
     parser.add_argument("--grid", type=int, default=None, metavar="N",
                         help="--stair のブロック長 [samples]。省略すると "
                              f"2^(18-hi)/{STAIR_SUB} を使う")
@@ -1200,10 +1711,22 @@ def main(argv=None):
                       args.lag_span, args.dump)
         return 0
 
+    if args.bits:
+        if not args.mode:
+            parser.error("--bits には --mode が要る")
+        report_bits(args.bits, args.mode, args.period, args.bits_lag)
+        return 0
+
     if args.stair:
         if not args.mode:
             parser.error("--stair には --mode が要る")
         report_stair(args.stair, args.mode, args.grid)
+        return 0
+
+    if args.cycle:
+        if not args.mode:
+            parser.error("--cycle には --mode が要る")
+        report_cycle(args.cycle, args.mode, args.grid)
         return 0
 
     if args.supply:
