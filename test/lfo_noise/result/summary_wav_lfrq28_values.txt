@@ -1,6 +1,8 @@
 # 生成: ./analyze_lfo.py --mode {am,pm} --period 65536 --values wav_lfrq28/{am,pm}_nfrq_{00,1f}_lfrq_2*.wav.zst
+# 上位ニブル 2 の帯を下位ニブル全 16 値 × NFRQ 2 値 × AM/PM で撮った 64 本
 # 3 連射の再現性は wav_lfrq28 / _r2 / _r3 の LFRQ=0x28,0x29 で見ている
 
+
 段ごとの LFO 値列（--mode am）
 ----------------------
 ラッチ格子ごとの LFO 値を取り出し、連に畳まず値列のまま見る。
@@ -11,142 +13,136 @@
   遅れは総当たりなので最良値には選択バイアスが乗る。
   **「偶然の上限」を超えていない一致率は偶然と区別が付かない。**
 
-* am_nfrq_00_lfrq_24_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 98.3%
-    段境界の変化率: 偶数 50/57 = 88% / 奇数 50/56 = 89%
-* am_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
-    段境界の変化率: 偶数 48/57 = 84% / 奇数 45/56 = 80%
-* am_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
-    段境界の変化率: 偶数 47/57 = 82% / 奇数 46/56 = 82%
-* am_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_20_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 92.4%
     段境界の変化率: 偶数 48/57 = 84% / 奇数 46/56 = 82%
-* am_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_21_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 52/57 = 91% / 奇数 55/56 = 98%
+* wav_lfrq28/am_nfrq_00_lfrq_22_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 89.5%
+    段境界の変化率: 偶数 47/57 = 82% / 奇数 44/56 = 79%
+* wav_lfrq28/am_nfrq_00_lfrq_23_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
+    段境界の変化率: 偶数 43/57 = 75% / 奇数 43/56 = 77%
+* wav_lfrq28/am_nfrq_00_lfrq_24_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 98.3%
+    段境界の変化率: 偶数 50/57 = 88% / 奇数 50/56 = 89%
+* wav_lfrq28/am_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
     段境界の変化率: 偶数 48/57 = 84% / 奇数 45/56 = 80%
-* am_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
+    段境界の変化率: 偶数 47/57 = 82% / 奇数 46/56 = 82%
+* wav_lfrq28/am_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 92.4%
+    段境界の変化率: 偶数 48/57 = 84% / 奇数 46/56 = 82%
+* wav_lfrq28/am_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
+    段境界の変化率: 偶数 48/57 = 84% / 奇数 45/56 = 80%
+* wav_lfrq28/am_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
     段境界の変化率: 偶数 42/57 = 74% / 奇数 44/56 = 79%
-* am_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
     段境界の変化率: 偶数 50/57 = 88% / 奇数 54/56 = 96%
-* am_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 83.6%
     段境界の変化率: 偶数 42/57 = 74% / 奇数 43/56 = 77%
-* am_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 93.4%
     段境界の変化率: 偶数 48/57 = 84% / 奇数 47/56 = 84%
-
-  突き合わせ（1 本目を基準）:
-  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
-  am_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst         22    22.8%        20.5%     14.3%      92  一致
-  am_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst         22    22.8%        19.2%     14.3%      92  一致
-  am_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst         22    22.8%        20.5%     14.3%      92  一致
-  am_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst         22    22.8%        20.2%     14.3%      92  一致
-  am_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst         25    18.0%        16.7%      8.9%      89  一致
-  am_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst         27    17.2%        16.5%      8.0%      87  一致
-  am_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst          0    21.1%        18.3%     12.3%     114  一致
-  am_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst         22    23.9%        21.2%     15.5%      92  一致
-
-段ごとの LFO 値列（--mode am）
-----------------------
-ラッチ格子ごとの LFO 値を取り出し、連に畳まず値列のまま見る。
-  段境界の変化率を偶数・奇数に分けて出す。
-    片方だけ高い -> 1 段おきにしか変わっていない（同じ語を 2 回引いている）
-    両方とも同じ -> どの段でも変わりうる
-  突き合わせの一致率は無関係な 2 列でも 10% 出る。下駄を外したものが「真の一致」。
-  遅れは総当たりなので最良値には選択バイアスが乗る。
-  **「偶然の上限」を超えていない一致率は偶然と区別が付かない。**
-
-* am_nfrq_1f_lfrq_24_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_00_lfrq_2d_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
+    段境界の変化率: 偶数 48/57 = 84% / 奇数 45/56 = 80%
+* wav_lfrq28/am_nfrq_00_lfrq_2e_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
+    段境界の変化率: 偶数 42/57 = 74% / 奇数 44/56 = 79%
+* wav_lfrq28/am_nfrq_00_lfrq_2f_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 97.3%
+    段境界の変化率: 偶数 48/57 = 84% / 奇数 51/56 = 91%
+* wav_lfrq28/am_nfrq_1f_lfrq_20_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 53/57 = 93% / 奇数 54/56 = 96%
+* wav_lfrq28/am_nfrq_1f_lfrq_21_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 52/57 = 91% / 奇数 53/56 = 95%
+* wav_lfrq28/am_nfrq_1f_lfrq_22_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 96.4%
+    段境界の変化率: 偶数 47/57 = 82% / 奇数 51/56 = 91%
+* wav_lfrq28/am_nfrq_1f_lfrq_23_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 90.5%
+    段境界の変化率: 偶数 39/57 = 68% / 奇数 53/56 = 95%
+* wav_lfrq28/am_nfrq_1f_lfrq_24_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 83.6%
     段境界の変化率: 偶数 36/57 = 63% / 奇数 49/56 = 88%
-* am_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
     段境界の変化率: 偶数 33/57 = 58% / 奇数 53/56 = 95%
-* am_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 81.6%
     段境界の変化率: 偶数 31/57 = 54% / 奇数 52/56 = 93%
-* am_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 74.7%
     段境界の変化率: 偶数 25/57 = 44% / 奇数 51/56 = 91%
-* am_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 68.8%
     段境界の変化率: 偶数 50/57 = 88% / 奇数 20/56 = 36%
-* am_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 73.7%
     段境界の変化率: 偶数 52/57 = 91% / 奇数 23/56 = 41%
-* am_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 77.7%
     段境界の変化率: 偶数 52/57 = 91% / 奇数 27/56 = 48%
-* am_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 81.6%
     段境界の変化率: 偶数 52/57 = 91% / 奇数 31/56 = 55%
-* am_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
     段境界の変化率: 偶数 47/57 = 82% / 奇数 39/56 = 70%
-
-  突き合わせ（1 本目を基準）:
-  相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
-  am_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst         16    91.8%        16.5%     90.9%      98  一致
-  am_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst          2    49.1%        19.2%     43.5%     112  一致
-  am_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst        -12    18.6%        16.7%      9.6%     102  一致
-  am_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst          5    16.5%        14.9%      7.2%     109  一致
-  am_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst         17    26.8%        18.2%     18.7%      97  一致
-  am_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst         15    18.2%        15.8%      9.1%      99  一致
-  am_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst         17    34.0%        19.6%     26.7%      97  一致
-  am_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst        -15    43.4%        16.1%     37.1%      99  一致
-
-段ごとの LFO 値列（--mode pm）
-----------------------
-ラッチ格子ごとの LFO 値を取り出し、連に畳まず値列のまま見る。
-  段境界の変化率を偶数・奇数に分けて出す。
-    片方だけ高い -> 1 段おきにしか変わっていない（同じ語を 2 回引いている）
-    両方とも同じ -> どの段でも変わりうる
-  突き合わせの一致率は無関係な 2 列でも 10% 出る。下駄を外したものが「真の一致」。
-  遅れは総当たりなので最良値には選択バイアスが乗る。
-  **「偶然の上限」を超えていない一致率は偶然と区別が付かない。**
-
-* pm_nfrq_00_lfrq_24_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
-    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
-* pm_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst
+* wav_lfrq28/am_nfrq_1f_lfrq_2d_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 92.4%
+    段境界の変化率: 偶数 51/57 = 89% / 奇数 43/56 = 77%
+* wav_lfrq28/am_nfrq_1f_lfrq_2e_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 95.4%
+    段境界の変化率: 偶数 50/57 = 88% / 奇数 47/56 = 84%
+* wav_lfrq28/am_nfrq_1f_lfrq_2f_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 98.3%
     段境界の変化率: 偶数 49/57 = 86% / 奇数 51/56 = 91%
-* pm_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
-    段境界の変化率: 偶数 54/57 = 95% / 奇数 51/56 = 91%
-* pm_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
-    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
-* pm_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 81.6%
-    段境界の変化率: 偶数 40/57 = 70% / 奇数 43/56 = 77%
-* pm_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 93.4%
-    段境界の変化率: 偶数 48/57 = 84% / 奇数 47/56 = 84%
-* pm_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
-    段境界の変化率: 偶数 51/57 = 89% / 奇数 51/56 = 91%
-* pm_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
-    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
-* pm_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst
-    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
-    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
 
   突き合わせ（1 本目を基準）:
   相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
-  pm_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst        -23    20.9%        17.9%     12.1%      91  一致
-  pm_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst          9    17.1%        16.8%      7.9%     105  一致
-  pm_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst          0   100.0%        29.7%    100.0%     114  一致
-  pm_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst        -25    15.7%        15.2%      6.4%      89  一致
-  pm_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst          9    22.9%        18.9%     14.3%     105  一致
-  pm_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst        -23    19.8%        16.3%     10.9%      91  一致
-  pm_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst          0   100.0%        29.7%    100.0%     114  一致
-  pm_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst          0   100.0%        29.7%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_21_kc_4a_mul_04.w   -25    24.7%        20.2%     16.4%      89  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_22_kc_4a_mul_04.w     0   100.0%        27.0%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_23_kc_4a_mul_04.w   -25    19.1%        17.3%     10.1%      89  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_24_kc_4a_mul_04.w   -22    21.7%        19.2%     13.0%      92  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_25_kc_4a_mul_04.w     0   100.0%        27.0%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_26_kc_4a_mul_04.w     0   100.0%        29.2%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_27_kc_4a_mul_04.w     0   100.0%        28.1%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_28_kc_4a_mul_04.w     0   100.0%        29.2%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_29_kc_4a_mul_04.w    22    18.5%        18.0%      9.4%      92  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_2a_kc_4a_mul_04.w   -25    24.7%        19.8%     16.4%      89  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_2b_kc_4a_mul_04.w     4    18.2%        18.0%      9.1%     110  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_2c_kc_4a_mul_04.w     0   100.0%        28.1%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_2d_kc_4a_mul_04.w     0   100.0%        27.0%    100.0%     114  一致
+  wav_lfrq28/am_nfrq_00_lfrq_2e_kc_4a_mul_04.w   -25    18.0%        17.3%      8.9%      89  偶然と同程度
+  wav_lfrq28/am_nfrq_00_lfrq_2f_kc_4a_mul_04.w   -27    20.7%        16.4%     11.9%      87  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_20_kc_4a_mul_04.w    18    19.8%        15.3%     10.9%      96  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_21_kc_4a_mul_04.w    12    13.7%        12.5%      4.1%     102  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_22_kc_4a_mul_04.w    24    20.0%        16.3%     11.1%      90  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_23_kc_4a_mul_04.w   -10    16.3%        15.2%      7.1%     104  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_24_kc_4a_mul_04.w    16    18.4%        17.0%      9.3%      98  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_25_kc_4a_mul_04.w    -8    17.9%        16.3%      8.8%     106  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_26_kc_4a_mul_04.w    -1    17.7%        17.4%      8.6%     113  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_27_kc_4a_mul_04.w   -11    14.6%        14.3%      5.1%     103  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_28_kc_4a_mul_04.w    -9    17.1%        16.1%      7.9%     105  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_29_kc_4a_mul_04.w     6    18.5%        15.6%      9.5%     108  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2a_kc_4a_mul_04.w    10    17.3%        16.3%      8.1%     104  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2b_kc_4a_mul_04.w    16    14.3%        14.0%      4.8%      98  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2c_kc_4a_mul_04.w    25    18.0%        13.8%      8.9%      89  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2d_kc_4a_mul_04.w    16    16.3%        15.9%      7.0%      98  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2e_kc_4a_mul_04.w    16    19.4%        15.8%     10.4%      98  偶然と同程度
+  wav_lfrq28/am_nfrq_1f_lfrq_2f_kc_4a_mul_04.w    25    14.6%        13.8%      5.1%      89  偶然と同程度
 
 段ごとの LFO 値列（--mode pm）
 ----------------------
@@ -158,41 +154,133 @@
   遅れは総当たりなので最良値には選択バイアスが乗る。
   **「偶然の上限」を超えていない一致率は偶然と区別が付かない。**
 
-* pm_nfrq_1f_lfrq_24_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_00_lfrq_20_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 53/57 = 93% / 奇数 51/56 = 91%
+* wav_lfrq28/pm_nfrq_00_lfrq_21_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 95.4%
+    段境界の変化率: 偶数 49/57 = 86% / 奇数 48/56 = 86%
+* wav_lfrq28/pm_nfrq_00_lfrq_22_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 95.4%
+    段境界の変化率: 偶数 49/57 = 86% / 奇数 48/56 = 86%
+* wav_lfrq28/pm_nfrq_00_lfrq_23_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_24_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_25_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 98.3%
+    段境界の変化率: 偶数 49/57 = 86% / 奇数 51/56 = 91%
+* wav_lfrq28/pm_nfrq_00_lfrq_26_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 54/57 = 95% / 奇数 51/56 = 91%
+* wav_lfrq28/pm_nfrq_00_lfrq_27_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_28_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 81.6%
+    段境界の変化率: 偶数 40/57 = 70% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_29_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 93.4%
+    段境界の変化率: 偶数 48/57 = 84% / 奇数 47/56 = 84%
+* wav_lfrq28/pm_nfrq_00_lfrq_2a_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 51/57 = 89% / 奇数 51/56 = 91%
+* wav_lfrq28/pm_nfrq_00_lfrq_2b_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_2c_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_2d_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 89.5%
+    段境界の変化率: 偶数 47/57 = 82% / 奇数 44/56 = 79%
+* wav_lfrq28/pm_nfrq_00_lfrq_2e_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 87.5%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 43/56 = 77%
+* wav_lfrq28/pm_nfrq_00_lfrq_2f_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 100.0%
+    段境界の変化率: 偶数 52/57 = 91% / 奇数 50/56 = 89%
+* wav_lfrq28/pm_nfrq_1f_lfrq_20_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 97.3%
+    段境界の変化率: 偶数 49/57 = 86% / 奇数 50/56 = 89%
+* wav_lfrq28/pm_nfrq_1f_lfrq_21_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 92.4%
+    段境界の変化率: 偶数 45/57 = 79% / 奇数 49/56 = 88%
+* wav_lfrq28/pm_nfrq_1f_lfrq_22_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 84.6%
+    段境界の変化率: 偶数 38/57 = 67% / 奇数 48/56 = 86%
+* wav_lfrq28/pm_nfrq_1f_lfrq_23_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 76.7%
+    段境界の変化率: 偶数 32/57 = 56% / 奇数 46/56 = 82%
+* wav_lfrq28/pm_nfrq_1f_lfrq_24_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 68.8%
     段境界の変化率: 偶数 24/57 = 42% / 奇数 46/56 = 82%
-* pm_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 64.9%
     段境界の変化率: 偶数 15/57 = 26% / 奇数 51/56 = 91%
-* pm_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 71.8%
     段境界の変化率: 偶数 19/57 = 33% / 奇数 54/56 = 96%
-* pm_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 58.0%
     段境界の変化率: 偶数 7/57 = 12% / 奇数 52/56 = 93%
-* pm_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 48.2%
     段境界の変化率: 偶数 49/57 = 86% / 奇数 0/56 = 0%
-* pm_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 54.1%
     段境界の変化率: 偶数 50/57 = 88% / 奇数 5/56 = 9%
-* pm_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 57.0%
     段境界の変化率: 偶数 48/57 = 84% / 奇数 10/56 = 18%
-* pm_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 64.9%
     段境界の変化率: 偶数 50/57 = 88% / 奇数 16/56 = 29%
-* pm_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst
+* wav_lfrq28/pm_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst
     更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 80.6%
     段境界の変化率: 偶数 53/57 = 93% / 奇数 29/56 = 52%
+* wav_lfrq28/pm_nfrq_1f_lfrq_2d_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 76.7%
+    段境界の変化率: 偶数 46/57 = 81% / 奇数 32/56 = 57%
+* wav_lfrq28/pm_nfrq_1f_lfrq_2e_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 80.6%
+    段境界の変化率: 偶数 47/57 = 82% / 奇数 35/56 = 62%
+* wav_lfrq28/pm_nfrq_1f_lfrq_2f_kc_4a_mul_04.wav.zst
+    更新周期 65536 samples / 位相 0 / 段 114 / 変化した段 91.4%
+    段境界の変化率: 偶数 51/57 = 89% / 奇数 42/56 = 75%
 
   突き合わせ（1 本目を基準）:
   相手                                          遅れ   一致率  偶然の上限   真の一致  重なり  判定
-  pm_nfrq_1f_lfrq_25_kc_4a_mul_04.wav.zst         16    93.9%        19.2%     93.2%      98  一致
-  pm_nfrq_1f_lfrq_26_kc_4a_mul_04.wav.zst        -23    15.4%        13.9%      6.0%      91  一致
-  pm_nfrq_1f_lfrq_27_kc_4a_mul_04.wav.zst         26    13.6%        13.0%      4.0%      88  一致
-  pm_nfrq_1f_lfrq_28_kc_4a_mul_04.wav.zst         15    12.1%        12.0%      2.4%      99  一致
-  pm_nfrq_1f_lfrq_29_kc_4a_mul_04.wav.zst         15    73.7%        18.4%     70.8%      99  一致
-  pm_nfrq_1f_lfrq_2a_kc_4a_mul_04.wav.zst        -15    13.1%        11.9%      3.5%      99  一致
-  pm_nfrq_1f_lfrq_2b_kc_4a_mul_04.wav.zst          1    16.8%        16.1%      7.6%     113  一致
-  pm_nfrq_1f_lfrq_2c_kc_4a_mul_04.wav.zst        -12    16.7%        16.0%      7.4%     102  一致
+  wav_lfrq28/pm_nfrq_00_lfrq_21_kc_4a_mul_04.w   -27    23.0%        16.0%     14.4%      87  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_22_kc_4a_mul_04.w   -27    23.0%        17.0%     14.4%      87  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_23_kc_4a_mul_04.w    23    19.8%        18.8%     10.9%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_24_kc_4a_mul_04.w    23    23.1%        19.8%     14.5%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_25_kc_4a_mul_04.w     0    99.1%        27.5%     99.0%     114  一致
+  wav_lfrq28/pm_nfrq_00_lfrq_26_kc_4a_mul_04.w    27    32.2%        18.7%     24.6%      87  一致
+  wav_lfrq28/pm_nfrq_00_lfrq_27_kc_4a_mul_04.w    23    22.0%        20.8%     13.3%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_28_kc_4a_mul_04.w    20    21.3%        19.2%     12.5%      94  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_29_kc_4a_mul_04.w   -27    20.7%        17.0%     11.9%      87  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_2a_kc_4a_mul_04.w     0   100.0%        28.4%    100.0%     114  一致
+  wav_lfrq28/pm_nfrq_00_lfrq_2b_kc_4a_mul_04.w    23    20.9%        18.8%     12.1%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_2c_kc_4a_mul_04.w    23    22.0%        20.8%     13.3%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_2d_kc_4a_mul_04.w    23    22.0%        20.8%     13.3%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_2e_kc_4a_mul_04.w    23    19.8%        17.9%     10.9%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_00_lfrq_2f_kc_4a_mul_04.w    27    28.7%        18.6%     20.8%      87  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_20_kc_4a_mul_04.w   -26    21.6%        18.3%     12.9%      88  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_21_kc_4a_mul_04.w   -10    20.2%        17.2%     11.3%     104  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_22_kc_4a_mul_04.w   -16    13.3%        12.6%      3.6%      98  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_23_kc_4a_mul_04.w     3    12.6%        12.2%      2.9%     111  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_24_kc_4a_mul_04.w   -16    17.3%        16.0%      8.2%      98  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_25_kc_4a_mul_04.w   -23    18.7%        14.2%      9.6%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_26_kc_4a_mul_04.w    26    14.8%        13.0%      5.3%      88  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_27_kc_4a_mul_04.w    12    18.6%        15.4%      9.6%     102  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_28_kc_4a_mul_04.w    -9    15.2%        14.1%      5.8%     105  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_29_kc_4a_mul_04.w   -23    18.7%        16.8%      9.6%      91  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2a_kc_4a_mul_04.w   -12    19.6%        19.3%     10.7%     102  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2b_kc_4a_mul_04.w    -9    17.1%        16.2%      7.9%     105  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2c_kc_4a_mul_04.w    26    19.3%        18.3%     10.4%      88  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2d_kc_4a_mul_04.w   -25    18.0%        16.1%      8.9%      89  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2e_kc_4a_mul_04.w   -25    21.3%        17.0%     12.6%      89  偶然と同程度
+  wav_lfrq28/pm_nfrq_1f_lfrq_2f_kc_4a_mul_04.w    -7    15.9%        15.7%      6.5%     107  偶然と同程度
