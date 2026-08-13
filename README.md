@@ -751,14 +751,14 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 新しい環境で組んだときに一通り確かめる**手順**。1. は毎回実行して回帰検査に使うもの、
 2.〜5. は配線とファームを立ち上げるときの確認項目。
 
-1. **ホスト側の自動テスト**: 実機もロジアナも要らない。いずれも全ケース `PASS` すること。
+1. **ホスト側の自動テスト**: 実機は要らない。いずれも全ケース `PASS` すること。
 
-   | コマンド | 対象 | 所要 |
-   | --- | --- | --- |
-   | `./tools/opm-lfo-period-testgen.py` | LFO 周期解析 (`opm-lfo-period.py`) | 25 秒 |
-   | `./test/dac_lr/lr_relation.py --self-test` | L/R 判定器 | 1 秒 |
-   | `./test/lfo_noise/analyze_lfo.py --self-test` | 段ごとの LFO 値と値列の突き合わせ | 10 秒 |
-   | `./test/noise_period/analyze_noise.py --self-test` | ノイズ発生器の周期推定 | 10 秒 |
+   | コマンド | 対象 | ケース数 | 所要 |
+   | --- | --- | --- | --- |
+   | `./tools/opm-lfo-period-testgen.py` | LFO 周期解析 (`opm-lfo-period.py`) | 47 | 30 秒 |
+   | `./test/dac_lr/lr_relation.py --self-test` | L/R 判定器 | 16 | 1 秒 |
+   | `./test/lfo_noise/analyze_lfo.py --self-test` | 段ごとの LFO 値と値列の突き合わせ | 46 | 15 秒 |
+   | `./test/noise_period/analyze_noise.py --self-test` | ノイズ発生器の周期推定 | 14 | 1 秒 |
 
 2. **単体（OPM 未接続）**: 書き込み後にシリアル接続し、起動バナーが出ることと `i` の表示が
    期待どおりであることを確認する。CDC が 2 本列挙されることも見ておく。

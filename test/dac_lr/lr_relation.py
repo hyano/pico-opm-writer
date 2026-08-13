@@ -385,7 +385,7 @@ def _synth(n, period, seed=1):
 
 
 def self_test(verbose=False):
-    """合成波形で判定が期待どおりに出るかを見る。実機もロジアナも要らない。"""
+    """合成波形で判定が期待どおりに出るかを見る。実機は要らない。"""
     n = 20000
     cases = []
     for period in (6.7, 31.8, 127.1):

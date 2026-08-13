@@ -217,13 +217,13 @@ EOF
 - `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / DMA overrun 回数 / 禁止コード E=0 の数 / 実測フレームレート）
 - `s 0` — 統計をリセット
 
-**ホスト側スクリプトの検証**は次の 4 本。いずれも実機もロジアナも要らず、全ケース `PASS` で終了コード 0:
+**ホスト側スクリプトの検証**は次の 4 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
 
 ```bash
-./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（47 ケース）
+./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（30 秒 / 47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
-./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（30 ケース）
-./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（9 ケース）
+./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（15 秒 / 46 ケース）
+./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（1 秒 / 14 ケース）
 ```
 
 **実機調査**：`tools/opm-writer.py` は `test/` の掃引スクリプトをそのまま実行できる。
