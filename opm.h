@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include "pico/stdlib.h"
 
-#define OPM_WRITER_VERSION "0.1.0"
+#define OPM_WRITER_VERSION "0.2.0"
 
 /* ---- クロック ---------------------------------------------------------- */
 
@@ -42,10 +42,12 @@
 
 #define OPM_PIN_D0   2   /* D0-D7 = GP2-GP9。マスク書き込みのため連続であること */
 #define OPM_PIN_A0   10  /* L=アドレスラッチ / H=データ書き込み */
-#define OPM_PIN_WR   11  /* 書き込みストローブ（負論理） */
-#define OPM_PIN_IC   12  /* ハードウェアリセット（負論理） */
-#define OPM_PIN_PHIM 13  /* マスタークロック（PIO 出力） */
-#define OPM_PIN_LED  PICO_DEFAULT_LED_PIN
+#define OPM_PIN_CS   11  /* チップセレクト（負論理） */
+#define OPM_PIN_WR   12  /* 書き込みストローブ（負論理） */
+#define OPM_PIN_RD   13  /* 読み出しストローブ（負論理）。現在は H 固定 */
+#define OPM_PIN_IC   14  /* ハードウェアリセット（負論理） */
+#define OPM_PIN_PHIM 15  /* マスタークロック（PIO 出力） */
+#define OPM_PIN_IRQ  16  /* 割り込み要求（負論理）。入力・レベル参照のみ */
 
 /* ---- タイミング定数 ---------------------------------------------------- */
 
@@ -62,6 +64,7 @@ void opm_init(void);                        /* GPIO と PIO(φM) を初期化し
 void opm_write(uint8_t addr, uint8_t data); /* 1 レジスタ書き込み（アドレス→データの 2 サイクル） */
 void opm_reset(void);                       /* /IC によるハードウェアリセット */
 void opm_clear(void);                       /* ソフトウェアによる全レジスタクリア */
+bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true = H = 非アサート） */
 
 uint32_t opm_clock_hz_actual(void); /* 実際に生成されている φM 周波数 */
 uint32_t opm_clock_div_int(void);   /* PIO 分周比の整数部 */

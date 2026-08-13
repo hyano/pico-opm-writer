@@ -1,0 +1,74 @@
+;
+; YM3012 (OPM の DAC) シリアル出力のキャプチャ
+;
+; SPDX-License-Identifier: MIT
+;
+
+; 入力は in_base から連続 4 本に割り当てる。
+;
+;   pin0 = SO  (シリアルデータ)
+;   pin1 = φ1  (ビットクロック、φM/2)
+;   pin2 = SH1 (CH2 のサンプルホールド)
+;   pin3 = SH2 (CH1 のサンプルホールド。今回は読まない)
+;
+; ピンの参照はすべて in_base からのオフセットで書く（WAIT ... PIN は IN_BASE 相対）。
+; GPIO 番号はここには現れない。
+;
+; 1 フレーム = φ1 の 32 クロック。CH1 の D0 を起点にすると中身はこうなっている。
+;
+;    0..9  CH1 D0..D9 (仮数)
+;   10..12 CH1 S0..S2 (指数)   ← 直後に SH2 が立ち下がる
+;   13..15 無効 x3
+;   16..25 CH2 D0..D9
+;   26..28 CH2 S0..S2          ← 直後に SH1 が立ち下がる
+;   29..31 無効 x3
+;
+; つまり SH1 の立ち下がりが CH2 スロットの終端なので、その直後から 32bit 取り込めば
+; 先頭の 16bit が CH1 (= L)、続く 16bit が CH2 (= R) になる。SH2 の立ち下がり直後だと
+; R が先に来てしまうため、同期には SH1 を使う。
+;
+; 毎フレーム SH1 で取り直すので、一度ずれても次のフレームで復帰する。
+
+.program ym3012_capture
+
+.wrap_target
+    wait 1 pin 2            ; SH1 が H になるのを待つ
+    wait 0 pin 2            ; SH1 立ち下がり = CH2 スロットの終端。次は CH1 (L)
+    set  x, 31              ; 1 フレーム = 32bit
+bitloop:
+    wait 0 pin 1            ; φ1 の L 区間へ入る
+    wait 1 pin 1            ; φ1 立ち上がり
+    in   pins, 1            ; SO を 1bit 取り込む（右シフト / 32bit で autopush）
+    jmp  x--, bitloop
+.wrap
+
+% c-sdk {
+
+#include "hardware/clocks.h"
+
+// キャプチャ用ステートマシンを初期化する。
+//
+// GPIO 側の設定（方向・機能）はここでは行わない。本番では YM3012 からの入力、
+// 自己診断ではループバック用ピンと、パッドの持ち主が変わるため呼び出し側に任せる。
+//
+// in_base は SO のピン番号。SO / φ1 / SH1 / SH2 が連続していること。
+static inline void ym3012_capture_program_init(PIO pio, uint sm, uint offset, uint in_base) {
+    pio_sm_config c = ym3012_capture_program_get_default_config(offset);
+
+    sm_config_set_in_pin_base(&c, in_base);
+    sm_config_set_in_pin_count(&c, 4);
+
+    // 右シフト = 先に受け取ったビットが LSB 側へ落ちる。YM3012 は LSB first なので
+    // これで仮数・指数がそのままの並びで入る。autopush の閾値を 32 にして、
+    // 1 フレーム (L 16bit + R 16bit) をちょうど 1 エントリへ詰める。
+    sm_config_set_in_shift(&c, true, true, 32);
+
+    // TX FIFO は使わないので RX 側へ寄せて深さ 8 にする。
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // 分周なし。φ1 は 2MHz、sys_clk は 144MHz なので 1 クロックあたり 72 サイクルある。
+    sm_config_set_clkdiv_int_frac8(&c, 1, 0);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}

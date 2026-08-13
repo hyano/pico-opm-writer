@@ -15,11 +15,13 @@
 /* GPIO マスク */
 #define OPM_MASK_DATA ((uint32_t)0xffu << OPM_PIN_D0)
 #define OPM_MASK_A0   ((uint32_t)1u << OPM_PIN_A0)
+#define OPM_MASK_CS   ((uint32_t)1u << OPM_PIN_CS)
 #define OPM_MASK_WR   ((uint32_t)1u << OPM_PIN_WR)
+#define OPM_MASK_RD   ((uint32_t)1u << OPM_PIN_RD)
 #define OPM_MASK_IC   ((uint32_t)1u << OPM_PIN_IC)
-#define OPM_MASK_LED  ((uint32_t)1u << OPM_PIN_LED)
+#define OPM_MASK_IRQ  ((uint32_t)1u << OPM_PIN_IRQ)
 
-#define OPM_MASK_ALL (OPM_MASK_DATA | OPM_MASK_A0 | OPM_MASK_WR | OPM_MASK_IC | OPM_MASK_LED)
+#define OPM_MASK_ALL (OPM_MASK_DATA | OPM_MASK_A0 | OPM_MASK_CS | OPM_MASK_WR | OPM_MASK_RD | OPM_MASK_IC)
 
 /* φM 生成に使っている PIO / ステートマシン */
 static PIO s_pio;
@@ -33,9 +35,6 @@ static uint32_t s_clock_hz_actual;
 
 /* OPM_T_SETUP_NS 相当のシステムクロックサイクル数 */
 static uint32_t s_setup_cycles;
-
-/* LED のアクティビティ表示用の状態 */
-static bool s_led_state;
 
 /*
  * φM の分周比を算出して PIO を起動する。
@@ -62,24 +61,46 @@ static void opm_clock_start(void) {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-/* データバスと A0 を確定させてから /WR を 1 回叩く（1 バスサイクル） */
+/*
+ * データバスの向きを切り替える。
+ *
+ * 現状は書き込み専用なので常に出力だが、将来 /RD を使ってステータスや
+ * レジスタを読み出すときは、ここを入力へ倒してから /RD を叩くことになる。
+ */
+static void opm_bus_set_dir(bool out) {
+    if (out) {
+        gpio_set_dir_out_masked(OPM_MASK_DATA);
+    } else {
+        gpio_set_dir_in_masked(OPM_MASK_DATA);
+    }
+}
+
+/* データバスと A0 を確定させてから /CS と /WR を制御する（1 バスサイクル） */
 static void opm_bus_cycle(bool a0, uint8_t value) {
-    gpio_put_masked(OPM_MASK_DATA | OPM_MASK_A0,
+    /* データ・A0 と同時に /CS を L にする */
+    gpio_put_masked(OPM_MASK_DATA | OPM_MASK_A0 | OPM_MASK_CS,
                     ((uint32_t)value << OPM_PIN_D0) | (a0 ? OPM_MASK_A0 : 0u));
     busy_wait_at_least_cycles(s_setup_cycles); /* t_SETUP */
 
     gpio_clr_mask(OPM_MASK_WR);
     busy_wait_us_32(OPM_T_WR_US);
     gpio_set_mask(OPM_MASK_WR);
+
+    /* /WR を H に戻した後に /CS を H に戻す */
+    gpio_set_mask(OPM_MASK_CS);
 }
 
 void opm_init(void) {
-    /* 出力ピンをまとめて初期化。/WR と /IC は負論理なので H から始める。 */
+    /* 出力ピンをまとめて初期化。/CS・/WR・/RD・/IC は負論理なので H から始める。 */
     gpio_init_mask(OPM_MASK_ALL);
-    gpio_put_masked(OPM_MASK_ALL, OPM_MASK_WR | OPM_MASK_IC);
-    gpio_set_dir_out_masked(OPM_MASK_ALL);
+    gpio_put_masked(OPM_MASK_ALL, OPM_MASK_CS | OPM_MASK_WR | OPM_MASK_RD | OPM_MASK_IC);
+    gpio_set_dir_out_masked(OPM_MASK_ALL & ~OPM_MASK_DATA);
+    opm_bus_set_dir(true); /* データバスは書き込み方向で始める */
 
-    s_led_state = false;
+    /* /IRQ を入力として初期化し、プルアップを有効にする */
+    gpio_init(OPM_PIN_IRQ);
+    gpio_set_dir(OPM_PIN_IRQ, GPIO_IN);
+    gpio_pull_up(OPM_PIN_IRQ);
 
     /* ns 指定のセットアップ時間をサイクル数へ（切り上げ） */
     uint32_t sys_hz = clock_get_hz(clk_sys);
@@ -97,12 +118,9 @@ void opm_write(uint8_t addr, uint8_t data) {
     opm_bus_cycle(false, addr);
     busy_wait_us_32(OPM_T_ADDR_US);
 
-    /* データサイクル。/RD 未接続で BUSY を読めないため固定時間待つ。 */
+    /* データサイクル。BUSY 読み出しは未実装なので固定時間待つ。 */
     opm_bus_cycle(true, data);
     busy_wait_us_32(OPM_T_DATA_US);
-
-    s_led_state = !s_led_state;
-    gpio_put(OPM_PIN_LED, s_led_state);
 }
 
 void opm_reset(void) {
@@ -150,4 +168,8 @@ uint32_t opm_clock_div_int(void) {
 
 uint32_t opm_clock_div_frac(void) {
     return s_div_frac;
+}
+
+bool opm_irq_level(void) {
+    return gpio_get(OPM_PIN_IRQ);
 }
