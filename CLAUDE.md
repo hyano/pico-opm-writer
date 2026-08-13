@@ -6,8 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チップのレジスタを書き込むためのファームウェア。
 
-仕様は [README.md](README.md) に全部書いてある。ファームウェアは
-`pico-opm-writer.c`（行入力 + コマンドパーサ）/ `opm.h` / `opm.c`（バス制御）/ `opm_clock.pio`（φM 生成）の 4 ファイル構成。
+仕様は [README.md](README.md) に全部書いてある。ファームウェアの主要ファイル：
+
+| ファイル | 役割 |
+| --- | --- |
+| `pico-opm-writer.c` | main・コマンドパーサ |
+| `opm.c` / `opm.h` | YM2151 バス制御（GPIO / PIO） |
+| `opm_clock.pio` | φM 生成（PIO） |
+| `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 |
+| `capture.c` / `capture.h` | キャプチャ状態機械 |
+| `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
+| `led.c` / `led.h` | LED 表示 |
+| `stats.c` / `stats.h` | 実行時統計 |
+| `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本構成 |
 
 これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 5 本ある。リファレンスは `docs/` にあり、
 ファイル名は拡張子を落とした `docs/<スクリプト名>.md`。
@@ -163,7 +174,8 @@ GUI でのステップ実行デバッグは VS Code の "Pico Debug (Cortex-Debu
 
 | デバイス | 中身 |
 | --- | --- |
-| `/dev/cu.usbmodem112101` | **ターゲット pico2 自身の USB CDC** = `printf` の出力先 |
+| `/dev/cu.usbmodem112101` | **ターゲット pico2 自身の USB CDC #0** = コマンド / `printf` の出力先 |
+| `/dev/cu.usbmodem112103` | **ターゲット pico2 自身の USB CDC #1** = PCM データ出力（signed 16bit LE ステレオ、サンプリングレート φM/64） |
 | `/dev/cu.usbmodem112202` | PicoProbe 側の CDC-UART ブリッジ（現状の設定では未使用） |
 
 tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c IOSerialBSDClient -l -w 0` の `locationID` と `ioreg -p IOUSB -l -w 0` の `USB Product Name` を突き合わせて引き直す（ターゲットは Product Name `Pico`、プローブは `Debugprobe on Pico _CMSIS_DAP_`）。
@@ -202,6 +214,11 @@ EOF
 
 **ファームウェアの検証**は **増分ビルド → SWD で書き込み → `/dev/cu.usbmodem112101` の出力を確認** の 3 ステップで行う（上記の各節そのまま）。ホスト上で走るファームウェアのテストは存在しない。
 
+**ファームウェア自身が持つ自己診断**：
+- `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示
+- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / DMA overrun 回数 / 禁止コード E=0 の数 / 実測フレームレート）
+- `s 0` — 統計をリセット
+
 **ホスト側スクリプトの検証**は次の 3 本。いずれも実機もロジアナも要らず、全ケース `PASS` で終了コード 0:
 
 ```bash
@@ -211,6 +228,10 @@ EOF
 ./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（30 ケース）
 ./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（9 ケース）
 ```
+
+**ロジックアナライザが無い環境でも実機調査できる**：`tools/opm-writer.py --capture-mode pcm` で
+`test/` の掃引スクリプトをそのまま実行できる（CDC #1 から PCM を直接読む）。ファーム側の DMA リングは
+16KB（62500 フレーム/s で 65.5ms 分）しかないので、取り込み中はホストが読み続ける必要がある。
 
 出力が変わらない機能を触ったときは、**その回だけ判別できる文字列**（`__DATE__` / `__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を出力だけで切り分けられる。2026-08-08 にこの手順で書き込み〜確認まで一巡することを実機で確認済み。
 
