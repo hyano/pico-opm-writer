@@ -27,6 +27,7 @@ SPDX-License-Identifier: MIT
 import argparse
 import collections
 import errno
+import importlib.util
 import os
 import re
 import select
@@ -41,6 +42,25 @@ from pathlib import Path
 
 # pico-opm-writer 自身の USB CDC（PicoProbe 側の CDC-UART ではない）
 SERIAL_DEVICE = "/dev/cu.usbmodem112101"
+
+# PCM を流す 2 本目の CDC（ファーム側の CDC #1）
+PCM_DEVICE = "/dev/cu.usbmodem112103"
+
+# `!capture` の取得経路。la = ロジアナ + sigrok / pcm = ファームの CDC #1
+CAPTURE_MODES = ("la", "pcm")
+DEFAULT_CAPTURE_MODE = "la"
+
+# PCM 1 フレーム（L と R の int16）のバイト数
+PCM_FRAME_BYTES = 4
+
+# `p 0` を送ってから応答が返るまでの上限。ファーム側は 2 秒で打ち切る
+PCM_DRAIN_TIMEOUT_S = 5.0
+
+# `p 0` の応答後、ホスト側に残っている分を拾い切るまでの無音待ち
+PCM_TAIL_QUIET_S = 0.3
+
+# PCM ポートの 1 回の読み単位
+PCM_READ_BYTES = 1 << 16
 
 # デバイスノードが現れるまでの待ち時間（SWD reset 直後は数秒消える）
 SERIAL_WAIT_S = 10.0
@@ -294,6 +314,28 @@ class Serial:
             if chunk:
                 self.buf += chunk
 
+    def read_bytes(self, timeout):
+        """届いているバイト列をそのまま返す。何も来なければ b""。
+
+        PCM ストリームのように行の切れ目が無いデータ用。read_line() とは
+        バッファを共有しないので、同じ fd で混ぜて使わないこと。
+        """
+        if timeout > 0 and not select.select([self.fd], [], [], timeout)[0]:
+            return b""
+        try:
+            return os.read(self.fd, PCM_READ_BYTES)
+        except BlockingIOError:
+            return b""
+
+    def drain_bytes(self, seconds):
+        """指定時間ぶんバイト列を読み捨てる。"""
+        deadline = time.monotonic() + seconds
+        while True:
+            remain = deadline - time.monotonic()
+            if remain <= 0:
+                return
+            self.read_bytes(remain)
+
     def drain(self, seconds):
         """指定時間ぶん読み捨てる（受け取った行を返す）。"""
         deadline = time.monotonic() + seconds
@@ -315,6 +357,9 @@ def reply_timeout(line):
         return REPLY_TIMEOUT_S + int(tokens[1]) / 1000.0
     if cmd in ("r", "c"):
         return REPLY_TIMEOUT_S + 5.0
+    if cmd == "p":
+        # `p 0` はリングの残りを送り切ってから応答する（ファーム側の上限は 2 秒）
+        return REPLY_TIMEOUT_S + PCM_DRAIN_TIMEOUT_S
     return REPLY_TIMEOUT_S
 
 
@@ -361,32 +406,48 @@ def dac2wav_argv(step, args):
 
 def capture_command(step, args):
     """表示用のコマンドライン文字列。"""
+    if args.capture_mode == "pcm":
+        return (f"p 1 → {args.pcm_device} ({step.ms} ms) → {step.output} "
+                f"→ p 0")
     if step.fmt == "bin":
         return shlex.join(sigrok_argv(step, args, to_stdout=False))
     return (shlex.join(sigrok_argv(step, args, to_stdout=True)) + " | " +
             shlex.join(dac2wav_argv(step, args)))
 
 
-def expected_bytes(step, args):
-    """要求どおりキャプチャできた場合に sigrok-cli が吐くバイト数。読めなければ None。
+def pcm_rate(args):
+    """PCM のサンプリングレート [Hz]。YM3012 の出力レートは φM/64。"""
+    return int(round(args.phim / 64.0))
 
-    `-O binary` は 1 サンプル 1 バイトなので samplerate × 時間そのもの。
+
+def capture_byte_rate(args):
+    """キャプチャ経路が 1 秒あたりに吐くバイト数。読めなければ None。
+
+    la  : sigrok-cli の `-O binary` は 1 サンプル 1 バイトなので samplerate そのもの
+    pcm : 1 フレーム 4 バイト（L と R の int16）
     """
-    rate = parse_samplerate(args.samplerate)
+    if args.capture_mode == "pcm":
+        return float(pcm_rate(args) * PCM_FRAME_BYTES)
+    return parse_samplerate(args.samplerate)
+
+
+def expected_bytes(step, args):
+    """要求どおりキャプチャできた場合に届くバイト数。読めなければ None。"""
+    rate = capture_byte_rate(args)
     return int(rate * step.ms / 1000.0) if rate else None
 
 
 def report_output(step, args, captured):
     """キャプチャ長を検査して結果を表示する。エラーなら理由の文字列。
 
-    captured は sigrok-cli が実際に吐いたバイト数。途中で取得が死んでも sigrok-cli は
+    captured は実際に受け取ったバイト数。la 経路では途中で取得が死んでも sigrok-cli は
     終了コード 0 で終わるため、長さを見ないと短い出力を成功と誤認する。
     """
     if not step.output.exists():
         return f"キャプチャファイルが生成されていない: {step.output}"
 
     want = expected_bytes(step, args)
-    rate = parse_samplerate(args.samplerate)
+    rate = capture_byte_rate(args)
     if want is not None and captured < want * CAPTURE_SHORT_RATIO:
         return discard_output(
             step, f"キャプチャが短い: {captured / rate:.3f}s / "
@@ -397,13 +458,118 @@ def report_output(step, args, captured):
     return None
 
 
-def run_capture(step, args):
+def run_capture(step, args, ser):
     """`!capture` を実行する。エラーなら理由の文字列。"""
     print(f"$ {capture_command(step, args)}", flush=True)
     step.output.parent.mkdir(parents=True, exist_ok=True)
+    if args.capture_mode == "pcm":
+        return run_capture_pcm(step, args, ser)
     if step.fmt == "bin":
         return run_capture_raw(step, args)
     return run_capture_pipeline(step, args)
+
+
+def load_dac2wav():
+    """opm-dac2wav.py をモジュールとして読み込む。
+
+    WAV のヘッダと zstd 出力を la 経路と完全に同じ実装で書くために、
+    デコーダの WavSink / open_output をそのまま借りる。
+    """
+    spec = importlib.util.spec_from_file_location("opm_dac2wav", DAC2WAV)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def run_capture_pcm(step, args, ser):
+    """ファームの CDC #1 から PCM を読んで WAV に落とす。
+
+    ロジアナを使わず、YM3012 の取り込みからデコードまでをファーム側で済ませる経路。
+    出力の形式・サンプリングレートは la 経路と同じなので、解析ツールはそのまま使える。
+
+    取り込み中は PCM ポートを止めずに読み続ける必要がある。読まないと 65.5ms 分の
+    DMA リングが溢れて overrun になる。
+    """
+    if step.fmt == "bin":
+        return "--capture-mode pcm では生キャプチャ（.bin）は出力できない"
+
+    try:
+        d2w = load_dac2wav()
+    except Exception as e:                                  # noqa: BLE001
+        return f"{DAC2WAV} を読み込めない: {e}"
+
+    try:
+        pcm = Serial(args.pcm_device, SERIAL_WAIT_S)
+    except RuntimeError as e:
+        return str(e)
+
+    fp = closers = sink = None
+    captured = 0
+    try:
+        # 前回の取りこぼしが残っていることがあるので、開始前に捨てる
+        pcm.drain_bytes(0.2)
+
+        err = send_line(ser, "p 1")
+        if err is not None:
+            return f"p 1 が失敗した: {err}"
+
+        try:
+            fp, closers, _ = d2w.open_output(step.output, args.zstd_level)
+        except OSError as e:
+            send_line(ser, "p 0")
+            return str(e)
+        sink = d2w.WavSink(fp, 2, 2, pcm_rate(args))
+
+        deadline = time.monotonic() + step.ms / 1000.0
+        while True:
+            remain = deadline - time.monotonic()
+            if remain <= 0:
+                break
+            chunk = pcm.read_bytes(min(remain, 0.05))
+            if chunk:
+                sink.writeframes(chunk)
+                captured += len(chunk)
+
+        # p 0 の応答はドレインの完了を待つので、待つ間も PCM を読み続ける
+        print("> p 0", flush=True)
+        ser.write_line("p 0")
+        reply = None
+        drain_end = time.monotonic() + PCM_DRAIN_TIMEOUT_S
+        while time.monotonic() < drain_end:
+            chunk = pcm.read_bytes(0.01)
+            if chunk:
+                sink.writeframes(chunk)
+                captured += len(chunk)
+            line = ser.read_line(time.monotonic() + 0.005)
+            if line is None:
+                continue
+            print(f"< {line}", flush=True)
+            if line.startswith("#"):
+                continue
+            reply = line
+            break
+
+        # 応答の後もホスト側のバッファに残っていることがあるので拾い切る
+        quiet_end = time.monotonic() + PCM_TAIL_QUIET_S
+        while time.monotonic() < quiet_end:
+            chunk = pcm.read_bytes(0.05)
+            if chunk:
+                sink.writeframes(chunk)
+                captured += len(chunk)
+                quiet_end = time.monotonic() + PCM_TAIL_QUIET_S
+
+        if reply is None:
+            return "p 0 の応答がタイムアウトした"
+        if reply != "OK":
+            return reply
+    finally:
+        if sink is not None:
+            sink.close()
+        for c in reversed(closers or []):
+            c.close()
+        pcm.close()
+
+    return report_output(step, args, captured)
 
 
 def run_capture_raw(step, args):
@@ -634,7 +800,7 @@ def execute(steps, args):
                 if args.dry_run:
                     print(f"$ {capture_command(step, args)}", flush=True)
                     continue
-                err = run_capture(step, args)
+                err = run_capture(step, args, ser)
 
             if err is not None:
                 n_error += 1
@@ -673,7 +839,15 @@ def main(argv=None):
                         default=[], metavar="KEY=VALUE",
                         help="@KEY@ の置換値（複数指定可）")
     parser.add_argument("--device", default=SERIAL_DEVICE,
-                        help=f"USB CDC のデバイス（既定 {SERIAL_DEVICE}）")
+                        help=f"コマンド用 USB CDC のデバイス（既定 {SERIAL_DEVICE}）")
+    parser.add_argument("--capture-mode", choices=CAPTURE_MODES,
+                        default=DEFAULT_CAPTURE_MODE,
+                        help="`!capture` の取得経路。la = ロジアナ + sigrok-cli / "
+                             "pcm = ファームの CDC #1 から PCM を読む"
+                             f"（既定 {DEFAULT_CAPTURE_MODE}）")
+    parser.add_argument("--pcm-device", default=PCM_DEVICE,
+                        help="PCM 出力の USB CDC のデバイス"
+                             f"（--capture-mode pcm のとき。既定 {PCM_DEVICE}）")
     parser.add_argument("--samplerate", default=SIGROK_SAMPLERATE,
                         help=f"sigrok-cli の samplerate（既定 {SIGROK_SAMPLERATE}）")
     parser.add_argument("--phim", type=float, default=DEFAULT_PHIM,

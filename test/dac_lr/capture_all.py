@@ -74,6 +74,10 @@ def build_argv(case, out, args):
         argv += ["-D", f"{k}={defines[k]}"]
     if args.device:
         argv += ["--device", args.device]
+    if args.capture_mode:
+        argv += ["--capture-mode", args.capture_mode]
+    if args.pcm_device:
+        argv += ["--pcm-device", args.pcm_device]
     if args.samplerate:
         argv += ["--samplerate", args.samplerate]
     argv += ["--phim", str(args.phim), "--zstd-level", str(args.zstd_level)]
@@ -93,6 +97,11 @@ def main(argv=None):
                         help="1 条件のキャプチャ長 [ms]（既定 500）")
     parser.add_argument("--device", default=None,
                         help="USB CDC のデバイス（既定は opm-writer.py に任せる）")
+    parser.add_argument("--capture-mode", choices=("la", "pcm"), default=None,
+                        help="取得経路（既定は opm-writer.py に任せる）")
+    parser.add_argument("--pcm-device", default=None,
+                        help="PCM 出力の USB CDC のデバイス"
+                             "（既定は opm-writer.py に任せる）")
     parser.add_argument("--samplerate", default=None,
                         help="sigrok-cli の samplerate（既定は opm-writer.py に任せる）")
     parser.add_argument("--phim", type=float, default=4000000.0, metavar="HZ",
