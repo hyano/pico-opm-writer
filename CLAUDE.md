@@ -20,14 +20,12 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `stats.c` / `stats.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本構成 |
 
-これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 5 本ある。リファレンスは `docs/` にあり、
+これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 3 本ある。リファレンスは `docs/` にあり、
 ファイル名は拡張子を落とした `docs/<スクリプト名>.md`。
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
-| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む（`!capture` でロジアナも制御） | [docs/opm-writer.md](docs/opm-writer.md) |
-| `tools/opm-dac2wav.py` | DAC 出力の生ロジックキャプチャを 16bit ステレオ WAV へデコード | [docs/opm-dac2wav.md](docs/opm-dac2wav.md) |
-| `tools/opm-dac-testgen.py` | `opm-dac2wav.py` の回帰テスト（実機不要） | [docs/opm-dac-testgen.md](docs/opm-dac-testgen.md) |
+| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。`!capture` でファーム側の CDC #1 から PCM をキャプチャ | [docs/opm-writer.md](docs/opm-writer.md) |
 | `tools/opm-lfo-period.py` | キャプチャから LFO の更新周期をサンプル数で測る（`--mode` で AM/PM を指定）。出力は TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
@@ -219,18 +217,17 @@ EOF
 - `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / DMA overrun 回数 / 禁止コード E=0 の数 / 実測フレームレート）
 - `s 0` — 統計をリセット
 
-**ホスト側スクリプトの検証**は次の 3 本。いずれも実機もロジアナも要らず、全ケース `PASS` で終了コード 0:
+**ホスト側スクリプトの検証**は次の 4 本。いずれも実機もロジアナも要らず、全ケース `PASS` で終了コード 0:
 
 ```bash
-./tools/opm-dac-testgen.py                 # opm-dac2wav.py の回帰テスト（1 秒）
 ./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
 ./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（30 ケース）
 ./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（9 ケース）
 ```
 
-**ロジックアナライザが無い環境でも実機調査できる**：`tools/opm-writer.py --capture-mode pcm` で
-`test/` の掃引スクリプトをそのまま実行できる（CDC #1 から PCM を直接読む）。ファーム側の DMA リングは
+**実機調査**：`tools/opm-writer.py` は `test/` の掃引スクリプトをそのまま実行できる。
+ファーム側の CDC #1 から PCM を直接読む。ファーム側の DMA リングは
 16KB（62500 フレーム/s で 65.5ms 分）しかないので、取り込み中はホストが読み続ける必要がある。
 
 出力が変わらない機能を触ったときは、**その回だけ判別できる文字列**（`__DATE__` / `__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を出力だけで切り分けられる。2026-08-08 にこの手順で書き込み〜確認まで一巡することを実機で確認済み。

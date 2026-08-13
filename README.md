@@ -277,9 +277,7 @@ bit 13..15 : L 指数 S0..S2   bit 29..31 : R 指数 S0..S2
 値域は **−32768**（m=0, E=7）〜 **+32704**（m=1023, E=7 = 511<<6）。
 正側が +32767 に届かないのは仕様どおりで、正規化してはいけない。
 
-実装は [ym3012.h](ym3012.h) の `ym3012_word_to_pcm()`。ホスト側デコーダ
-[tools/opm-dac2wav.py](tools/opm-dac2wav.py) の `PCM_LUT` と同じ式なので、
-どちらの経路で取っても同じ値になる。
+実装は [ym3012.h](ym3012.h) の `ym3012_word_to_pcm()`。
 
 ### 4.4 DMA リング
 
@@ -728,20 +726,15 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
-| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。行末コメント / `@KEY@` 置換 / `!capture` によるキャプチャに対応。`--capture-mode` でロジアナ経由と CDC #1 の PCM 経由を切り替える | [docs/opm-writer.md](docs/opm-writer.md) |
-| `tools/opm-dac2wav.py` | OPM の DAC 出力 (SO/SH1/SH2) の生ロジックキャプチャを 16bit ステレオ WAV へデコードする | [docs/opm-dac2wav.md](docs/opm-dac2wav.md) |
-| `tools/opm-dac-testgen.py` | `opm-dac2wav.py` の回帰テスト（実機不要） | [docs/opm-dac-testgen.md](docs/opm-dac-testgen.md) |
+| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。行末コメント / `@KEY@` 置換 / `!capture` によるキャプチャに対応。`!capture` はファームの CDC #1 から PCM をキャプチャする | [docs/opm-writer.md](docs/opm-writer.md) |
 | `tools/opm-lfo-period.py` | 実機キャプチャから LFO の更新周期をサンプル数で測る（`--mode am` / `--mode pm`）。結果は 1 ファイル 1 行の TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
-**ロジックアナライザが無くても `test/` の掃引はそのまま実行できる。**
-`tools/opm-writer.py --capture-mode pcm` を使うと、`!capture` の取得経路が
-ファームの CDC #1 から読む PCM に切り替わる。出力の形式（`.wav` / `.wav.zst`）と
-サンプリングレート（φM/64）は変わらないので、シーケンスファイルも解析ツールも
-そのまま使える。掃引スクリプトへは `--capture-mode` をそのまま渡せる。
+**キャプチャはファームの CDC #1 から PCM を直接読むので、ロジックアナライザは要らない。**
+`test/` の掃引スクリプトはそのまま実行できる。
 
 ```bash
-./test/dac_lr/capture_all.py --capture-mode pcm --analyze
+./test/dac_lr/capture_all.py --analyze
 ```
 
 `test/` 以下は、これらを使った実機調査の一次データ生成環境。掃引スクリプトと測定条件は
@@ -762,7 +755,6 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 
    | コマンド | 対象 | 所要 |
    | --- | --- | --- |
-   | `./tools/opm-dac-testgen.py` | DAC デコーダ (`opm-dac2wav.py`) | 1 秒 |
    | `./tools/opm-lfo-period-testgen.py` | LFO 周期解析 (`opm-lfo-period.py`) | 25 秒 |
    | `./test/dac_lr/lr_relation.py --self-test` | L/R 判定器 | 1 秒 |
    | `./test/lfo_noise/analyze_lfo.py --self-test` | 段ごとの LFO 値と値列の突き合わせ | 10 秒 |
@@ -820,7 +812,7 @@ w 08 00
 
 7. **L/R の確認**: `w 20 47`（L のみ）で鳴らして取ったキャプチャの R が全サンプル
    厳密に 0、`w 20 87`（R のみ）で L が全サンプル厳密に 0 になることを確認する。
-   逆になっていたら L/R が入れ替わっている。`test/dac_lr/capture_all.py --capture-mode pcm
+   逆になっていたら L/R が入れ替わっている。`test/dac_lr/capture_all.py
    --analyze` がこれを含めた判定を一通り行う。
 
 ファームウェア自体のホスト上での自動テストは無い。検証は

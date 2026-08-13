@@ -6,18 +6,15 @@ pico-opm-writer にシーケンスファイルを流し込むホスト側スク�
 - `#` 以降を除去する。ファームは行頭 `#` の行しかコメントと見なさないので、
   行末コメントを含むシーケンスはこのスクリプト経由でしか流せない
 - `@KEY@` を -D KEY=VALUE で置換する
-- `!capture <ms>` で sigrok-cli によるロジックアナライザのキャプチャを行う
+- `!capture <ms>` でファームの CDC #1 から PCM をキャプチャし WAV へ変換する
 
 ## キャプチャの出力形式は拡張子で決まる
 
-    out.bin       sigrok-cli の生キャプチャをそのまま保存する（8MB/s で膨れる）
-    out.wav       sigrok-cli | opm-dac2wav.py をパイプで繋いで WAV を書く
+    out.wav       ファームの CDC #1 から読んだ PCM を WAV に書く
     out.wav.zst   同上。WAV を zstd で最大圧縮して書く
 
-`.wav` / `.wav.zst` では生キャプチャも中間の WAV も**ディスクに落とさない**。
-10 秒のキャプチャが 80MB の .bin + 2.5MB の .wav ではなく数百 KB の .wav.zst だけになる。
-デコードがその場で走るので、`--phim` などを間違えると取り直しになる点だけ注意する
-（デバッグしたいときは `.bin` でキャプチャする）。
+この 2 つ以外の拡張子は受け付けない。WAV に書くサンプリングレートは φM/64 なので、
+`--phim` は実機の φM と合わせること（ずれると時間軸のずれた WAV が黙って出来上がる）。
 
 外部ライブラリは使わない（標準ライブラリのみ）。
 
@@ -25,18 +22,20 @@ SPDX-License-Identifier: MIT
 """
 
 import argparse
-import collections
 import errno
-import importlib.util
 import os
 import re
 import select
-import shlex
-import subprocess
+import struct
 import sys
 import termios
 import time
 from pathlib import Path
+
+try:                                    # Python 3.14+ (PEP 784)
+    from compression.zstd import CompressionParameter, ZstdFile
+except ImportError:                     # 3.13 以前は zstd 出力を諦める
+    ZstdFile = None
 
 # ---- 設定 ---------------------------------------------------------------
 
@@ -45,10 +44,6 @@ SERIAL_DEVICE = "/dev/cu.usbmodem112101"
 
 # PCM を流す 2 本目の CDC（ファーム側の CDC #1）
 PCM_DEVICE = "/dev/cu.usbmodem112103"
-
-# `!capture` の取得経路。la = ロジアナ + sigrok / pcm = ファームの CDC #1
-CAPTURE_MODES = ("la", "pcm")
-DEFAULT_CAPTURE_MODE = "la"
 
 # PCM 1 フレーム（L と R の int16）のバイト数
 PCM_FRAME_BYTES = 4
@@ -71,49 +66,19 @@ REPLY_TIMEOUT_S = 5.0
 # 接続直後の起動バナーを読み捨てる時間
 BANNER_DRAIN_S = 1.0
 
-# sigrok-cli の samplerate
-SIGROK_SAMPLERATE = "8m"
-
-# sigrok-cli のコマンドライン。{samplerate} / {time_ms} が実行時に埋まる。
-# `-o` を付けなければ標準出力へ書く（sigrok-cli(1) の --output-file）
-SIGROK_ARGV = [
-    "sigrok-cli",
-    "-d", "fx2lafw",
-    "--config", "samplerate={samplerate}",
-    "-O", "binary",
-    "--time={time_ms}",
-]
-
-# ファイルへ落とすときだけ足す。{output} が実行時に埋まる
-SIGROK_OUTPUT_ARGV = ["-o", "{output}"]
-
-# sigrok-cli のプロセスを打ち切るまでのマージン（キャプチャ時間に加算）
-SIGROK_TIMEOUT_MARGIN_S = 30.0
-
-# パイプ経路のマージン。キャプチャ後にデコードと zstd の最終フラッシュが少し残る
-PIPELINE_TIMEOUT_MARGIN_S = 120.0
-
-# sigrok-cli の出力をデコーダへ中継するときの読み単位
-PUMP_READ_BYTES = 1 << 20
-
-# デコーダが遅れたときに親が抱えるバックログの上限。超えたら失敗にする
-PUMP_BACKLOG_MAX = 256 << 20
-
 # 届いたキャプチャが要求のこの割合を下回ったら失敗扱いにする
 CAPTURE_SHORT_RATIO = 0.99
 
-# パイプで繋ぐデコーダ。自分と同じディレクトリに置かれている前提
-DAC2WAV = Path(__file__).resolve().parent / "opm-dac2wav.py"
-
-# デコーダへ渡す既定値
+# WAV へ書く既定値
 DEFAULT_PHIM = 4000000.0
 DEFAULT_ZSTD_LEVEL = 22
 
 # 出力の拡張子 → キャプチャの形式。長い方から見る
 CAPTURE_SUFFIXES = (".wav.zst", ".wav")
 
-# sigrok の samplerate 表記の接尾辞
-SAMPLERATE_SUFFIX = {"k": 1e3, "m": 1e6, "g": 1e9}
+# WavSink がヘッダのサイズ欄を確定させるために溜めておける PCM の上限 [byte]。
+# 64MiB = 62500Hz / 16bit / stereo で約 17 分ぶん。
+WAV_BUFFER_MAX = 64 << 20
 
 # ------------------------------------------------------------------------
 
@@ -131,7 +96,103 @@ class Step:
         self.text = text
         self.ms = ms
         self.output = output
-        self.fmt = fmt      # capture のときの出力形式（"bin" / "wav" / "wav.zst"）
+        self.fmt = fmt      # capture のときの出力形式（"wav" / "wav.zst"）
+
+
+# ---- WAV 出力 -----------------------------------------------------------
+
+class WavSink:
+    """16bit PCM の WAV を書き出す。`wave` の代わりに使う最小限の実装。
+
+    `wave` はヘッダのサイズ欄を close() 時に書き戻すためシーカブルな出力を要求するが、
+    こちらはパイプや zstd ストリームにも書けるようにする必要がある。そのため PCM を
+    WAV_BUFFER_MAX まではメモリに溜め、close() でサイズ欄を確定させてから一気に書く。
+    溜めきれなくなったらサイズ欄を 0xFFFFFFFF にしたヘッダを先に吐いて素通しへ切り替え、
+    シーク可能な出力ならそのヘッダを close() で書き戻す。
+
+    ヘッダのバイト並びは `wave` が出すものと同じ（44 バイト、RIFF/fmt /data）。
+    """
+
+    def __init__(self, fp, nchannels, sampwidth, framerate,
+                 buffer_max=WAV_BUFFER_MAX):
+        self.fp = fp
+        self.nchannels = nchannels
+        self.sampwidth = sampwidth
+        self.framerate = framerate
+        self.buffer_max = buffer_max
+        self.chunks = []        # まだ書き出していない PCM（素通しに入る前だけ使う）
+        self.nbytes = 0
+        self.streaming = False  # ヘッダを先に吐いてしまったか
+        self.header_at = None   # 書き戻すためのヘッダ位置。シーク不可なら None
+
+    def _header(self, datalength):
+        """44 バイトのヘッダ。datalength=None ならサイズ欄を不定 (0xFFFFFFFF) にする。"""
+        if datalength is None:
+            riff = data = 0xFFFFFFFF
+        else:
+            riff, data = 36 + datalength, datalength
+        return struct.pack("<4sL4s4sLHHLLHH4sL",
+                           b"RIFF", riff, b"WAVE",
+                           b"fmt ", 16, 1, self.nchannels, self.framerate,
+                           self.nchannels * self.framerate * self.sampwidth,
+                           self.nchannels * self.sampwidth, self.sampwidth * 8,
+                           b"data", data)
+
+    def writeframes(self, data):
+        self.nbytes += len(data)
+        if self.streaming:
+            self.fp.write(data)
+            return
+        self.chunks.append(data)
+        if self.nbytes > self.buffer_max:
+            self._start_streaming()
+
+    def _start_streaming(self):
+        try:
+            self.header_at = self.fp.tell() if self.fp.seekable() else None
+        except (AttributeError, OSError):
+            self.header_at = None
+        self._flush(None)
+        self.streaming = True
+        if self.header_at is None:
+            print(f"! WAV が {self.buffer_max} バイトを超えたので、ヘッダのサイズ欄を "
+                  "0xFFFFFFFF にして流し書きする（長さ不定の WAV になる）",
+                  file=sys.stderr)
+
+    def _flush(self, datalength):
+        self.fp.write(self._header(datalength))
+        for chunk in self.chunks:
+            self.fp.write(chunk)
+        self.chunks = []
+
+    def close(self):
+        if not self.streaming:
+            self._flush(self.nbytes)
+        elif self.header_at is not None:
+            # 素通しに入ったがシークできる出力だった。サイズ欄を実測値で上書きする
+            self.fp.seek(self.header_at)
+            self.fp.write(self._header(self.nbytes))
+
+
+def open_output(path, level):
+    """出力を開いて (fp, closers) を返す。`.zst` なら zstd で圧縮する。
+
+    `closers` は呼び出し側が逆順に閉じる。
+    """
+    compress = str(path).endswith(".zst")
+    if compress and ZstdFile is None:
+        # ファイルを作る前に弾く（空の出力を残さない）
+        raise OSError("zstd 圧縮の出力には Python 3.14 以降が必要")
+
+    raw = open(path, "wb")
+    closers = [raw]
+
+    fp = raw
+    if compress:
+        fp = ZstdFile(raw, "wb",
+                      options={CompressionParameter.compression_level: level})
+        closers.append(fp)
+    return fp, closers
 
 
 def substitute(text, defines, undefined):
@@ -148,38 +209,24 @@ def substitute(text, defines, undefined):
 
 
 def capture_kind(base):
-    """出力名の拡張子からキャプチャの形式を決める。不明な拡張子は生キャプチャ。"""
+    """出力名の拡張子からキャプチャの形式を決める。.wav / .wav.zst のみ対応。"""
     name = base.name.lower()
     for suffix in CAPTURE_SUFFIXES:
         if name.endswith(suffix):
             return suffix[1:]       # "wav.zst" / "wav"
-    return "bin"
+    return None
 
 
 def capture_path(base, index):
-    """1 個目は指定名のまま、2 個目以降は拡張子の手前に -N を付ける。"""
+    """1 個目は指定名のまま、2 個目以降は拡張子の手前に -N を付ける。
+
+    呼ぶ前に capture_kind() で拡張子を検証しておくこと。
+    """
     if index == 1:
         return base
-    kind = capture_kind(base)
     # `.wav.zst` は 1 つの拡張子として扱う（`out.wav-2.zst` にならないように）
-    n = len(base.suffix) if kind == "bin" else len(kind) + 1
-    stem, tail = (base.name[:-n], base.name[-n:]) if n else (base.name, "")
-    return base.with_name(f"{stem}-{index}{tail}")
-
-
-def parse_samplerate(text):
-    """sigrok の samplerate 表記（`8m` / `16MHz` / `8000000`）を Hz にする。
-
-    デコーダの `--la-rate` へ渡すためだけに使う。読めなければ None（既定値に任せる）。
-    """
-    s = text.strip().lower().removesuffix("hz").strip()
-    mul = 1.0
-    if s and s[-1] in SAMPLERATE_SUFFIX:
-        mul, s = SAMPLERATE_SUFFIX[s[-1]], s[:-1].strip()
-    try:
-        return float(s) * mul
-    except ValueError:
-        return None
+    n = len(capture_kind(base)) + 1
+    return base.with_name(f"{base.name[:-n]}-{index}{base.name[-n:]}")
 
 
 def preprocess(path, defines, capture_base):
@@ -382,37 +429,10 @@ def send_line(ser, line):
         return reply
 
 
-def sigrok_argv(step, args, to_stdout):
-    """sigrok-cli のコマンドライン。to_stdout なら `-o` を付けない。"""
-    argv = list(SIGROK_ARGV)
-    if not to_stdout:
-        argv += SIGROK_OUTPUT_ARGV
-    return [a.format(samplerate=args.samplerate, time_ms=step.ms,
-                     output=str(step.output)) for a in argv]
-
-
-def dac2wav_argv(step, args):
-    """パイプで受ける opm-dac2wav.py のコマンドライン。"""
-    argv = [sys.executable, str(DAC2WAV), "-", str(step.output),
-            "--phim", repr(args.phim),
-            "--zstd-level", str(args.zstd_level)]
-    la_rate = parse_samplerate(args.samplerate)
-    if la_rate:
-        argv += ["--la-rate", repr(la_rate)]
-    # .bin が残らないので、デコーダの統計が唯一の健全性チェックになる
-    argv.append("-v")
-    return argv
-
-
 def capture_command(step, args):
     """表示用のコマンドライン文字列。"""
-    if args.capture_mode == "pcm":
-        return (f"p 1 → {args.pcm_device} ({step.ms} ms) → {step.output} "
-                f"→ p 0")
-    if step.fmt == "bin":
-        return shlex.join(sigrok_argv(step, args, to_stdout=False))
-    return (shlex.join(sigrok_argv(step, args, to_stdout=True)) + " | " +
-            shlex.join(dac2wav_argv(step, args)))
+    return (f"p 1 → {args.pcm_device} ({step.ms} ms) → {step.output} "
+            f"→ p 0")
 
 
 def pcm_rate(args):
@@ -421,18 +441,12 @@ def pcm_rate(args):
 
 
 def capture_byte_rate(args):
-    """キャプチャ経路が 1 秒あたりに吐くバイト数。読めなければ None。
-
-    la  : sigrok-cli の `-O binary` は 1 サンプル 1 バイトなので samplerate そのもの
-    pcm : 1 フレーム 4 バイト（L と R の int16）
-    """
-    if args.capture_mode == "pcm":
-        return float(pcm_rate(args) * PCM_FRAME_BYTES)
-    return parse_samplerate(args.samplerate)
+    """キャプチャ経路が 1 秒あたりに吐くバイト数。PCM は 1 フレーム 4 バイト（L と R の int16）。"""
+    return float(pcm_rate(args) * PCM_FRAME_BYTES)
 
 
 def expected_bytes(step, args):
-    """要求どおりキャプチャできた場合に届くバイト数。読めなければ None。"""
+    """要求どおりキャプチャできた場合に届くバイト数。φM が 0 なら None。"""
     rate = capture_byte_rate(args)
     return int(rate * step.ms / 1000.0) if rate else None
 
@@ -440,8 +454,8 @@ def expected_bytes(step, args):
 def report_output(step, args, captured):
     """キャプチャ長を検査して結果を表示する。エラーなら理由の文字列。
 
-    captured は実際に受け取ったバイト数。la 経路では途中で取得が死んでも sigrok-cli は
-    終了コード 0 で終わるため、長さを見ないと短い出力を成功と誤認する。
+    captured は実際に受け取ったバイト数。ホストが PCM を読み落としても `p 0` の応答は
+    `OK` で返るため、長さを見ないと短い出力を成功と誤認する。
     """
     if not step.output.exists():
         return f"キャプチャファイルが生成されていない: {step.output}"
@@ -459,44 +473,14 @@ def report_output(step, args, captured):
 
 
 def run_capture(step, args, ser):
-    """`!capture` を実行する。エラーなら理由の文字列。"""
-    print(f"$ {capture_command(step, args)}", flush=True)
-    step.output.parent.mkdir(parents=True, exist_ok=True)
-    if args.capture_mode == "pcm":
-        return run_capture_pcm(step, args, ser)
-    if step.fmt == "bin":
-        return run_capture_raw(step, args)
-    return run_capture_pipeline(step, args)
-
-
-def load_dac2wav():
-    """opm-dac2wav.py をモジュールとして読み込む。
-
-    WAV のヘッダと zstd 出力を la 経路と完全に同じ実装で書くために、
-    デコーダの WavSink / open_output をそのまま借りる。
-    """
-    spec = importlib.util.spec_from_file_location("opm_dac2wav", DAC2WAV)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def run_capture_pcm(step, args, ser):
     """ファームの CDC #1 から PCM を読んで WAV に落とす。
 
-    ロジアナを使わず、YM3012 の取り込みからデコードまでをファーム側で済ませる経路。
-    出力の形式・サンプリングレートは la 経路と同じなので、解析ツールはそのまま使える。
-
+    YM3012 の取り込みからデコードまでをファーム側で済ませる経路。
     取り込み中は PCM ポートを止めずに読み続ける必要がある。読まないと 65.5ms 分の
     DMA リングが溢れて overrun になる。
     """
-    if step.fmt == "bin":
-        return "--capture-mode pcm では生キャプチャ（.bin）は出力できない"
-
-    try:
-        d2w = load_dac2wav()
-    except Exception as e:                                  # noqa: BLE001
-        return f"{DAC2WAV} を読み込めない: {e}"
+    print(f"$ {capture_command(step, args)}", flush=True)
+    step.output.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         pcm = Serial(args.pcm_device, SERIAL_WAIT_S)
@@ -514,11 +498,11 @@ def run_capture_pcm(step, args, ser):
             return f"p 1 が失敗した: {err}"
 
         try:
-            fp, closers, _ = d2w.open_output(step.output, args.zstd_level)
+            fp, closers = open_output(step.output, args.zstd_level)
         except OSError as e:
             send_line(ser, "p 0")
             return str(e)
-        sink = d2w.WavSink(fp, 2, 2, pcm_rate(args))
+        sink = WavSink(fp, 2, 2, pcm_rate(args))
 
         deadline = time.monotonic() + step.ms / 1000.0
         while True:
@@ -572,208 +556,12 @@ def run_capture_pcm(step, args, ser):
     return report_output(step, args, captured)
 
 
-def run_capture_raw(step, args):
-    """sigrok-cli を起動し、生キャプチャをファイルへ落とす。"""
-    argv = sigrok_argv(step, args, to_stdout=False)
-    timeout = step.ms / 1000.0 + SIGROK_TIMEOUT_MARGIN_S
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except FileNotFoundError:
-        return f"{argv[0]} が見つからない"
-    except subprocess.TimeoutExpired:
-        return f"sigrok-cli が {timeout:.0f} 秒で終わらなかった"
-
-    for stream in (proc.stdout, proc.stderr):
-        for out in stream.splitlines():
-            print(f"| {out}", flush=True)
-
-    if proc.returncode != 0:
-        return f"sigrok-cli が終了コード {proc.returncode} で失敗した"
-    size = step.output.stat().st_size if step.output.exists() else 0
-    return report_output(step, args, size)
-
-
-def run_capture_pipeline(step, args):
-    """sigrok-cli → 親 → opm-dac2wav.py を組み、キャプチャと変換を同時に走らせる。
-
-    生キャプチャは 8MB/s で膨れるのでディスクへは落とさない。書くのは最終出力だけ。
-    **両者を直結せず、データは親が中継する**（pump_pipeline のコメントを参照）。
-    """
-    sig_argv = sigrok_argv(step, args, to_stdout=True)
-    dec_argv = dac2wav_argv(step, args)
-    timeout = step.ms / 1000.0 + PIPELINE_TIMEOUT_MARGIN_S
-
-    try:
-        sig = subprocess.Popen(sig_argv, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-    except FileNotFoundError:
-        return f"{sig_argv[0]} が見つからない"
-
-    try:
-        dec = subprocess.Popen(dec_argv, stdin=subprocess.PIPE,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    except OSError as e:
-        sig.stdout.close()
-        sig.kill()
-        sig.wait()
-        return f"{DAC2WAV.name} を起動できない: {e}"
-
-    try:
-        ok, captured, overflow = pump_pipeline(sig, dec, timeout)
-    finally:
-        for fp in (sig.stdout, dec.stdin):
-            try:
-                fp.close()
-            except OSError:
-                pass
-
-    if overflow:
-        for proc in (dec, sig):
-            proc.kill()
-            proc.wait()
-        return discard_output(
-            step, f"デコーダが追いつかず、未処理データが {PUMP_BACKLOG_MAX} バイトを超えた")
-    if not ok:
-        for proc in (dec, sig):
-            proc.kill()
-            proc.wait()
-        return discard_output(step, f"キャプチャが {timeout:.0f} 秒で終わらなかった")
-
-    # デコーダを先に見る（デコーダが落ちると sigrok は EPIPE で二次的に失敗するので、
-    # そちらのコードを出しても原因が分からない）
-    if dec.returncode != 0:
-        return discard_output(
-            step, f"{DAC2WAV.name} が終了コード {dec.returncode} で失敗した")
-    if sig.returncode != 0:
-        return discard_output(
-            step, f"sigrok-cli が終了コード {sig.returncode} で失敗した")
-    return report_output(step, args, captured)
-
-
 def discard_output(step, err):
     """失敗した回の出力を消す。長さの足りない WAV がデータセットに混ざる方が厄介。"""
     if step.output.exists():
         step.output.unlink()
         print(f"* 失敗したので {step.output} は消した", flush=True)
     return err
-
-
-def echo_stderr(fds, fd):
-    """子プロセスの stderr を 1 回読み、行が揃うたびに `| ` 付きで出す。
-
-    EOF に達したらその fd を fds から外す（= そのプロセスは終了間際）。
-    """
-    fp, buf = fds[fd]
-    try:
-        chunk = os.read(fd, 4096)
-    except BlockingIOError:
-        return
-    if not chunk:
-        if buf:
-            print(f"| {buf.decode('utf-8', 'replace')}", flush=True)
-        fp.close()
-        del fds[fd]
-        return
-    buf += chunk
-    while True:
-        nl = buf.find(b"\n")
-        if nl < 0:
-            break
-        line = bytes(buf[:nl]).decode("utf-8", "replace").rstrip("\r")
-        del buf[:nl + 1]
-        print(f"| {line}", flush=True)
-
-
-def pump_pipeline(sig, dec, timeout):
-    """sigrok の出力をデコーダへ中継しつつ、両者の stderr を流して終了を待つ。
-
-    **sigrok とデコーダを直結してはいけない。** デコーダが 1 チャンクを処理している間
-    パイプは読まれず、OS のパイプ容量（64KiB = 8MB/s で 8ms ぶん）を超えると
-    sigrok-cli の write が待たされる。その間 sigrok-cli は libusb の転送を回せないので
-    ロジアナ側の FIFO が溢れ、取得が途中で死ぬ。しかも sigrok-cli は終了コード 0 で
-    終わるため、短いキャプチャが黙って通ってしまう。
-
-    親はキャプチャ中ほかに何もしていないので、ここで中継役に回る。デコーダが一時的に
-    遅れたぶんは RAM に抱え、sigrok 側は決して待たせない。
-
-    戻り値は (時間内に終わったか, デコーダへ渡したバイト数, バックログが溢れたか)。
-    """
-    data_fd = sig.stdout.fileno()
-    sink_fd = dec.stdin.fileno()
-    os.set_blocking(data_fd, False)
-    os.set_blocking(sink_fd, False)
-
-    fds = {proc.stderr.fileno(): (proc.stderr, bytearray()) for proc in (sig, dec)}
-    backlog = collections.deque()   # まだデコーダへ渡していない memoryview の列
-    pending = 0                     # backlog の合計バイト数
-    forwarded = 0
-    data_open = True                # sigrok の出力がまだ続くか
-    sink_open = True                # デコーダの stdin がまだ開いているか
-    deadline = time.monotonic() + timeout
-
-    while fds or data_open or pending:
-        remain = deadline - time.monotonic()
-        if remain <= 0:
-            return False, forwarded, False
-
-        rlist = list(fds)
-        # バックログが上限に達したら読むのを止める（そこで初めて sigrok を待たせる）
-        if data_open and pending < PUMP_BACKLOG_MAX:
-            rlist.append(data_fd)
-        wlist = [sink_fd] if sink_open and pending else []
-        ready_r, ready_w, _ = select.select(rlist, wlist, [], remain)
-        if not ready_r and not ready_w:
-            return False, forwarded, False
-
-        if data_fd in ready_r:
-            try:
-                chunk = os.read(data_fd, PUMP_READ_BYTES)
-            except BlockingIOError:
-                chunk = None            # まだ来ていないだけ
-            if chunk:
-                backlog.append(memoryview(chunk))
-                pending += len(chunk)
-            elif chunk is not None:     # b"" = sigrok が出力を閉じた
-                data_open = False
-
-        for fd in list(ready_r):
-            if fd in fds:
-                echo_stderr(fds, fd)
-
-        if sink_fd in ready_w and backlog:
-            head = backlog[0]
-            try:
-                n = os.write(sink_fd, head)
-            except BlockingIOError:
-                n = 0
-            except OSError:
-                # デコーダが落ちた。読み口も閉じて sigrok を EPIPE で終わらせる
-                backlog.clear()
-                pending = 0
-                sink_open = False
-                data_open = False
-                sig.stdout.close()
-                continue
-            if n:
-                pending -= n
-                forwarded += n
-                backlog[0] = head[n:]
-                if not len(backlog[0]):
-                    backlog.popleft()
-
-        if sink_open and not data_open and not pending:
-            dec.stdin.close()       # これがデコーダへの EOF になる
-            sink_open = False
-
-        if pending >= PUMP_BACKLOG_MAX:
-            return False, forwarded, True
-
-    for proc in (sig, dec):
-        try:
-            proc.wait(timeout=max(1.0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            return False, forwarded, False
-    return True, forwarded, False
 
 
 def execute(steps, args):
@@ -833,36 +621,32 @@ def main(argv=None):
         description="pico-opm-writer にシーケンスファイルを流し込む")
     parser.add_argument("input", type=Path, help="入力シーケンスファイル")
     parser.add_argument("capture", type=Path,
-                        help="キャプチャの出力ファイル名。拡張子で形式が決まる"
-                             "（.wav / .wav.zst はパイプで WAV へ変換、他は生キャプチャ）")
+                        help="キャプチャの出力ファイル名。拡張子で形式が決まる（.wav / .wav.zst）")
     parser.add_argument("-D", "--define", type=parse_define, action="append",
                         default=[], metavar="KEY=VALUE",
                         help="@KEY@ の置換値（複数指定可）")
     parser.add_argument("--device", default=SERIAL_DEVICE,
                         help=f"コマンド用 USB CDC のデバイス（既定 {SERIAL_DEVICE}）")
-    parser.add_argument("--capture-mode", choices=CAPTURE_MODES,
-                        default=DEFAULT_CAPTURE_MODE,
-                        help="`!capture` の取得経路。la = ロジアナ + sigrok-cli / "
-                             "pcm = ファームの CDC #1 から PCM を読む"
-                             f"（既定 {DEFAULT_CAPTURE_MODE}）")
     parser.add_argument("--pcm-device", default=PCM_DEVICE,
-                        help="PCM 出力の USB CDC のデバイス"
-                             f"（--capture-mode pcm のとき。既定 {PCM_DEVICE}）")
-    parser.add_argument("--samplerate", default=SIGROK_SAMPLERATE,
-                        help=f"sigrok-cli の samplerate（既定 {SIGROK_SAMPLERATE}）")
+                        help=f"PCM 出力の USB CDC のデバイス（既定 {PCM_DEVICE}）")
     parser.add_argument("--phim", type=float, default=DEFAULT_PHIM,
-                        help="OPM の φM [Hz]（.wav / .wav.zst のとき"
-                             f"デコーダへ渡す。既定 {DEFAULT_PHIM:g}）")
+                        help=f"OPM の φM [Hz]（既定 {DEFAULT_PHIM:g}）")
     parser.add_argument("--zstd-level", type=int, default=DEFAULT_ZSTD_LEVEL,
                         metavar="N",
                         help=f".wav.zst の圧縮レベル（既定 {DEFAULT_ZSTD_LEVEL} = 最大）")
     parser.add_argument("-n", "--dry-run", action="store_true",
-                        help="シリアルも sigrok も触らず、実行内容だけ表示する")
+                        help="シリアルに触らず、実行内容だけ表示する")
     parser.add_argument("--stop-on-error", action="store_true",
                         help="エラーが出た時点で中断する（既定は警告して続行）")
     args = parser.parse_args(argv)
 
     defines = dict(args.define)
+
+    # 拡張子は capture_path() が使うので、シーケンスを読む前に検証する
+    if capture_kind(args.capture) is None:
+        print(f"! キャプチャの出力名が .wav でも .wav.zst でもない: {args.capture}",
+              file=sys.stderr)
+        return 1
 
     try:
         steps, errors = preprocess(args.input, defines, args.capture)
@@ -873,11 +657,6 @@ def main(argv=None):
     if errors:
         for e in errors:
             print(f"! {e}", file=sys.stderr)
-        return 1
-
-    if any(s.kind == "capture" and s.fmt != "bin" for s in steps) \
-            and not DAC2WAV.exists():
-        print(f"! デコーダが見つからない: {DAC2WAV}", file=sys.stderr)
         return 1
 
     try:

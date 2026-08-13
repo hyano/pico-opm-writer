@@ -2,7 +2,7 @@
 """
 YM2151 の DAC 出力 2 スロット (CH1 / CH2) の関係を調べるキャプチャ一式。
 
-`opm_lr_seq.txt` を `tools/opm-writer.py` に流し込み、`!capture` でロジアナを回して
+`opm_lr_seq.txt` を `tools/opm-writer.py` に流し込み、`!capture` でファーム側の PCM をキャプチャして
 `wav/` に `.wav.zst` を溜める。LFO は使わず、鳴らすオペレータの組み合わせと RL だけを
 振る。1 条件 0.5 秒、全 16 条件で 1 分ほど。
 
@@ -74,12 +74,8 @@ def build_argv(case, out, args):
         argv += ["-D", f"{k}={defines[k]}"]
     if args.device:
         argv += ["--device", args.device]
-    if args.capture_mode:
-        argv += ["--capture-mode", args.capture_mode]
     if args.pcm_device:
         argv += ["--pcm-device", args.pcm_device]
-    if args.samplerate:
-        argv += ["--samplerate", args.samplerate]
     argv += ["--phim", str(args.phim), "--zstd-level", str(args.zstd_level)]
     if args.dry_run:
         argv.append("-n")
@@ -97,13 +93,8 @@ def main(argv=None):
                         help="1 条件のキャプチャ長 [ms]（既定 500）")
     parser.add_argument("--device", default=None,
                         help="USB CDC のデバイス（既定は opm-writer.py に任せる）")
-    parser.add_argument("--capture-mode", choices=("la", "pcm"), default=None,
-                        help="取得経路（既定は opm-writer.py に任せる）")
     parser.add_argument("--pcm-device", default=None,
-                        help="PCM 出力の USB CDC のデバイス"
-                             "（既定は opm-writer.py に任せる）")
-    parser.add_argument("--samplerate", default=None,
-                        help="sigrok-cli の samplerate（既定は opm-writer.py に任せる）")
+                        help="PCM 出力の USB CDC のデバイス（既定は opm-writer.py に任せる）")
     parser.add_argument("--phim", type=float, default=4000000.0, metavar="HZ",
                         help="OPM の φM [Hz]（既定 4000000）")
     parser.add_argument("--zstd-level", type=int, default=22, metavar="N",
@@ -111,7 +102,7 @@ def main(argv=None):
     parser.add_argument("--analyze", action="store_true",
                         help="キャプチャし終えたあと lr_relation.py で判定まで行う")
     parser.add_argument("-n", "--dry-run", action="store_true",
-                        help="実機にもロジアナにも触らず、コマンドラインを表示するだけ")
+                        help="実機に触らず、コマンドラインを表示するだけ")
     args = parser.parse_args(argv)
 
     cases = [c for c in CASES if not args.only or args.only in c[0]]

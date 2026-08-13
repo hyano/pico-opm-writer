@@ -260,7 +260,7 @@ step    = 2**22 / inc                           # 位相 1 段ぶんのサンプ
 - ターゲット: Raspberry Pi Pico 2 + YM2151、φM = 4.000000MHz（`OPM_CLOCK_MODE_4MHZ`）
 - OPM の内部サンプルレート fs = φM / 64 = **62500Hz**
 - ロジアナ: fx2lafw、8MHz サンプリング（`sigrok-cli -O binary`）。CH0=φ1 / CH1=SO / CH2=SH1 / CH3=SH2
-- WAV: 62500Hz / 16bit / stereo（`tools/opm-dac2wav.py`（[docs](../../docs/opm-dac2wav.md)）が生成）
+- WAV: 62500Hz / 16bit / stereo（当時の `tools/opm-dac2wav.py` が生成）
 
 **解析に使うのは L (CH1) だけ。** DAC の CH2 は CH1 の半フレーム後にラッチされるため、
 本ディレクトリの設定（4 オペレータを同条件で鳴らす）では R が L の 2 タップ移動平均
@@ -1641,7 +1641,7 @@ DAC 出力そのものは 1 サンプル（32 φ1）ごとにしか見えない�
 # LFO 波形を変えてキャプチャする（既定は 3 = ノイズ。W を変えるときは出力先も分ける）
 ./capture_lfo.py --w 2 --wav-dir ./wav_w2
 
-# 実行内容の確認だけ（実機にもロジアナにも触らない）
+# 実行内容の確認だけ（実機に触らない）
 ./capture_lfo.py -n --lfrq-start f0 --lfrq-end f3
 
 # キャプチャし終えた wav/ が要求どおりの長さで揃っているかを検査する
@@ -1655,30 +1655,17 @@ DAC 出力そのものは 1 サンプル（32 φ1）ごとにしか見えない�
 ```
 tools/opm-writer.py opm_seq.txt wav/{name}.wav.zst -D ...
   └─ 実機へシーケンスを書き込み、`!capture` で次の経路を組む
-       sigrok-cli -O binary --time=...
-         └─ opm-writer.py が RAM で受けて中継
-              └─ tools/opm-dac2wav.py - wav/{name}.wav.zst
+       ファーム: `p 1` で YM3012 → PCM 変換（PIO + DMA + Core 0）を起動
+         └─ opm-writer.py が USB CDC #1 から PCM を読み続ける
+              └─ 読みながら zstd 圧縮して wav/{name}.wav.zst へ直接書く
 ```
 
-`opm-writer.py` は出力名の拡張子でキャプチャの形式を決める（`.wav.zst` / `.wav` は
-パイプ経由、それ以外は sigrok の生キャプチャをそのまま保存）。詳細は
-[docs/opm-writer.md](../../docs/opm-writer.md) を参照。生キャプチャ (8MB/s、
-`--max-ms 120000` なら 960MB) と中間の WAV (30MB) はパイプの中だけを通り、
-ディスクには落ちない。失敗したらその場で停止して終了コード 1 を返し、
-書きかけの `.wav.zst` は消す。
+出力形式は `.wav.zst` / `.wav` の 2 択で、それ以外の拡張子は扱えない。生キャプチャや
+中間の WAV を経由する段は無く、読んだ PCM がそのまま最終ファイルになる。詳細は
+[docs/opm-writer.md](../../docs/opm-writer.md) を参照。失敗したらその場で停止して
+終了コード 1 を返し、書きかけの `.wav.zst` は消す。
 
-デコードがキャプチャと同時に走るので、`--phim` などを間違えるとその条件は取り直しに
-なる。信号の質を直接見たいときは `.bin` でキャプチャする:
-
-```bash
-# AM 測定
-../../tools/opm-writer.py opm_seq.txt /tmp/foo.bin -D KC=4a -D MUL=04 -D NFRQ=1f \
-  -D LFRQ=a3 -D TIME=1000 -D PMD=00 -D AMD=7f -D AMSE=80 -D APMS=02
-
-# PM 測定
-../../tools/opm-writer.py opm_seq.txt /tmp/foo.bin -D KC=4a -D MUL=04 -D NFRQ=1f \
-  -D LFRQ=a3 -D TIME=1000 -D PMD=ff -D AMD=00 -D AMSE=00 -D APMS=70
-```
+`--phim` を間違えると PCM のサンプリングレート算出がずれるので、その条件は取り直しになる。
 
 ### A.2 リトライ
 
@@ -1693,8 +1680,10 @@ tools/opm-writer.py opm_seq.txt wav/{name}.wav.zst -D ...
   cap 3.2s  zst 75.4KiB
 ```
 
-リトライの対象は `opm-writer.py` のエラー終了だけではない。**キャプチャが途中で死んでも
-sigrok-cli は終了コード 0 を返す**ので、キャプチャできた `.wav.zst` の長さも毎回検査し、要求長の
+リトライの対象は `opm-writer.py` のエラー終了だけではない。ファームの DMA リングは
+16KB（65.5ms 分）しか無いので、キャプチャ中はホストが USB CDC #1 を読み続けないと
+あふれる。**読みが足りなくても `opm-writer.py` はそれだけでは終了コード非 0 にならない**
+ので、キャプチャできた `.wav.zst` の長さも毎回検査し、要求長の
 98% を下回っていたら失敗としてキャプチャし直す（`--check` と同じ判定、[§A.4](#a4-キャプチャできているかの検査)）。この検査には
 Python 3.14 以降が要る（`compression.zstd`）。それより古い環境ではサイズ 0 かどうかだけを
 見るので、短いものは後から `--check` で拾う。
@@ -1723,12 +1712,12 @@ Python 3.14 以降が要る（`compression.zstd`）。それより古い環境�
 
 ### A.4 キャプチャできているかの検査
 
-`--check` は実機にもロジアナにも触らず、`--wav-dir` 以下の `.wav.zst` を走査して
+`--check` は実機に触らず、`--wav-dir` 以下の `.wav.zst` を走査して
 **要求した長さでキャプチャできているか**だけを見る。各ファイルの先頭 44 バイト（WAV ヘッダ）を
 読んで実長を出し、ファイル名の LFRQ から決まる要求長の 98% を下回るものを挙げる。
 短いものが 1 件でもあれば終了コード 1。ファイル名から LFRQ を読めないものと、
 ヘッダのサイズ欄が不定になっている WAV
-（[docs/opm-dac2wav.md](../../docs/opm-dac2wav.md#長い出力ではヘッダのサイズ欄が不定になる)）は
+（[docs/opm-writer.md](../../docs/opm-writer.md)）は
 「検査できず」として飛ばし、末尾に件数を出す。
 
 ```
@@ -1760,12 +1749,11 @@ $ ./capture_lfo.py --check
 | `--retry` | `5` | 1 条件あたりのリトライ回数（[§A.2](#a2-リトライ)）。`0` で無効 |
 | `--retry-wait` | `5` | リトライまでの待ち時間 [秒] |
 | `--device` | opm-writer.py の既定 | USB CDC のデバイス |
-| `--samplerate` | opm-writer.py の既定 (`8m`) | sigrok-cli の samplerate |
 | `--phim` | `4000000` | OPM の φM [Hz]。NTSC 版は `3579545` |
 | `--no-resume` | off | 既存の `.wav.zst` を無視して先頭からやり直す |
 | `--check` | off | キャプチャせずに `--wav-dir` の `.wav.zst` の長さを検査する（[§A.4](#a4-キャプチャできているかの検査)）。短いものがあれば終了コード 1 |
 | `--delete` | off | `--check` で見つかった短い `.wav.zst` を消す。単独では使えない |
-| `-n`, `--dry-run` | off | 実行するコマンドラインを表示するだけ（`opm-writer.py` も `-n` で走らせ、中で組まれるパイプまで表示する） |
+| `-n`, `--dry-run` | off | 実行するコマンドラインを表示するだけ（`opm-writer.py` も `-n` で走らせる） |
 
 モードごとの設定はスクリプト内の `AM` / `PM`（`Mode` オブジェクト）にまとまっている。
 `defines` が固定する `-D` 値（[§B.1](#b1-モードで決まるパラメータ)）で、深さを変えたいときはここを書き換える
@@ -1794,9 +1782,9 @@ $ ./capture_lfo.py --check
 ### A.7 所要時間と容量
 
 既定設定でのキャプチャ時間の合計は **3 時間 25 分**（モード 2 本 × NFRQ 2 値 ×
-LFRQ 256 値 = 1024 条件）。これに 1 条件あたりのオーバヘッド（実機書き込み + sigrok
-起動で約 1.4s、キャプチャ終了後に残るデコードと zstd の尾で数秒）が乗るので、
-**5〜6 時間**程度を見込めばよい。デコードはキャプチャと並行して進む。
+LFRQ 256 値 = 1024 条件）。これに 1 条件あたりのオーバヘッド（実機書き込みで約 1.4s、
+キャプチャ終了後に残る DMA リングの掃き出しと zstd の尾で数秒）が乗るので、
+**5〜6 時間**程度を見込めばよい。圧縮はキャプチャと並行して進む。
 1 モードだけならこの半分（`--mode am` / `--mode pm`）。
 
 なお進捗表示の残り時間は、1 件目だけはオーバヘッドの実測値が無いため既定の 8 秒／件で
@@ -1804,8 +1792,8 @@ LFRQ 256 値 = 1024 条件）。これに 1 条件あたりのオーバヘッド
 
 **ディスクに書くのは `.wav.zst` だけ**（1 ファイル 40KB〜数 MB）。合計はキャプチャ量に
 比例して増えるので 1GB 前後を見込むが、圧縮率が条件によって大きく変わるため要実測。
-生キャプチャ（`--max-ms 120000` で最大 960MB）と中間の WAV（最大 30MB）は
-パイプの中だけを通るので、SSD には 1 バイトも書かれない。
+生キャプチャや中間の WAV は無く、USB CDC #1 から読んだ PCM をその場で圧縮して
+`.wav.zst` へ直接書くだけなので、それ以外の中間ファイルは 1 バイトも書かれない。
 
 `.gitignore` は `*.wav` と `*.bin` を除外しているが、**`.wav.zst` は除外していない**ので
 `wav/` 以下は git の管理対象に入る。手元だけに置きたいときは `.gitignore` に

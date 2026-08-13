@@ -2,21 +2,19 @@
 """
 YM2151 の LFO パラメータを振りながら DAC 出力をキャプチャし、WAV を蓄積するバッチ。
 
-- `opm_seq.txt` を `tools/opm-writer.py` に流し込み、`!capture` でロジアナを回す
-- 出力名を `.wav.zst` にするので、`opm-writer.py` が
-  `sigrok-cli | tools/opm-dac2wav.py` をパイプで繋ぎ、WAV を zstd で最大圧縮して書く
+- `opm_seq.txt` を `tools/opm-writer.py` に流し込み、`!capture` でファーム側の CDC #1 から PCM をキャプチャ
+- 出力名を `.wav.zst` にするので、`opm-writer.py` が WAV を zstd で最大圧縮して書く
 
-**中間ファイルは作らない。** ディスクに落ちるのは数百 KB の `.wav.zst` だけで、
-生キャプチャも中間の WAV もパイプの中しか通らない。
+**中間ファイルは作らない。** ディスクに落ちるのは数百 KB の `.wav.zst` だけ。
 
 測定は **AM 測定 (AMD=7f) と PM 測定 (PMD=7f) の 2 本**。モードを最も外側、次いで
 KC / NFRQ、LFRQ を最内で掃引する。LFRQ は大きい方から回す（周期とキャプチャ時間の
 短い条件から先にファイルが揃う）。既に .wav.zst がある場合は、最初の欠番の 1 つ手前を
 上書きするところから再開する。
 
-失敗した条件はその場でキャプチャし直す（`--retry`）。sigrok-cli はキャプチャが途中で死んでも
-終了コード 0 を返すので、`opm-writer.py` のエラーだけでなく**キャプチャできた .wav.zst が要求より
-短いかどうか**もリトライの判定に使う。使い切ったら中断する。
+失敗した条件はその場でキャプチャし直す（`--retry`）。ホストが CDC #1 を読み落としても
+`opm-writer.py` が必ず異常終了するとは限らないので、そのエラーだけでなく**キャプチャできた
+.wav.zst が要求より短いかどうか**もリトライの判定に使う。使い切ったら中断する。
 
 搬送波 (KC / MUL) は既定では LFRQ ごとに自動で選ぶ。刻みが短い条件ほど短い搬送波が
 要るため（`choose_carrier` の節を参照）。`--kc` / `--mul` を指定すればその値に固定する。
@@ -49,7 +47,6 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 TOOLS_DIR = REPO_ROOT / "tools"
 
 OPM_WRITER = TOOLS_DIR / "opm-writer.py"
-OPM_DAC2WAV = TOOLS_DIR / "opm-dac2wav.py"
 
 # LFO の想定モデル（ymfm 相当）。これ自体が本調査の検証対象なので、
 # キャプチャ長の目安を出すためだけに使う。
@@ -139,7 +136,7 @@ MODES = {m.name: m for m in (AM, PM)}
 
 # --- 出来上がった .wav.zst の検査用 -------------------------------------
 
-# opm-dac2wav.py が吐く WAV ヘッダ。`<4sL4s4sLHHLLHH4sL` の 44 バイト固定
+# opm-writer.py が吐く WAV ヘッダ。`<4sL4s4sLHHLLHH4sL` の 44 バイト固定
 WAV_HEADER = "<4sL4s4sLHHLLHH4sL"
 WAV_HEADER_BYTES = struct.calcsize(WAV_HEADER)
 
@@ -244,9 +241,9 @@ def wav_seconds(path):
 def verify_capture(task):
     """キャプチャできた .wav.zst が使い物になるかを見る。エラーなら理由の文字列。
 
-    キャプチャが途中で死んでも sigrok-cli は終了コード 0 で終わるので、
-    opm-writer.py の終了コードだけでは短いファイルを弾けない。掃引中はここで拾い、
-    リトライに繋げる（--check の事後検査と同じ 98% を閾値にする）。
+    ホストが CDC #1 の読み取りを取りこぼしても opm-writer.py の終了コードだけでは
+    短いファイルを弾けない。掃引中はここで拾い、リトライに繋げる
+    （--check の事後検査と同じ 98% を閾値にする）。
     """
     size = task.zst.stat().st_size if task.zst.exists() else 0
     if size == 0:
@@ -270,7 +267,7 @@ def verify_capture(task):
 def check_wav_dir(args, sample_rate):
     """--wav-dir 以下の .wav.zst が要求どおりの長さでキャプチャできているかを見る。
 
-    キャプチャが途中で死んでも sigrok-cli は終了コード 0 で終わるため、この検査を
+    キャプチャが途中で切れても呼び出し側が気付けないことがあるため、この検査を
     入れる前にキャプチャしたファイルには短いものが混ざっている。キャプチャし直しは --delete で
     消してから同じ掃引をもう一度回す。
     """
@@ -430,7 +427,7 @@ def run(argv, timeout=None, echo_prefix=None):
 def do_capture(task, args):
     """キャプチャ〜WAV 変換〜zstd 圧縮を opm-writer.py に一括でやらせる。
 
-    出力名が `.wav.zst` なので、opm-writer.py 側が sigrok-cli とデコーダをパイプで繋ぐ。
+    出力名が `.wav.zst` なので、opm-writer.py 側がファーム側 PCM を読んで WAV を書く。
     """
     argv = [sys.executable, OPM_WRITER, args.seq, task.zst,
             "-D", f"KC={task.kc:02x}",
@@ -446,14 +443,11 @@ def do_capture(task, args):
         argv += ["-D", f"{key}={val}"]
     if args.device:
         argv += ["--device", args.device]
-    if args.samplerate:
-        argv += ["--samplerate", args.samplerate]
     if args.dry_run:
-        # dry-run でも opm-writer.py は -n で走らせる。中で組まれる
-        # `sigrok-cli | opm-dac2wav.py` の行まで確認できる
+        # dry-run でも opm-writer.py は -n で走らせる
         argv.append("-n")
         return run(argv, timeout=60.0, echo_prefix="$")
-    # opm-writer.py 自身がパイプに「キャプチャ時間 + 120 秒」の制限を掛けるので、
+    # opm-writer.py 自身が CDC 読み取りにタイムアウトを掛けるので、
     # こちらはさらに余裕を持たせる
     return run(argv, timeout=task.time_ms / 1000.0 + 300.0)
 
@@ -660,8 +654,6 @@ def main(argv=None):
                         help="リトライまでの待ち時間 [秒]（既定 5）")
     parser.add_argument("--device", default=None,
                         help="USB CDC のデバイス（opm-writer.py へ素通し）")
-    parser.add_argument("--samplerate", default=None,
-                        help="sigrok-cli の samplerate（opm-writer.py へ素通し）")
     parser.add_argument("--phim", type=float, default=DEFAULT_PHIM,
                         help="OPM の φM [Hz]（既定 %(default)s）")
     parser.add_argument("--no-resume", action="store_true",
@@ -689,11 +681,10 @@ def main(argv=None):
         return 1
 
     if args.check:
-        # 検査は既存ファイルだけを見るので、実機もデコーダも要らない
+        # 検査は既存ファイルだけを見るので、実機も要らない
         return check_wav_dir(args, args.phim / 64.0)
 
-    # デコーダは opm-writer.py がパイプで呼ぶ。ここで先に有無を見ておく
-    for path in (args.seq, OPM_WRITER, OPM_DAC2WAV):
+    for path in (args.seq, OPM_WRITER):
         if not path.exists():
             print(f"! 見つからない: {path}", file=sys.stderr)
             return 1

@@ -56,8 +56,6 @@
  *
  * 値域は -32768 (m=0, E=7) 〜 +32704 (m=1023, E=7 = 511<<6)。
  * 正側が +32767 に届かないのは仕様どおりで、正規化してはいけない。
- *
- * ホスト側デコーダ tools/opm-dac2wav.py の PCM_LUT と同じ式。
  */
 static inline int16_t ym3012_word_to_pcm(uint16_t w) {
     uint32_t m = ((uint32_t)w >> 3) & 0x3ffu;

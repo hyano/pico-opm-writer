@@ -1,6 +1,6 @@
 # YM2151 の DAC 2 スロット (CH1 / CH2) の関係
 
-`tools/opm-dac2wav.py`（[docs](../../docs/opm-dac2wav.md)）が出す WAV は、YM3012 のシリアル
+`tools/opm-writer.py`（[docs](../../docs/opm-writer.md)）が出す WAV は、YM3012 のシリアル
 ストリームの 2 スロット CH1 / CH2 をそれぞれ L / R に割り当てたもの。**1 チャネルだけを
 `RL=both` で鳴らせば L と R はサンプル単位で一致するはず**だが、実際には一致しない。
 これがデコードの誤りなのか実機がそう出しているのかを切り分け、後者ならその仕組みを突き止める。
@@ -88,7 +88,7 @@
 - ターゲット: Raspberry Pi Pico 2 + YM2151、φM = 4.000000MHz（`OPM_CLOCK_MODE_4MHZ`）
 - OPM の内部サンプルレート fs = φM / 64 = **62500Hz**
 - ロジアナ: fx2lafw、8MHz サンプリング。CH0=φ1 / CH1=SO / CH2=SH1 / CH3=SH2
-- WAV: 62500Hz / 16bit / stereo（`tools/opm-dac2wav.py` が生成）
+- WAV: 62500Hz / 16bit / stereo（当時の `tools/opm-dac2wav.py` が生成）
 
 `opm_lr_seq.txt` は [../lfo_noise/opm_seq.txt](../lfo_noise/opm_seq.txt) から **LFO 関連の
 書き込みを全部落とした**もの。`NFRQ` / `LFRQ` / `PMD` / `AMD` / `W` / `PMS` / `AMS` は
@@ -168,7 +168,7 @@
 # 一部だけキャプチャし直す
 ./capture_all.py --only slow_
 
-# 実機にもロジアナにも触らず、実行するコマンドラインを見るだけ
+# 実機に触らず、実行するコマンドラインを見るだけ
 ./capture_all.py -n
 
 # 判定だけやり直す
@@ -188,11 +188,11 @@
 | `--wav-dir` | `./wav` | 出力先。`.wav.zst` だけが置かれる |
 | `--only SUBSTR` | 全部 | 名前にこの文字列を含む条件だけキャプチャする（例: `--only slow_`） |
 | `--time-ms` | `500` | 1 条件のキャプチャ長 [ms] |
-| `--device` / `--samplerate` | opm-writer.py の既定 | USB CDC のデバイス / sigrok-cli の samplerate |
+| `--device` / `--pcm-device` | opm-writer.py の既定 | コマンド用 / PCM 出力用の USB CDC のデバイス |
 | `--phim` | `4000000` | OPM の φM [Hz] |
 | `--zstd-level` | `22` | zstd の圧縮レベル |
 | `--analyze` | off | キャプチャし終えたあと `lr_relation.py` で判定まで行う |
-| `-n`, `--dry-run` | off | 実機にもロジアナにも触らず、コマンドラインを表示するだけ |
+| `-n`, `--dry-run` | off | 実機に触らず、コマンドラインを表示するだけ |
 
 条件は 1 件でも失敗したらそこで止まる（終了コード 1）。キャプチャし直しは `--only` で絞る。
 
