@@ -3,7 +3,7 @@
 [tools/opm-writer.py](../tools/opm-writer.py)
 
 シーケンスファイルを USB CDC 経由で pico-opm-writer のファームへ流し込むホスト側ドライバ。
-1 行送るごとに応答 (`OK` / `ERR`) を待ち、`!capture` の行ではキャプチャを起動する。ファームのコマンド仕様は [README §5](../README.md#5-ホストインタフェース) を参照。
+1 行送るごとに応答 (`OK` / `ERR`) を待ち、`!capture` の行ではキャプチャを起動する。ファームのコマンド仕様は [README §3](../README.md#3-ホストインタフェース) を参照。
 
 外部ライブラリは使わない（標準ライブラリのみ）。
 

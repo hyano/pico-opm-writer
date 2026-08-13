@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チップのレジスタを書き込むためのファームウェア。
 
-仕様は [README.md](README.md) に全部書いてある。ファームウェアの主要ファイル：
+使い方・配線・コマンド仕様は [README.md](README.md) に、ファームウェアの内部設計と実装は [docs/pico-opm-writer.md](docs/pico-opm-writer.md) に記載されている。ファームウェアの主要ファイル：
 
 | ファイル | 役割 |
 | --- | --- |
@@ -21,7 +21,8 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本構成 |
 
 これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 3 本ある。リファレンスは `docs/` にあり、
-ファイル名は拡張子を落とした `docs/<スクリプト名>.md`。
+ファイル名は拡張子を落とした `docs/<スクリプト名>.md`（`docs/` にはこれらに加えて上記の
+`docs/pico-opm-writer.md` が入る）。
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
@@ -159,13 +160,16 @@ PicoProbe (Debugprobe on Pico, CMSIS-DAP, VID:PID `2e8a:000c`) がターゲッ�
 
 `.vscode/tasks.json` の "Flash" タスクと等価。成功時は `** Programming Finished **` / `** Verified OK **` / `** Resetting Target **` が出る。`openocd` は PATH に無いのでフルパスで叩く。DAP に繋がらなくなったら `target/rp2350-rescue.cfg` を使う "Rescue Reset" タスク相当を先に実行する。
 
-代替経路（USB 側が生きている場合のみ）:
+代替経路（BOOTSEL 経由）。BOOTSEL を押しながら USB を挿してから実行する:
 
 ```bash
-picotool load build/pico-opm-writer.uf2 -fx   # BOOTSEL 不要、書き込み後に実行まで行う
+picotool load build/pico-opm-writer.uf2
 ```
 
 または `build/pico-opm-writer.uf2` を BOOTSEL 起動時の RPI-RP2 ドライブへコピーする。
+
+CDC を 2 本にするため TinyUSB のディスクリプタを自前で持っており、`PICO_ENABLE_USB_RESET_VIA_VENDOR_INTERFACE` が無効になるので **`-fx`（BOOTSEL 操作なしの書き込み）は使えない**。
+
 GUI でのステップ実行デバッグは VS Code の "Pico Debug (Cortex-Debug)" 構成を使う。
 
 ### シリアル (stdio) の読み取り
