@@ -93,15 +93,17 @@ DMA リングが溢れて overrun になる。
 | オプション | 既定 | 説明 |
 | --- | --- | --- |
 | `-D`, `--define KEY=VALUE` | なし | `@KEY@` の置換値。複数指定可 |
-| `--device DEVICE` | `/dev/cu.usbmodem112101` | コマンド用 USB CDC のデバイス |
-| `--pcm-device DEVICE` | `/dev/cu.usbmodem112103` | PCM 出力の USB CDC のデバイス |
+| `--device DEVICE` | 自動検出 | コマンド用 USB CDC のデバイス |
+| `--pcm-device DEVICE` | 自動検出 | PCM 出力の USB CDC のデバイス |
 | `--phim PHIM` | `4000000` | OPM の φM [Hz] |
 | `--zstd-level N` | `22` | `.wav.zst` の圧縮レベル（22 = 最大） |
 | `-n`, `--dry-run` | off | シリアルに触らず、実行内容だけ表示する |
 | `--stop-on-error` | off | エラーが出た時点で中断する。既定は警告して続行 |
 
-`--device` は **ターゲット pico2 自身の USB CDC**（`printf` の出力先）を指す。PicoProbe 側の
-CDC-UART ブリッジでも、PCM 出力用の CDC #1 でもない。tty 名の引き直し方は [README §7](../README.md#7-ビルドと書き込み) を参照。
+既定では USB インタフェース名 `pico-opm-writer command` / `pico-opm-writer PCM` で IORegistry を引いて
+自動で見つかるため、通常は指定不要。このため PicoProbe 側の CDC-UART ブリッジを誤って掴むこともない。
+`--device` / `--pcm-device` を明示すると自動検出を上書きでき、同じインタフェース名の機器が複数繋がっている
+ときは明示指定すること。
 
 ## 出力
 

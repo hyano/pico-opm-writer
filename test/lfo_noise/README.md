@@ -1748,7 +1748,7 @@ $ ./capture_lfo.py --check
 | `--zstd-level` | `22` | zstd の圧縮レベル（22 = 最大） |
 | `--retry` | `5` | 1 条件あたりのリトライ回数（[§A.2](#a2-リトライ)）。`0` で無効 |
 | `--retry-wait` | `5` | リトライまでの待ち時間 [秒] |
-| `--device` | opm-writer.py の既定 | USB CDC のデバイス |
+| `--device` / `--pcm-device` | opm-writer.py の自動検出 | コマンド用 / PCM 出力用の USB CDC のデバイス |
 | `--phim` | `4000000` | OPM の φM [Hz]。NTSC 版は `3579545` |
 | `--no-resume` | off | 既存の `.wav.zst` を無視して先頭からやり直す |
 | `--check` | off | キャプチャせずに `--wav-dir` の `.wav.zst` の長さを検査する（[§A.4](#a4-キャプチャできているかの検査)）。短いものがあれば終了コード 1 |

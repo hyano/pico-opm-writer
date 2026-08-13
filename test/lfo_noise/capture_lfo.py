@@ -443,6 +443,8 @@ def do_capture(task, args):
         argv += ["-D", f"{key}={val}"]
     if args.device:
         argv += ["--device", args.device]
+    if args.pcm_device:
+        argv += ["--pcm-device", args.pcm_device]
     if args.dry_run:
         # dry-run でも opm-writer.py は -n で走らせる
         argv.append("-n")
@@ -654,6 +656,8 @@ def main(argv=None):
                         help="リトライまでの待ち時間 [秒]（既定 5）")
     parser.add_argument("--device", default=None,
                         help="USB CDC のデバイス（opm-writer.py へ素通し）")
+    parser.add_argument("--pcm-device", default=None,
+                        help="PCM 出力の USB CDC のデバイス（opm-writer.py へ素通し）")
     parser.add_argument("--phim", type=float, default=DEFAULT_PHIM,
                         help="OPM の φM [Hz]（既定 %(default)s）")
     parser.add_argument("--no-resume", action="store_true",

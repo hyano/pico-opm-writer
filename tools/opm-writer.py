@@ -24,9 +24,11 @@ SPDX-License-Identifier: MIT
 import argparse
 import errno
 import os
+import plistlib
 import re
 import select
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -39,11 +41,11 @@ except ImportError:                     # 3.13 以前は zstd 出力を諦める
 
 # ---- 設定 ---------------------------------------------------------------
 
-# pico-opm-writer 自身の USB CDC（PicoProbe 側の CDC-UART ではない）
-SERIAL_DEVICE = "/dev/cu.usbmodem112101"
-
-# PCM を流す 2 本目の CDC（ファーム側の CDC #1）
-PCM_DEVICE = "/dev/cu.usbmodem112103"
+# ファーム側 usb_descriptors.c が CDC #0 / #1 に付けている USB インタフェース名。
+# tty 名（/dev/cu.usbmodem<location>0N）は USB のポート位置で変わるので、
+# 決め打ちにせずこの名前から IORegistry を引いてデバイスノードを求める。
+CDC_COMMAND_NAME = "pico-opm-writer command"
+CDC_PCM_NAME = "pico-opm-writer PCM"
 
 # PCM 1 フレーム（L と R の int16）のバイト数
 PCM_FRAME_BYTES = 4
@@ -280,6 +282,96 @@ def preprocess(path, defines, capture_base):
     return steps, errors
 
 
+# ---- デバイス検出 -------------------------------------------------------
+
+def usb_interfaces():
+    """IORegistry から USB インタフェースの一覧を取る。"""
+    try:
+        out = subprocess.run(
+            ["ioreg", "-a", "-r", "-l", "-w", "0", "-c", "IOUSBHostInterface"],
+            check=True, capture_output=True).stdout
+    except OSError as e:
+        raise RuntimeError(
+            f"ioreg を実行できない: {e}"
+            "（macOS 以外では --device / --pcm-device で明示すること）") from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"ioreg が失敗した: {e}") from e
+
+    if not out.strip():
+        return []
+    try:
+        entries = plistlib.loads(out)
+    except Exception as e:
+        raise RuntimeError(f"ioreg の出力を解釈できない: {e}") from e
+    return entries if isinstance(entries, list) else [entries]
+
+
+def callout_device(node):
+    """インタフェース配下の IOSerialBSDClient が持つ /dev/cu.* を探す。"""
+    dev = node.get("IOCalloutDevice")
+    if dev:
+        return dev
+    for child in node.get("IORegistryEntryChildren", []):
+        dev = callout_device(child)
+        if dev:
+            return dev
+    return None
+
+
+def find_cdc_devices(itf_name):
+    """インタフェース名に対応する /dev/cu.* を全部返す。
+
+    CDC-ACM は「制御インタフェース + データインタフェース」の 2 本組で、
+    名前が付くのは制御側なのに tty がぶら下がるのはデータ側なので、名前の一致した
+    インタフェースそのものではなく、同じデバイス（= 同じ locationID）で後ろに続く
+    インタフェースから tty を拾う。
+    """
+    interfaces = usb_interfaces()
+    found = []
+    for itf in interfaces:
+        if itf.get("IORegistryEntryName") != itf_name:
+            continue
+        loc = itf.get("locationID")
+        num = itf.get("bInterfaceNumber")
+        if loc is None or num is None:
+            continue
+        rest = [s for s in interfaces
+                if s.get("locationID") == loc
+                and s.get("bInterfaceNumber", -1) > num]
+        for sib in sorted(rest, key=lambda s: s["bInterfaceNumber"]):
+            dev = callout_device(sib)
+            if dev:
+                found.append(dev)
+                break
+    return found
+
+
+def resolve_device(explicit, itf_name, wait_s=SERIAL_WAIT_S):
+    """USB インタフェース名から /dev/cu.* を引く。explicit があればそれを優先する。
+
+    SWD の reset 直後はデバイスが数秒消えるので、現れるまで待つ。
+    """
+    if explicit:
+        return explicit
+
+    deadline = time.monotonic() + wait_s
+    while True:
+        found = find_cdc_devices(itf_name)
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            raise RuntimeError(
+                f'USB インタフェース "{itf_name}" が {len(found)} 個見つかった'
+                f"（{', '.join(found)}）。"
+                "--device / --pcm-device でどれを使うか明示すること")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f'USB インタフェース "{itf_name}" が見つからない。'
+                "ファームが動いているか確認すること"
+                "（--device / --pcm-device で明示も可）")
+        time.sleep(0.2)
+
+
 # ---- シリアル -----------------------------------------------------------
 
 class Serial:
@@ -431,7 +523,9 @@ def send_line(ser, line):
 
 def capture_command(step, args):
     """表示用のコマンドライン文字列。"""
-    return (f"p 1 → {args.pcm_device} ({step.ms} ms) → {step.output} "
+    # 実行時は execute() が解決済みのデバイスパスを入れている。dry-run では
+    # 実機を探しに行かないので、代わりに探す対象のインタフェース名を出す。
+    return (f"p 1 → {args.pcm_device or CDC_PCM_NAME} ({step.ms} ms) → {step.output} "
             f"→ p 0")
 
 
@@ -572,6 +666,16 @@ def execute(steps, args):
 
     try:
         if not args.dry_run:
+            # デバイスパスは USB インタフェース名から引く。PCM 側は !capture が
+            # あるときだけ要るので、無いシーケンスで見つからなくても失敗させない。
+            try:
+                args.device = resolve_device(args.device, CDC_COMMAND_NAME)
+                if any(step.kind == "capture" for step in steps):
+                    args.pcm_device = resolve_device(args.pcm_device, CDC_PCM_NAME)
+            except RuntimeError as e:
+                print(f"! {e}", file=sys.stderr, flush=True)
+                return 1
+
             ser = Serial(args.device, SERIAL_WAIT_S)
             for line in ser.drain(BANNER_DRAIN_S):
                 print(f"< {line}", flush=True)
@@ -625,10 +729,12 @@ def main(argv=None):
     parser.add_argument("-D", "--define", type=parse_define, action="append",
                         default=[], metavar="KEY=VALUE",
                         help="@KEY@ の置換値（複数指定可）")
-    parser.add_argument("--device", default=SERIAL_DEVICE,
-                        help=f"コマンド用 USB CDC のデバイス（既定 {SERIAL_DEVICE}）")
-    parser.add_argument("--pcm-device", default=PCM_DEVICE,
-                        help=f"PCM 出力の USB CDC のデバイス（既定 {PCM_DEVICE}）")
+    parser.add_argument("--device", default=None,
+                        help=f'コマンド用 USB CDC のデバイス'
+                             f'（既定は "{CDC_COMMAND_NAME}" から自動検出）')
+    parser.add_argument("--pcm-device", default=None,
+                        help=f'PCM 出力の USB CDC のデバイス'
+                             f'（既定は "{CDC_PCM_NAME}" から自動検出）')
     parser.add_argument("--phim", type=float, default=DEFAULT_PHIM,
                         help=f"OPM の φM [Hz]（既定 {DEFAULT_PHIM:g}）")
     parser.add_argument("--zstd-level", type=int, default=DEFAULT_ZSTD_LEVEL,

@@ -188,7 +188,7 @@
 | `--wav-dir` | `./wav` | 出力先。`.wav.zst` だけが置かれる |
 | `--only SUBSTR` | 全部 | 名前にこの文字列を含む条件だけキャプチャする（例: `--only slow_`） |
 | `--time-ms` | `500` | 1 条件のキャプチャ長 [ms] |
-| `--device` / `--pcm-device` | opm-writer.py の既定 | コマンド用 / PCM 出力用の USB CDC のデバイス |
+| `--device` / `--pcm-device` | opm-writer.py の自動検出 | コマンド用 / PCM 出力用の USB CDC のデバイス |
 | `--phim` | `4000000` | OPM の φM [Hz] |
 | `--zstd-level` | `22` | zstd の圧縮レベル |
 | `--analyze` | off | キャプチャし終えたあと `lr_relation.py` で判定まで行う |
