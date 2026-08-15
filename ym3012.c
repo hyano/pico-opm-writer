@@ -38,7 +38,9 @@ static uint s_dma_ch;
  */
 static uint32_t s_last_widx;
 static uint64_t s_write_total;
-static uint64_t s_read_total;
+
+/* USB キャプチャが使う既定の読み出しカーソル */
+static ym3012_reader_t s_reader;
 
 static bool s_selftest_ok;
 static char s_selftest_detail[80];
@@ -212,7 +214,7 @@ void ym3012_init(void) {
     /* SM を動かす前なので、書き込み位置はまだリング先頭のまま */
     s_last_widx = 0;
     s_write_total = 0;
-    s_read_total = 0;
+    ym3012_reader_init(&s_reader, true);
 
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
@@ -239,25 +241,32 @@ void ym3012_ring_poll(void) {
     s_last_widx = widx;
 }
 
-uint32_t ym3012_unread(void) {
-    uint64_t unread = s_write_total - s_read_total;
-    return (unread > YM3012_RING_FRAMES) ? YM3012_RING_FRAMES : (uint32_t)unread;
-}
-
-void ym3012_ring_sync(void) {
-    s_read_total = s_write_total;
-}
-
 uint64_t ym3012_write_total(void) {
     return s_write_total;
 }
 
-uint64_t ym3012_read_total(void) {
-    return s_read_total;
+/* ---- 読み出しカーソル -------------------------------------------------- */
+
+void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden) {
+    rd->read_total = s_write_total;
+    rd->count_forbidden = count_forbidden;
 }
 
-uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames) {
-    uint32_t n = ym3012_unread();
+uint32_t ym3012_reader_unread(const ym3012_reader_t *rd) {
+    uint64_t unread = s_write_total - rd->read_total;
+    return (unread > YM3012_RING_FRAMES) ? YM3012_RING_FRAMES : (uint32_t)unread;
+}
+
+void ym3012_reader_sync(ym3012_reader_t *rd) {
+    rd->read_total = s_write_total;
+}
+
+uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd) {
+    return rd->read_total;
+}
+
+uint32_t ym3012_reader_read_pcm(ym3012_reader_t *rd, int16_t *out, uint32_t max_frames) {
+    uint32_t n = ym3012_reader_unread(rd);
     if (n > max_frames) {
         n = max_frames;
     }
@@ -266,7 +275,7 @@ uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames) {
     }
 
     /* リング末尾をまたぐ分は次回に回す（呼び出し側は残量を見て再度呼ぶ） */
-    uint32_t ridx = (uint32_t)(s_read_total & (YM3012_RING_FRAMES - 1u));
+    uint32_t ridx = (uint32_t)(rd->read_total & (YM3012_RING_FRAMES - 1u));
     uint32_t to_end = YM3012_RING_FRAMES - ridx;
     if (n > to_end) {
         n = to_end;
@@ -292,12 +301,30 @@ uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames) {
         out[2u * i + 1u] = ym3012_word_to_pcm(wr);  /* R */
     }
 
-    s_read_total += n;
+    rd->read_total += n;
 
-    if (forbidden != 0u) {
+    if (forbidden != 0u && rd->count_forbidden) {
         stats_count_forbidden(forbidden);
     }
     return n;
+}
+
+/* ---- 既定カーソル（USB キャプチャ用）---------------------------------- */
+
+uint32_t ym3012_unread(void) {
+    return ym3012_reader_unread(&s_reader);
+}
+
+void ym3012_ring_sync(void) {
+    ym3012_reader_sync(&s_reader);
+}
+
+uint64_t ym3012_read_total(void) {
+    return ym3012_reader_read_total(&s_reader);
+}
+
+uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames) {
+    return ym3012_reader_read_pcm(&s_reader, out, max_frames);
 }
 
 bool ym3012_check_rxstall(void) {

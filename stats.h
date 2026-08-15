@@ -36,17 +36,30 @@ void stats_usb_tx_update(uint32_t pending_bytes);
 uint32_t stats_usb_tx_bytes(void);     /* 現在の滞留バイト数 */
 uint32_t stats_usb_tx_bytes_max(void); /* リセット以降の最大値 */
 
+/* ---- I2S 出力 ---------------------------------------------------------- */
+
+/*
+ * DMA の先を走っているフレーム数を通知する。low-water を更新する。
+ * 余裕がどこまで削れたかを見たいので、ここだけは最大ではなく最小を残す。
+ */
+void stats_i2s_update(uint32_t depth_frames);
+
+uint32_t stats_i2s_depth(void);     /* 現在の先行フレーム数 */
+uint32_t stats_i2s_depth_min(void); /* リセット以降の最小値 */
+
 /* ---- カウンタ ---------------------------------------------------------- */
 
 void stats_count_overrun(void);            /* DMA overrun 発生 */
 void stats_count_forbidden(uint32_t n);    /* YM3012 の禁止コード E=0 を n 個検出 */
 void stats_count_rxstall(void);            /* PIO RX FIFO あふれ */
 void stats_count_frames(uint32_t n);       /* 取り込んだフレーム数を n 加算 */
+void stats_count_i2s_underrun(void);       /* I2S の先行分が尽きた */
 
 uint32_t stats_overrun(void);
 uint64_t stats_forbidden(void);
 uint32_t stats_rxstall(void);
 uint64_t stats_frames(void);
+uint32_t stats_i2s_underrun(void);
 
 /* 直近 1 秒窓で数えた実測フレームレート [frames/s]。 */
 uint32_t stats_frame_rate(void);

@@ -14,6 +14,7 @@
 #include "tusb.h"
 
 #include "capture.h"
+#include "i2s.h"
 #include "led.h"
 #include "opm.h"
 #include "stats.h"
@@ -36,10 +37,10 @@ static bool s_overflow;
 /* ---- メインループの 1 周分 --------------------------------------------- */
 
 /*
- * USB・キャプチャ・LED・統計をひと回しする。
+ * USB・キャプチャ・I2S・LED・統計をひと回しする。
  *
  * コマンドの待ち時間（`d` の遅延や `p 0` のドレイン待ち）の中からも呼ぶので、
- * 待っている間も PCM の送出と USB の処理が止まらない。
+ * 待っている間も PCM の送出・I2S への供給・USB の処理が止まらない。
  *
  * CPU 使用率は「PCM を実際に動かせた周回」だけを busy として積む。USB の空き待ちで
  * 何も送れなかった周回は idle として扱い、送信待ちを CPU 処理時間と取り違えない。
@@ -49,6 +50,7 @@ static void service_all(void) {
 
     tud_task();
     bool worked = capture_service();
+    worked |= i2s_service();
     led_service();
 
     if (worked) {
@@ -85,6 +87,19 @@ static void print_info(void) {
     printf("# capture : ring %u bytes (%u frames) rate %u Hz\n",
            (unsigned)YM3012_RING_BYTES, (unsigned)YM3012_RING_FRAMES,
            (unsigned)(opm_clock_hz_actual() / 64u));
+#if I2S_ENABLED
+    printf("# i2s     : BCK=GP%d LRCK=GP%d DIN=GP%d (clkdiv %u + %u/256)\n",
+           I2S_PIN_BCK, I2S_PIN_LRCK, I2S_PIN_DIN,
+           (unsigned)i2s_clkdiv_int(), (unsigned)i2s_clkdiv_frac());
+    printf("# i2s     : 32fs bck %u Hz rate %u Hz latency %u frames (%u us)\n",
+           (unsigned)i2s_bck_hz(), (unsigned)i2s_rate_hz(),
+           (unsigned)I2S_TARGET_FRAMES,
+           (unsigned)(i2s_rate_hz() ? (uint32_t)((uint64_t)I2S_TARGET_FRAMES * 1000000u /
+                                                 i2s_rate_hz())
+                                    : 0u));
+#else
+    printf("# i2s     : disabled\n");
+#endif
     printf("# selftest: pio %s\n", ym3012_selftest_detail());
     reply_ok();
 }
@@ -105,6 +120,13 @@ static void print_stats(void) {
     printf("# USB_TX  : %u/%u bytes  MAX %u/%u\n",
            (unsigned)stats_usb_tx_bytes(), (unsigned)tx_cap,
            (unsigned)stats_usb_tx_bytes_max(), (unsigned)tx_cap);
+#if I2S_ENABLED
+    uint32_t i2s_min = stats_i2s_depth_min();
+    printf("# I2S     : depth %u/%u frames  MIN %u  UNDERRUN %u\n",
+           (unsigned)stats_i2s_depth(), (unsigned)I2S_TARGET_FRAMES,
+           (unsigned)(i2s_min == UINT32_MAX ? 0u : i2s_min),
+           (unsigned)stats_i2s_underrun());
+#endif
     printf("# OVERRUN : %u   E0 : %llu   RXSTALL : %u\n",
            (unsigned)stats_overrun(), (unsigned long long)stats_forbidden(),
            (unsigned)stats_rxstall());
@@ -465,6 +487,12 @@ int main(void) {
     /* PIO と DMA を起動する。以後キャプチャ経路は止めない。 */
     ym3012_init();
     capture_init();
+
+    /*
+     * I2S 出力。φM の分周比を使うので opm_init() より後、
+     * GP26-GP28 を握るのでループバック自己診断を含む ym3012_init() より後に置く。
+     */
+    i2s_init();
 
     bool connected = false;
 

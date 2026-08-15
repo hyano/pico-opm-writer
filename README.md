@@ -5,7 +5,7 @@ OPM のレジスタへ値を書き込むためのファームウェア。
 
 ホストからは USB CDC (仮想 COM ポート) として見え、`screen` や `minicom` などの素の
 ターミナルからテキストコマンドを打つだけでレジスタを操作できる。バッチ実行や
-DAC 出力のキャプチャには [ホスト側ツール](#6-ホスト側ツール)（`tools/`）を使う。
+DAC 出力のキャプチャには [ホスト側ツール](#7-ホスト側ツール)（`tools/`）を使う。
 
 **USB CDC を 2 本（コマンド用 / PCM キャプチャ用）持つ**のが特徴で、ターミナルから
 レジスタを叩きながら、同時に YM3012 (DAC) の出力をもう 1 本のポートから PCM として
@@ -46,19 +46,16 @@ Pico 2 は OPM のバスに対して **書き込み専用** で接続する。�
 | GP21 | 27 | -    | -   | 将来拡張用に予約 |
 | GP22 | 29 | -    | -   | 将来拡張用に予約 |
 | GP25 | -  | -    | OUT | 基板上 LED（[§3.9](#39-led)）。`PICO_DEFAULT_LED_PIN` |
-| GP26 | 31 | -    | -   | 将来の I2S BCLK 用に予約 |
-| GP27 | 32 | -    | -   | 将来の I2S LRCLK / WS 用に予約 |
-| GP28 | 34 | -    | -   | 将来の I2S DATA 用に予約 |
+| GP26 | 31 | BCK  | OUT | I2S ビットクロック（[§5](#5-i2s-出力)） |
+| GP27 | 32 | LRCK | OUT | I2S ワードセレクト。BCK の次の GPIO であること |
+| GP28 | 34 | DIN  | OUT | I2S データ |
 | GND  | 3, 8, 13, 18 … | GND | - | OPM と共通グラウンドを取ること |
 
 GP23 / GP24 は Pico 2 の内部用途（`PICO_SMPS_MODE_PIN` / `PICO_VBUS_PIN`）なので使わない。
-I2S の MCLK は使わないので、将来の I2S 用に確保するのは GP26-GP28 の 3 本だけ。
+I2S の MCLK は使わないので、DAC へ出すのは GP26-GP28 の 3 本だけ。
 
 SO / φ1 / SH1 / SH2 は **GP17 から連続していること**。キャプチャ用の PIO がこの 4 本を
 in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-writer.md#42-pio-によるビット取り込み)）。
-
-GP26-GP28 は起動時のループバック自己診断で使うので、既定では何も接続しないこと
-（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。
 
 ピン番号の定義は [opm.h](opm.h) の `OPM_PIN_*` と [ym3012.h](ym3012.h) の `YM3012_PIN_*`
 にまとまっている。
@@ -125,11 +122,11 @@ GP26-GP28 は起動時のループバック自己診断で使うので、既定�
   ときと変わらない。CDC #1 は末尾の番号が増えたものになる。
   2 本は独立しているので、コマンドを打ちながら PCM を取り込める。
 - CDC を 2 本にする都合で **`picotool load -fx`（BOOTSEL 不要の書き込み）は使えない**
-  （[§5.4](#54-書き込み代替経路)）。
+  （[§6.4](#64-書き込み代替経路)）。
 - ボーレート・パリティ等の設定は無視される（USB CDC のため何を指定しても動作する）。
 - macOS 例: `screen /dev/cu.usbmodem112101 115200`。
   **`/dev/tty.*` ではなく `/dev/cu.*` を使う**（`tty.*` は DCD 待ちで open がブロックする）。
-  デバイス名の引き直し方は [§5.5](#55-シリアル-stdio-の読み取り) を参照。
+  デバイス名の引き直し方は [§6.5](#65-シリアル-stdio-の読み取り) を参照。
 - 接続を検出した時点で起動バナーを出力する（接続前の出力は捨てられるため）。
 
 ### 3.2 行フォーマット
@@ -213,7 +210,9 @@ GP26-GP28 は起動時のループバック自己診断で使うので、既定�
 # timing  : t_wr=1us t_addr=5us t_data=25us
 # ym3012  : SO=GP17 phi1=GP18 SH1=GP19 SH2=GP20
 # capture : ring 16384 bytes (4096 frames) rate 62500 Hz
-# selftest: pio PASS
+# i2s     : BCK=GP26 LRCK=GP27 DIN=GP28 (clkdiv 36 + 0/256)
+# i2s     : 32fs bck 2000000 Hz rate 62500 Hz latency 1024 frames (16384 us)
+# selftest: pio SKIP (disabled)
 OK
 ```
 
@@ -293,10 +292,11 @@ CDC #1 への PCM 送信を制御する。**取り込み側の PIO と DMA は�
 # CPU     : 58% (max 58%)
 # RING    : 4/16384 bytes  MAX 108/16384  FREE 16380
 # USB_TX  : 0/4096 bytes  MAX 100/4096
+# I2S     : depth 1024/1024 frames  MIN 1012  UNDERRUN 0
 # OVERRUN : 0   E0 : 0   RXSTALL : 0
 # RATE    : 62500 frames/s (expect 62500)
 # FRAMES  : 56263161
-# PIOTEST : PASS
+# PIOTEST : SKIP (disabled)
 # IRQ     : H
 OK
 ```
@@ -307,12 +307,13 @@ OK
 | `CPU` | 直近 1 秒の Core 0 使用率と、リセット以降の最大値。USB の空き待ちで何も送れなかった周回は idle として数える |
 | `RING` | DMA リングの未処理量と high-water、空き |
 | `USB_TX` | CDC #1 の送信バッファ滞留量と high-water。USB エンドポイントの状態ではなく、ファーム内の TX FIFO の滞留量 |
+| `I2S` | I2S の DMA より先に書けているフレーム数と low-water、アンダーラン回数（[§5](#5-i2s-出力)）。ここだけは減る方向が危険なので最小値を残す |
 | `OVERRUN` | DMA overrun の発生回数 |
 | `E0` | YM3012 の禁止コード `E=0` を見た数。**PIO のビット位相が正しければ 0 のまま** |
 | `RXSTALL` | PIO の RX FIFO があふれた回数。あふれると L/R の並びが崩れる |
 | `RATE` | 直近 1 秒で数えた実測フレームレートと期待値 φM/64 |
 | `FRAMES` | 取り込んだ総フレーム数 |
-| `PIOTEST` | 起動時の PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)） |
+| `PIOTEST` | 起動時の PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。既定では `SKIP (disabled)`（[§5.4](#54-無効化)） |
 | `IRQ` | OPM の /IRQ の現在のレベル |
 
 `E0` / `RXSTALL` / `RATE` は、ロジックアナライザを繋がずにキャプチャ経路の健全性を
@@ -325,14 +326,14 @@ OK
 ```
 > t
 # pcm     : PASS
-# pio     : PASS
+# pio     : SKIP (disabled)
 OK
 ```
 
 | 項目 | 内容 |
 | --- | --- |
 | `pcm` | PCM 変換の既知ベクタ検証。ゼロ / ±1 / 仮数境界 / 指数全域 / 禁止コード / 無効 3bit のマスク / 値域の両端。加えて全 `E`・全仮数でステップが `1 << (E-1)` になることを総当たりで確認する |
-| `pio` | 起動時に実施した PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)） |
+| `pio` | 起動時に実施した PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。**I2S が有効な既定構成では GP26-GP28 が競合するので実施せず `SKIP (disabled)` になる**（[§5.4](#54-無効化)） |
 
 どちらかが失敗したら `ERR self test failed` を返す。
 
@@ -375,7 +376,74 @@ OPM が YM3012 (DAC) へ送るシリアル出力を取り込み、PCM に変換�
 [tools/opm-writer.py](docs/opm-writer.md) の `!capture` を使えば、読み出しは
 スクリプト側が面倒を見る。
 
-## 5. ビルドと書き込み
+## 5. I2S 出力
+
+キャプチャした PCM をそのまま I2S で外部 DAC (PCM5102A) へ流す。**電源を入れれば常に
+出力していて、開始も停止もコマンドは無い**。レジスタを書けばその場で音が出る。
+
+USB キャプチャ（[§4](#4-pcm-出力)）とは独立した読み出し位置を持つので、`p 1` で
+キャプチャしながら鳴らしても互いに干渉しない。
+
+### 5.1 DAC の配線
+
+| Pico 2 | PCM5102A | 備考 |
+| --- | --- | --- |
+| GP26 | BCK | ビットクロック |
+| GP27 | LRCK / WS | ワードセレクト。**GP26 の次の GPIO であること**（PIO の sideset 2bit に載せる） |
+| GP28 | DIN | データ |
+| GND | SCK | **GND へ落とす。** SCK を L にすると内蔵 PLL が BCK からシステムクロックを作る |
+| — | XSMT | H 固定（ソフトミュートは使わない）。多くのブレークアウト基板は既定で H |
+
+MCLK (SCK) を DAC 内部で作らせるので、Pico から出すのは 3 本だけ。
+
+### 5.2 フォーマット
+
+| 項目 | 値 |
+| --- | --- |
+| フォーマット | Philips 標準 I2S、MSB first、16bit |
+| BCK | 32fs（φM 4MHz で 2.000 MHz） |
+| サンプリングレート | φM/64 = 62500 Hz（`OPM_CLOCK_MODE_NTSC` では 55930.4 Hz） |
+| チャンネル | LRCK=0 が L (YM3012 CH1) / LRCK=1 が R (CH2) |
+| レイテンシ | 1024 フレーム = 16.4 ms |
+
+62.5kHz は標準的なレートではないが、PCM5102A は内蔵 PLL が BCK に追従するので
+そのまま鳴る（対応範囲 8k〜384kHz）。
+
+**サンプリングレートは変換していない。** φM も I2S も同じ sys_clk から分周しているため、
+キャプチャ側と出力側のレートは厳密に一致する。リサンプリングもドリフト補正も無く、
+固定長のバッファを挟むだけで済む。分周比の導出は
+[docs §5.2](docs/pico-opm-writer.md#52-サンプリングレートのロック)。
+
+L と R は同じ波形にならない（[test/dac_lr/](test/dac_lr/README.md)）。これは YM3012 の
+仕様どおりで、I2S 出力もそのまま両チャンネルを出している。
+
+### 5.3 アンダーラン
+
+I2S へ供給する DMA は止まらないので、CPU がリングを埋め遅れると **DMA は無音ではなく
+古いリング内容を再生する**。検出したら未処理を捨てて先行分を無音で埋め直し、
+`s` の `UNDERRUN` を 1 増やす（[§3.11](#311-s統計)）。一瞬ノイズが出るが継続はしない。
+
+余裕は 16.4ms あるので、通常の動作では起きない。`s` の `I2S` の `MIN`（先行量の
+low-water）がどこまで削れたかの指標になる。
+
+OPM を繋がずに動かした場合はソースが供給されないため、16.4ms ごとにアンダーランを
+繰り返す。出力は無音のままで、`UNDERRUN` だけが増え続ける。
+
+### 5.4 無効化
+
+`I2S_ENABLED=0` で再コンフィグすると I2S を止め、GP26-GP28 を解放できる。
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DI2S_ENABLED=0
+```
+
+このとき起動時の PIO ループバック自己診断が自動的に有効になる
+（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。診断は GP26-GP28 を使うので
+I2S とは同時に使えず、**I2S が有効な既定構成では `t` / `s` の `pio` は
+`SKIP (disabled)` になる**。DAC を外して診断だけ試したいときは
+`-DYM3012_LOOPBACK=1` を付ける。
+
+## 6. ビルドと書き込み
 
 ツールチェーンは `~/.pico-sdk/` 配下にバージョン固定でインストールされている。
 **システムの cmake / ninja / arm-none-eabi-gcc は使わない。**
@@ -397,7 +465,7 @@ export PICO_TOOLCHAIN_PATH=~/.pico-sdk/toolchain/15_2_Rel1
 export PATH=~/.pico-sdk/toolchain/15_2_Rel1/bin:~/.pico-sdk/picotool/2.3.0/picotool:~/.pico-sdk/cmake/v4.3.4/bin:~/.pico-sdk/ninja/v1.13.2:$PATH
 ```
 
-### 5.1 ビルド
+### 6.1 ビルド
 
 ```bash
 # 増分ビルド（通常はこれだけで足りる）
@@ -412,7 +480,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 
 成果物は `build/pico-opm-writer.{uf2,elf,bin,hex,dis}` と `build/compile_commands.json`。
 
-### 5.2 書き込み（SWD / PicoProbe が既定）
+### 6.2 書き込み（SWD / PicoProbe が既定）
 
 PicoProbe (Debugprobe on Pico、CMSIS-DAP、VID:PID `2e8a:000c`) をターゲット pico2 の SWD に
 接続している場合、**CLI からはこれで焼くのが既定**。BOOTSEL 操作もターゲットの USB 状態も
@@ -433,11 +501,11 @@ PicoProbe (Debugprobe on Pico、CMSIS-DAP、VID:PID `2e8a:000c`) をターゲッ
 
 書き込みには `.elf` を使う（`.uf2` ではない）。
 
-### 5.3 デバッグ
+### 6.3 デバッグ
 
 GUI でのステップ実行デバッグは VS Code の "Pico Debug (Cortex-Debug)" 構成を使う。
 
-### 5.4 書き込み（代替経路）
+### 6.4 書き込み（代替経路）
 
 SWD を繋いでいない場合は BOOTSEL から書き込む。BOOTSEL を押しながら USB を挿し、
 現れる RPI-RP2 ドライブへ `build/pico-opm-writer.uf2` をコピーする。
@@ -449,9 +517,9 @@ picotool load build/pico-opm-writer.uf2   # BOOTSEL で起動した状態で実�
 **`picotool load -fx`（BOOTSEL 操作なしで再起動させる書き込み）は使えない。**
 CDC を 2 本にするため TinyUSB のディスクリプタを自前で持っており、
 `PICO_ENABLE_USB_RESET_VIA_VENDOR_INTERFACE` が無効になるため
-（[docs §5](docs/pico-opm-writer.md#5-usb-cdc-2-本構成の実装)）。
+（[docs §6](docs/pico-opm-writer.md#6-usb-cdc-2-本構成の実装)）。
 
-### 5.5 シリアル (stdio) の読み取り
+### 6.5 シリアル (stdio) の読み取り
 
 | デバイス | 中身 |
 | --- | --- |
@@ -470,7 +538,7 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
   デバイスノードが数秒消えるので、存在を待ってから開く。
 - `stdio_usb` はホストが開く前の出力を捨てるため、起動直後の行は取り逃す。
 
-## 6. ホスト側ツール
+## 7. ホスト側ツール
 
 `tools/` にホスト PC 側のスクリプトを置いている。いずれも Python 3 の標準ライブラリだけで
 動く（`.zst` を扱う機能のみ Python 3.14 以上が必要）。
@@ -497,7 +565,7 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 | [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのもの（NE でノイズを直接 DAC へ出す） |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係 |
 
-## 7. 動作確認手順
+## 8. 動作確認手順
 
 新しい環境で組んだときに一通り確かめる**手順**。1. は毎回実行して回帰検査に使うもの、
 2.〜5. は配線とファームを立ち上げるときの確認項目。
@@ -513,11 +581,16 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 
 2. **単体（OPM 未接続）**: 書き込み後にシリアル接続し、起動バナーが出ることと `i` の表示が
    期待どおりであることを確認する。CDC が 2 本列挙されることも見ておく。
-   続けて `t` を実行し、PCM 変換と PIO ループバックが両方 `PASS` になることを確認する
-   （どちらも外部機器が要らない）。
+   `i` の `i2s` 行は既定プリセットで `clkdiv 36 + 0/256` / `rate 62500 Hz` になること
+   （**小数部が 0 でなければジッタが乗っている**）。`OPM_CLOCK_MODE_NTSC` では
+   `clkdiv 44 + 0/256` / `rate 55930 Hz`。
+   続けて `t` を実行し、`pcm` が `PASS` になることを確認する（外部機器が要らない）。
+   `pio` は既定では `SKIP (disabled)` で正常（[§5.4](#54-無効化)）。
 3. **φM の確認**: GP15 をオシロ / 周波数カウンタで測定し、既定プリセットなら
    4.000000MHz（`OPM_CLOCK_MODE_NTSC` なら 3.579545MHz）± 数十 ppm であることと、
    デューティが 50% であることを確認する。
+   同時に GP26 (BCK) が 2.000MHz、GP27 (LRCK) が 62.5kHz であることも見ておく
+   （**DAC を繋いでいなくても確認できる**）。
 4. **バス波形の確認**: `w 20 c7` を実行し、A0 / /WR / D0-D7 が
    [docs §3](docs/pico-opm-writer.md#3-opm-バス書き込みシーケンス) の
    シーケンスどおりに動いていることをロジックアナライザで確認する。
@@ -567,22 +640,32 @@ w 08 00
    逆になっていたら L/R が入れ替わっている。`test/dac_lr/capture_all.py
    --analyze` がこれを含めた判定を一通り行う。
 
+8. **I2S 出力の確認**（[§5](#5-i2s-出力)。PCM5102A を GP26-GP28 と SCK=GND で配線してから）:
+
+   | # | 手順 | 期待値 |
+   | --- | --- | --- |
+   | 8-1 | 起動後 5 分放置して `s` | `I2S` の `depth` が `1024/1024` で動かず、`MIN` が 1024 近傍、`UNDERRUN` が 0。`depth` が減り続けるならレートがずれている（`i` の `clkdiv` 小数部を疑う） |
+   | 8-2 | 5. の発音シーケンスを流す | DAC のライン出力から音が出る |
+   | 8-3 | `d 1000` を挟んだ長いシーケンスを流す | 音が途切れない（待ち時間中も供給が続いている） |
+   | 8-4 | 7. の `w 20 47` / `w 20 87` で鳴らす | 意図した側のスピーカーだけから出る |
+   | 8-5 | `p 1` で取り込みながら鳴らす | 音も WAV も正常。`s` の `OVERRUN` / `UNDERRUN` が増えない（2 本の読み出し位置が独立に動いていることの確認） |
+   | 8-6 | `s` を連続で 20 回送る | `UNDERRUN` が増えない。増える場合は `i2s.h` の `I2S_TARGET_FRAMES` を 2048（32.8ms）へ上げる |
+
 ファームウェア自体のホスト上での自動テストは無い。検証は
 **ビルド → 書き込み → シリアル出力の確認** の 3 ステップで行い、外部機器を使わない
 範囲の検証は `t` と `s` にまとめてある。
 
-## 8. 将来の拡張（本仕様の範囲外）
+## 9. 将来の拡張（本仕様の範囲外）
 
 - バイナリストリーミングモード（`w` の 1 行あたりのオーバーヘッド削減）
 - 時刻付きレジスタ列の一括転送とファーム側タイマによる再生（VGM 再生の下地）
 - `/RD` を使ったステータス（BUSY）ポーリングによる待ち時間の最適化。配線と
   データバスの向き切り替え（`opm_bus_set_dir()`）は用意してあるが、読み出し自体は未実装
 - `/IRQ` の割り込み処理。現在はレベルを参照できるだけ（`s` の `IRQ`）
-- I2S 出力（GP26-GP28 を予約済み。MCLK は使わない 3 線）
 - バス書き込みの PIO 化と FIFO による非同期キューイング
 - 2 個目の OPM / 他の Yamaha 音源チップ (OPN 系) への対応
 
-## 9. ライセンス
+## 10. ライセンス
 
 MIT License。詳細は [LICENSE](LICENSE) を参照。
 

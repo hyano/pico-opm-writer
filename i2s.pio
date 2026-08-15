@@ -1,0 +1,87 @@
+;
+; I2S (Philips 標準フォーマット) 出力
+;
+; SPDX-License-Identifier: MIT
+;
+
+; 出力は 3 本。sideset に BCK / LRCK、OUT に DIN を割り当てる。
+;
+;   sideset bit0 = BCK  (clock_base + 0)
+;   sideset bit1 = LRCK (clock_base + 1)
+;   out     pin  = DIN  (data_pin。clock_base と連続している必要は無い)
+;
+; 1 bit = 2 命令 = 2 SM サイクル（BCK の L 区間と H 区間）。DAC は BCK の
+; 立ち上がりで拾うので、L 区間側の命令でビットを出しておく。
+; 1 フレーム = 32bit = 64 SM サイクルなので
+;   fs = sys_clk / (64 x clkdiv)
+;
+; ---- ワードの並びと L/R の対応 ----
+;
+; OSR は MSB first (shift_right = false) で 32bit autopull。つまり先に出るのは
+; 32bit ワードの上位 16bit。下のプログラムは先頭の 16bit を LRCK=1 の期間に出す。
+; Philips I2S では WS=1 が R チャンネルなので
+;
+;   ワード上位 16bit -> R / ワード下位 16bit -> L
+;
+; となる。これは ym3012.h のフレーム形式（下位 16bit = L (CH1) / 上位 16bit = R (CH2)）
+; とそのまま一致するので、ym3012_read_pcm() が書いたバッファを uint32_t として
+; DMA で流すだけでよく、並べ替えは要らない。
+;
+; ---- LRCK の 1bit ディレイ ----
+;
+; I2S は「LRCK が遷移した 1 BCK 後から新しいワードの MSB が始まる」。下では
+; 各 16bit ブロックの最終ビットを出すところで LRCK を先に反転させており、
+; その最終ビットは遷移前のチャンネルの LSB として拾われる。
+
+.program i2s_out
+.side_set 2                         ;  bit1 = LRCK / bit0 = BCK
+
+.wrap_target
+bitloop_r:                          ; R チャンネル (LRCK = 1)
+    out pins, 1        side 0b10    ; BCK L: ビットを出す
+    jmp x--, bitloop_r side 0b11    ; BCK H: DAC が拾う。15bit ぶん回る
+    out pins, 1        side 0b00    ; 16bit 目。ここで LRCK を先に落とす
+    set x, 14          side 0b01
+
+bitloop_l:                          ; L チャンネル (LRCK = 0)
+    out pins, 1        side 0b00
+    jmp x--, bitloop_l side 0b01
+    out pins, 1        side 0b10    ; 16bit 目。ここで LRCK を先に上げる
+    set x, 14          side 0b11
+.wrap
+
+% c-sdk {
+
+// I2S 出力用ステートマシンを初期化する。
+//
+// data_pin   : DIN
+// clock_base : BCK。BCK と LRCK が連続していること (clock_base + 1 = LRCK)
+// div_int / div_frac8 は 16.8 固定小数の分周比（呼び出し側で算出する）。
+static inline void i2s_out_program_init(PIO pio, uint sm, uint offset, uint data_pin,
+                                        uint clock_base, uint32_t div_int, uint8_t div_frac8) {
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, clock_base);
+    pio_gpio_init(pio, clock_base + 1u);
+    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, clock_base, 2, true);
+
+    pio_sm_config c = i2s_out_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_sideset_pins(&c, clock_base);
+
+    // MSB first (shift_right = false) で 32bit autopull。1 プル = 1 フレーム。
+    sm_config_set_out_shift(&c, false, true, 32);
+
+    // RX FIFO は使わないので TX 側へ寄せて深さ 8 にする。
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    sm_config_set_clkdiv_int_frac8(&c, div_int, div_frac8);
+
+    pio_sm_init(pio, sm, offset, &c);
+
+    // PC は bitloop_r の先頭にあるが、X は pio_sm_init では初期化されない。
+    // X != 14 のまま走り出すと最初の R ブロックのビット数が 16 からずれ、
+    // 以後ワード境界と LRCK の位相が恒久的にずれる。ここで必ず入れておく。
+    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 14));
+}
+%}

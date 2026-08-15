@@ -15,6 +15,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `opm_clock.pio` | φM 生成（PIO） |
 | `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 |
 | `capture.c` / `capture.h` | キャプチャ状態機械 |
+| `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
 | `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
@@ -217,8 +218,8 @@ EOF
 **ファームウェアの検証**は **増分ビルド → SWD で書き込み → `/dev/cu.usbmodem112101` の出力を確認** の 3 ステップで行う（上記の各節そのまま）。ホスト上で走るファームウェアのテストは存在しない。
 
 **ファームウェア自身が持つ自己診断**：
-- `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示
-- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / DMA overrun 回数 / 禁止コード E=0 の数 / 実測フレームレート）
+- `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
+- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート）
 - `s 0` — 統計をリセット
 
 **ホスト側スクリプトの検証**は次の 4 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
@@ -270,6 +271,8 @@ EOF
 ヘッダを触らずに切り替えるときは `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DOPM_CLOCK_MODE=1` で再コンフィグする（`-DOPM_CLOCK_MODE=` 空で `opm.h` の既定に戻る）。
 
 クロック依存の遅延はすべて `clock_get_hz(clk_sys)` から実行時に算出しているため、周波数を変えても定数の書き換えは要らない。
+
+I2S の分周比は `i2s_init()` が **φM の分周値（256 倍固定小数）をそのまま 2 倍**して作る（`clkdiv_i2s = sys_clk/φM = 2 × clkdiv_opm`）。丸めを挟まないので、サンプリングレートは φM/64 と厳密に一致する。**φM 側だけを変えても I2S は自動で追従する**（docs §5.2）。
 
 ## Git
 

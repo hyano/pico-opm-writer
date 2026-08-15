@@ -49,6 +49,20 @@ static struct {
     .bytes_max = 0,
 };
 
+/* ---- I2S 出力 ---------------------------------------------------------- */
+
+/*
+ * こちらは減る方向が危険なので low-water を残す。UINT32_MAX は「まだ 1 度も
+ * 通知されていない」ことを表す番兵。
+ */
+static struct {
+    uint32_t depth_current;   /* 現在の先行フレーム数 */
+    uint32_t depth_min;       /* リセット以降の最小値 */
+} s_i2s = {
+    .depth_current = 0,
+    .depth_min = UINT32_MAX,
+};
+
 /* ---- カウンタ ---------------------------------------------------------- */
 
 static struct {
@@ -57,12 +71,14 @@ static struct {
     uint32_t rxstall;      /* PIO RX FIFO あふれ回数 */
     uint64_t frames;       /* 総フレーム数 */
     uint32_t frame_rate;   /* 直近窓でのフレームレート [frames/s] */
+    uint32_t i2s_underrun; /* I2S の先行分が尽きた回数 */
 } s_counters = {
     .overrun = 0,
     .forbidden = 0,
     .rxstall = 0,
     .frames = 0,
     .frame_rate = 0,
+    .i2s_underrun = 0,
 };
 
 /* ---- CPU 使用率 -------------------------------------------------------- */
@@ -148,6 +164,23 @@ uint32_t stats_usb_tx_bytes_max(void) {
     return s_usb_tx.bytes_max;
 }
 
+/* ---- I2S 出力 ---------------------------------------------------------- */
+
+void stats_i2s_update(uint32_t depth_frames) {
+    s_i2s.depth_current = depth_frames;
+    if (depth_frames < s_i2s.depth_min) {
+        s_i2s.depth_min = depth_frames;
+    }
+}
+
+uint32_t stats_i2s_depth(void) {
+    return s_i2s.depth_current;
+}
+
+uint32_t stats_i2s_depth_min(void) {
+    return s_i2s.depth_min;
+}
+
 /* ---- カウンタ ---------------------------------------------------------- */
 
 void stats_count_overrun(void) {
@@ -167,6 +200,10 @@ void stats_count_frames(uint32_t n) {
     s_window.frames_in_window += n;
 }
 
+void stats_count_i2s_underrun(void) {
+    s_counters.i2s_underrun++;
+}
+
 uint32_t stats_overrun(void) {
     return s_counters.overrun;
 }
@@ -181,6 +218,10 @@ uint32_t stats_rxstall(void) {
 
 uint64_t stats_frames(void) {
     return s_counters.frames;
+}
+
+uint32_t stats_i2s_underrun(void) {
+    return s_counters.i2s_underrun;
 }
 
 uint32_t stats_frame_rate(void) {
@@ -203,24 +244,30 @@ void stats_init(void) {
     s_usb_tx.bytes_current = 0;
     s_usb_tx.bytes_max = 0;
 
+    s_i2s.depth_current = 0;
+    s_i2s.depth_min = UINT32_MAX;
+
     s_counters.overrun = 0;
     s_counters.forbidden = 0;
     s_counters.rxstall = 0;
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
+    s_counters.i2s_underrun = 0;
 }
 
 void stats_reset(void) {
-    /* high-water とカウンタを 0 に戻す */
+    /* high-water / low-water とカウンタを初期値に戻す */
     s_cpu.cpu_percent_max = 0;
     s_ring.frames_max = 0;
     s_usb_tx.bytes_max = 0;
+    s_i2s.depth_min = UINT32_MAX;
 
     s_counters.overrun = 0;
     s_counters.forbidden = 0;
     s_counters.rxstall = 0;
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
+    s_counters.i2s_underrun = 0;
 
     /* 窓をリセット */
     s_window.window_start_us = time_us_32();
