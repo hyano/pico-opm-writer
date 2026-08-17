@@ -64,6 +64,24 @@ uint32_t stats_i2s_underrun(void);
 /* 直近 1 秒窓で数えた実測フレームレート [frames/s]。 */
 uint32_t stats_frame_rate(void);
 
+/* ---- フラッシュ書き込み ------------------------------------------------ */
+
+/*
+ * 4KiB ブロックを 1 回書き出した。消去と書き込みのあいだ IRQ は落ちていて
+ * メインループが回らないので、その停止時間 (blackout) の最大値も残す。
+ */
+void stats_count_flash_erase(void);
+void stats_flash_blackout_add(uint32_t us);
+
+uint32_t stats_flash_erase(void);
+uint32_t stats_flash_blackout_max_us(void);
+
+/* ---- VGM 再生 ---------------------------------------------------------- */
+
+/* スケジューラが予定時刻からどれだけ遅れたか。最大値を残す。 */
+void stats_vgm_lag_update(uint32_t us);
+uint32_t stats_vgm_lag_max_us(void);
+
 /* ---- 初期化・リセット -------------------------------------------------- */
 
 void stats_init(void);  /* 起動時に 1 回。全項目を 0 にする */

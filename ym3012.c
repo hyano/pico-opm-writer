@@ -241,6 +241,22 @@ void ym3012_ring_poll(void) {
     s_last_widx = widx;
 }
 
+void ym3012_ring_resync(void) {
+    /*
+     * 差分を積まずに基準点だけ張り直す。ym3012_ring_poll() の差分はリング長
+     * 4096 フレームで剰余を取るので、フラッシュ書き込みのように 65.5ms を超えて
+     * 止まったあとに普通に呼ぶと、進んだ分が一周単位で切り捨てられて
+     * s_write_total に恒久的なずれが残る。ここで基準を捨てて張り直す。
+     *
+     * 止まっている間に取り込まれたフレームは数えられないので、統計上は欠ける。
+     */
+    uintptr_t wp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->write_addr;
+    s_last_widx = (uint32_t)((wp - (uintptr_t)s_ring) >> 2);
+
+    /* 既定カーソルも現在位置へ寄せる（そうしないと誤 overrun になる） */
+    ym3012_reader_sync(&s_reader);
+}
+
 uint64_t ym3012_write_total(void) {
     return s_write_total;
 }

@@ -81,6 +81,18 @@ static struct {
     .i2s_underrun = 0,
 };
 
+/* ---- フラッシュ書き込み / VGM ------------------------------------------ */
+
+static struct {
+    uint32_t flash_erase;          /* 4KiB ブロックの書き出し回数 */
+    uint32_t flash_blackout_max_us;/* 書き出しでメインループが止まった最大時間 */
+    uint32_t vgm_lag_max_us;       /* VGM スケジューラの遅れの最大値 */
+} s_ext = {
+    .flash_erase = 0,
+    .flash_blackout_max_us = 0,
+    .vgm_lag_max_us = 0,
+};
+
 /* ---- CPU 使用率 -------------------------------------------------------- */
 
 void stats_busy_add(uint32_t busy_us) {
@@ -228,6 +240,38 @@ uint32_t stats_frame_rate(void) {
     return s_counters.frame_rate;
 }
 
+/* ---- フラッシュ書き込み ------------------------------------------------ */
+
+void stats_count_flash_erase(void) {
+    s_ext.flash_erase++;
+}
+
+void stats_flash_blackout_add(uint32_t us) {
+    if (us > s_ext.flash_blackout_max_us) {
+        s_ext.flash_blackout_max_us = us;
+    }
+}
+
+uint32_t stats_flash_erase(void) {
+    return s_ext.flash_erase;
+}
+
+uint32_t stats_flash_blackout_max_us(void) {
+    return s_ext.flash_blackout_max_us;
+}
+
+/* ---- VGM 再生 ---------------------------------------------------------- */
+
+void stats_vgm_lag_update(uint32_t us) {
+    if (us > s_ext.vgm_lag_max_us) {
+        s_ext.vgm_lag_max_us = us;
+    }
+}
+
+uint32_t stats_vgm_lag_max_us(void) {
+    return s_ext.vgm_lag_max_us;
+}
+
 /* ---- 初期化・リセット -------------------------------------------------- */
 
 void stats_init(void) {
@@ -253,6 +297,10 @@ void stats_init(void) {
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
+
+    s_ext.flash_erase = 0;
+    s_ext.flash_blackout_max_us = 0;
+    s_ext.vgm_lag_max_us = 0;
 }
 
 void stats_reset(void) {
@@ -268,6 +316,10 @@ void stats_reset(void) {
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
+
+    s_ext.flash_erase = 0;
+    s_ext.flash_blackout_max_us = 0;
+    s_ext.vgm_lag_max_us = 0;
 
     /* 窓をリセット */
     s_window.window_start_us = time_us_32();

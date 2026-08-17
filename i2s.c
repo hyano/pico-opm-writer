@@ -58,6 +58,14 @@ static uint32_t s_last_ridx;
 static uint64_t s_dma_total;
 static uint64_t s_fill_total;
 
+/*
+ * 出力の有効・無効。無効中はソース側リングを一切読まず、無音だけを詰める。
+ * ストレージが HOST モードのあいだ（PC が MSC でフラッシュを書いているあいだ）に
+ * 使う。BCK / LRCK と DMA は止めない。止めると PCM5102A がポップするうえ、
+ * 「I2S 出力は常時動作し停止しない」という前提が崩れる。
+ */
+static bool s_enabled = true;
+
 /* ---- リング操作 -------------------------------------------------------- */
 
 static void i2s_poll(void) {
@@ -158,6 +166,16 @@ bool i2s_service(void) {
     }
 
     uint32_t want = I2S_TARGET_FRAMES - (uint32_t)depth;
+
+    if (!s_enabled) {
+        /*
+         * 無効中。ソースを読まずに無音で埋める。リング全体が無音になるので、
+         * フラッシュ消去でサービスが止まって DMA が古い内容を再生しても無音のまま。
+         */
+        fill_silence(want);
+        return true;
+    }
+
     bool worked = false;
 
     while (want > 0u) {
@@ -190,6 +208,34 @@ bool i2s_service(void) {
     }
 
     return worked;
+}
+
+/* ---- 停止をまたいだ復帰 ------------------------------------------------ */
+
+void i2s_resync(void) {
+    /*
+     * i2s_poll() の差分はリング長 4096 フレームで剰余を取るので、リング一周
+     * 65.5ms を超えて止まったあとは s_dma_total に一周単位のずれが残る。
+     * その状態では depth が過大に見えて depth <= 0 のアンダーラン復帰が
+     * 二度と発火せず、ソース側カーソルも一周遅れのまま固定されてしまう。
+     * ここで DMA の読み出し位置を読み直して全部を張り直す。
+     */
+    uintptr_t rp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->read_addr;
+    s_last_ridx = (uint32_t)((rp - (uintptr_t)s_ring) >> 2);
+
+    stats_count_i2s_underrun();
+    ym3012_reader_sync(&s_reader);
+    s_fill_total = s_dma_total;
+    fill_silence(I2S_TARGET_FRAMES);
+    stats_i2s_update(I2S_TARGET_FRAMES);
+}
+
+void i2s_set_enabled(bool enabled) {
+    s_enabled = enabled;
+}
+
+bool i2s_enabled(void) {
+    return s_enabled;
 }
 
 /* ---- 情報 -------------------------------------------------------------- */
@@ -229,6 +275,17 @@ void i2s_init(void) {
 }
 
 bool i2s_service(void) {
+    return false;
+}
+
+void i2s_resync(void) {
+}
+
+void i2s_set_enabled(bool enabled) {
+    (void)enabled;
+}
+
+bool i2s_enabled(void) {
     return false;
 }
 
