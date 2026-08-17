@@ -7,6 +7,7 @@
  */
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "hardware/clocks.h"
 #include "pico/stdio_usb.h"
@@ -14,10 +15,12 @@
 #include "tusb.h"
 
 #include "capture.h"
+#include "flash_disk.h"
 #include "i2s.h"
 #include "led.h"
 #include "opm.h"
 #include "stats.h"
+#include "storage.h"
 #include "usb_pcm.h"
 #include "ym3012.h"
 
@@ -51,6 +54,7 @@ static void service_all(void) {
     tud_task();
     bool worked = capture_service();
     worked |= i2s_service();
+    worked |= storage_service();
     led_service();
 
     if (worked) {
@@ -101,6 +105,10 @@ static void print_info(void) {
     printf("# i2s     : disabled\n");
 #endif
     printf("# selftest: pio %s\n", ym3012_selftest_detail());
+    printf("# storage : flash 0x%06x + %u KiB  cluster %u B  sector %u B\n",
+           (unsigned)storage_region_offset(),
+           (unsigned)(storage_region_size() / 1024u),
+           (unsigned)FLASH_DISK_ES, (unsigned)FLASH_DISK_SS);
     reply_ok();
 }
 
@@ -133,6 +141,8 @@ static void print_stats(void) {
     printf("# RATE    : %u frames/s (expect %u)\n",
            (unsigned)stats_frame_rate(), (unsigned)(opm_clock_hz_actual() / 64u));
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
+    printf("# FLASH   : ERASE %u   BLACKOUT max %u us\n",
+           (unsigned)stats_flash_erase(), (unsigned)stats_flash_blackout_max_us());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();
@@ -147,6 +157,9 @@ static void print_help(void) {
     puts("# s | s 0                             : show / reset statistics");
     puts("# t                                   : run PCM conversion self test");
     puts("# i                                   : show info");
+    puts("# storage status                      : show storage state");
+    puts("# storage host | storage player       : hand the flash to PC / to firmware");
+    puts("# storage format yes                  : make a new filesystem (FAT12)");
     puts("# h | ?                               : show this help");
     reply_ok();
 }
@@ -176,6 +189,22 @@ static char *next_token(char **cursor) {
 
     *cursor = p;
     return start;
+}
+
+/* トークンの大小無視比較。strcasecmp に依存しない。 */
+static bool tok_is(const char *tok, const char *name) {
+    for (;;) {
+        int a = tolower((unsigned char)*tok);
+        int b = tolower((unsigned char)*name);
+        if (a != b) {
+            return false;
+        }
+        if (a == '\0') {
+            return true;
+        }
+        tok++;
+        name++;
+    }
 }
 
 /* ---- 引数のパース ------------------------------------------------------ */
@@ -335,6 +364,16 @@ static void cmd_pcm(char **cursor) {
     }
 
     if (mode == 1u) {
+        /*
+         * HOST モード中はフラッシュの消去でメインループが数十 ms 止まるので、
+         * キャプチャを走らせない。判定はここに置き、capture.c に storage への
+         * 依存を持ち込まない。
+         */
+        if (storage_mode() == STORAGE_MODE_HOST) {
+            printf("# hint    : storage host 中は PCM キャプチャできない。storage player に戻すこと\n");
+            reply_err("wrong state");
+            return;
+        }
         err = capture_start();
         if (err != NULL) {
             reply_err(err);
@@ -388,6 +427,125 @@ static void cmd_stats(char **cursor) {
     reply_ok();
 }
 
+/* ---- storage -------------------------------------------------------- */
+
+static void print_storage_status(void) {
+    printf("# storage : %s\n", storage_mode_name());
+    printf("# medium  : %s\n", storage_medium_present() ? "present" : "not present");
+    printf("# audio   : %s\n",
+           (storage_mode() == STORAGE_MODE_HOST) ? "disabled (host mode)" : "enabled");
+    printf("# region  : flash 0x%06x + %u KiB  (LBA %u B x %u)\n",
+           (unsigned)storage_region_offset(),
+           (unsigned)(storage_region_size() / 1024u),
+           (unsigned)FLASH_DISK_SS, (unsigned)FLASH_DISK_LBA_COUNT);
+
+    uint32_t fw_end = storage_firmware_end();
+    uint32_t gap = (fw_end < storage_region_offset()) ? (storage_region_offset() - fw_end) : 0u;
+    printf("# firmware: end 0x%08x (%u B)  gap %u KiB\n",
+           (unsigned)(XIP_BASE + fw_end), (unsigned)fw_end, (unsigned)(gap / 1024u));
+
+    uint32_t free_kib = 0, total_kib = 0;
+    if (storage_space_kib(&free_kib, &total_kib)) {
+        printf("# fs      : %s  cluster %u B  free %u/%u KiB\n",
+               storage_fs_type_name(), (unsigned)storage_cluster_bytes(),
+               (unsigned)free_kib, (unsigned)total_kib);
+    } else {
+        printf("# fs      : %s\n", storage_fs_state_name());
+    }
+
+    printf("# label   : %s\n", storage_label()[0] ? storage_label() : "-");
+    printf("# cache   : %u lines  dirty %u\n",
+           (unsigned)FLASH_DISK_CACHE_LINES, (unsigned)flash_disk_dirty_lines());
+    printf("# flash   : ERASE %u   BLACKOUT max %u us\n",
+           (unsigned)stats_flash_erase(), (unsigned)stats_flash_blackout_max_us());
+    reply_ok();
+}
+
+/*
+ * storage status | host | player | format yes
+ *
+ * format は確認トークンを必須にする。すでにマウントできている領域を消すときは
+ * format force yes を要求する。
+ */
+static void cmd_storage(char **cursor) {
+    char *sub = next_token(cursor);
+    if (sub == NULL) {
+        reply_err("wrong arity");
+        return;
+    }
+
+    if (tok_is(sub, "status")) {
+        if (expect_no_args(cursor)) {
+            print_storage_status();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "host")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        const char *err = storage_set_host();
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "player")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        const char *err = storage_set_player();
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "format")) {
+        char *tok = next_token(cursor);
+        bool force = false;
+        if (tok != NULL && tok_is(tok, "force")) {
+            force = true;
+            tok = next_token(cursor);
+        }
+        if (tok == NULL || !tok_is(tok, "yes")) {
+            reply_err("bad argument");
+            return;
+        }
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        if (storage_mode() != STORAGE_MODE_PLAYER) {
+            printf("# hint    : storage player に戻してからフォーマットすること\n");
+            reply_err("wrong state");
+            return;
+        }
+        if (!force && storage_fs_state() == STORAGE_FS_MOUNTED) {
+            printf("# hint    : すでにファイルシステムがある。消すなら storage format force yes\n");
+            reply_err("wrong state");
+            return;
+        }
+
+        /* ガードを全部抜けてから進捗を出す */
+        printf("# format  : 数十秒かかる。この間 I2S はアンダーランする\n");
+        const char *err = storage_format();
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    reply_err("unknown command");
+}
+
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
 static void cmd_selftest(void) {
     const char *detail = NULL;
@@ -415,8 +573,13 @@ static void process_line(char *line) {
     /* コマンドを受け付けたことを LED で示す（待機中・キャプチャ中のどちらでも） */
     led_notify_command();
 
+    /* 複数文字のコマンド。1 文字コマンドの経路には手を入れない。 */
     if (cmd[1] != '\0') {
-        reply_err("unknown command");
+        if (tok_is(cmd, "storage")) {
+            cmd_storage(&cursor);
+        } else {
+            reply_err("unknown command");
+        }
         return;
     }
 
@@ -493,6 +656,9 @@ int main(void) {
      * GP26-GP28 を握るのでループバック自己診断を含む ym3012_init() より後に置く。
      */
     i2s_init();
+
+    /* 内蔵フラッシュ後半のファイルシステム。領域を検査して PLAYER でマウントする。 */
+    storage_init();
 
     bool connected = false;
 

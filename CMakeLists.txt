@@ -35,6 +35,23 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
+# FatFs 本体（external/fatfs は上流のまま）。
+#
+# 別ターゲットにしてあるのは、下の -Wall -Wextra が PRIVATE で付いていて
+# 上流コードに波及しないようにするため。これで警告抑止も改変も要らなくなる。
+#
+# ffconf.h は external/fatfs には置かない。ff.h の #include "ffconf.h" は
+# まず ff.h 自身のあるディレクトリを探すので、そこに無いときだけ
+# リポジトリ直下の ffconf.h が拾われる。
+add_library(fatfs STATIC
+        external/fatfs/ff.c
+        external/fatfs/ffunicode.c
+        )
+target_include_directories(fatfs PUBLIC
+        ${CMAKE_CURRENT_LIST_DIR}/external/fatfs
+        ${CMAKE_CURRENT_LIST_DIR}
+        )
+
 add_executable(pico-opm-writer
         pico-opm-writer.c
         opm.c
@@ -44,6 +61,9 @@ add_executable(pico-opm-writer
         usb_pcm.c
         led.c
         stats.c
+        flash_disk.c
+        diskio_flash.c
+        storage.c
         usb_descriptors.c
         )
 
@@ -67,6 +87,17 @@ endif()
 # I2S 出力（GP26-GP28）。ym3012.h のループバック自己診断の既定値もこれで決まる。
 set(I2S_ENABLED "1" CACHE STRING "I2S output: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE I2S_ENABLED=${I2S_ENABLED})
+
+# FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
+# （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。
+set(FLASH_FATFS_OFFSET "" CACHE STRING "FatFs region offset from XIP_BASE, in bytes")
+set(FLASH_FATFS_SIZE "" CACHE STRING "FatFs region size in bytes")
+if(NOT FLASH_FATFS_OFFSET STREQUAL "")
+    target_compile_definitions(pico-opm-writer PRIVATE FLASH_FATFS_OFFSET=${FLASH_FATFS_OFFSET})
+endif()
+if(NOT FLASH_FATFS_SIZE STREQUAL "")
+    target_compile_definitions(pico-opm-writer PRIVATE FLASH_FATFS_SIZE=${FLASH_FATFS_SIZE})
+endif()
 
 # 起動時ループバック自己診断。空なら I2S_ENABLED から決める（I2S 有効時は無効）。
 # I2S を配線したまま診断だけ試すことはできないので、DAC を外してから 1 を指定する。
@@ -98,7 +129,10 @@ target_link_libraries(pico-opm-writer
         hardware_pio
         hardware_dma
         hardware_clocks
+        hardware_flash
+        pico_flash
         tinyusb_device
+        fatfs
         )
 
 pico_add_extra_outputs(pico-opm-writer)
