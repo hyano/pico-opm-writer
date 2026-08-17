@@ -44,8 +44,25 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
  * read10 / write10 に到達する前にすべて失敗する。
  */
 bool tud_msc_test_unit_ready_cb(uint8_t lun) {
-    (void)lun;
-    return storage_medium_present();
+    if (!storage_medium_present()) {
+        return false;
+    }
+
+    /*
+     * HOST へ入った直後の 1 回だけ、メディアが入れ替わったことを通知する。
+     * false を返すと CHECK CONDITION になるが、sense を先に立てておけば
+     * TinyUSB は MEDIUM NOT PRESENT で上書きせずこちらを返す
+     * （msc_device.c は sense_key が 0 のときだけ既定値を入れる）。
+     *
+     * これが無いと、一度 eject した PC は「取り外し済み」の状態を保持し、
+     * storage host に戻してもディスクとして現れない。
+     */
+    if (storage_take_media_change()) {
+        tud_msc_set_sense(lun, SCSI_SENSE_UNIT_ATTENTION, 0x28, 0x00);
+        return false;
+    }
+
+    return true;
 }
 
 void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size) {
@@ -83,6 +100,7 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
         return -1;
     }
 
+    storage_note_host_read();
     return (int32_t)bufsize;
 }
 

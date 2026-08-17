@@ -59,7 +59,10 @@ bool storage_service(void);
 const char *storage_set_host(void);
 const char *storage_set_player(void);
 
-/* PC が SCSI の START_STOP UNIT で eject したときに呼ぶ */
+/*
+ * PC が SCSI の START_STOP UNIT で eject したときに呼ぶ。
+ * ただしメディアを 1 度も読んでいないホストからの eject は無視する（下記）。
+ */
 void storage_host_ejected(void);
 
 /* ---- 問い合わせ -------------------------------------------------------- */
@@ -107,6 +110,19 @@ const char *storage_label(void);
 const char *storage_format(void);
 
 /* ---- MSC からの通知 ---------------------------------------------------- */
+
+/*
+ * HOST へ入った直後に 1 回だけ true を返す。
+ *
+ * メディアを入れ替えたことをホストへ知らせるための合図で、MSC 側はこれを見て
+ * 1 回だけ UNIT ATTENTION（メディアが変わった）を返す。これをやらないと、
+ * 一度 eject した PC は「取り外し済み」の状態を保持したままになり、
+ * storage host に戻してもディスクとして現れない。
+ */
+bool storage_take_media_change(void);
+
+/* PC がメディアを読んだ。実際に使い始めたかどうかの判定に使う。 */
+void storage_note_host_read(void);
 
 /* PC が書き込んだ。アイドル期限を張り直す。 */
 void storage_note_host_write(void);

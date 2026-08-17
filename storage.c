@@ -32,7 +32,9 @@ static storage_fs_state_t s_fs_state;
 static FATFS s_fs;
 static uint32_t s_fw_end;
 
-static bool s_host_dirty; /* PC が書いたが同期も eject も来ていない */
+static bool s_host_dirty; /* PC が書いたが eject が来ていない */
+static bool s_media_change; /* HOST へ入った直後の 1 回だけ立てる */
+static bool s_host_used;    /* PC がメディアを読んだか */
 static absolute_time_t s_flush_deadline;
 
 static char s_label[16];
@@ -180,6 +182,8 @@ const char *storage_set_host(void) {
     s_fs_state = STORAGE_FS_UNMOUNTED;
     s_label[0] = '\0';
     s_host_dirty = false;
+    s_media_change = true;
+    s_host_used = false;
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
     s_mode = STORAGE_MODE_HOST;
 
@@ -231,6 +235,16 @@ void storage_host_ejected(void) {
         return;
     }
 
+    /*
+     * メディアを 1 度も読んでいないホストからの eject は、利用者の操作ではなく
+     * 「前に取り外したのだから入れ直すな」という macOS の指示。これに従うと
+     * 一度 eject したあと storage host に戻せなくなるので無視する。
+     * 本物の eject は必ずマウント（= 読み出し）のあとに来る。
+     */
+    if (!s_host_used) {
+        return;
+    }
+
     s_host_dirty = false; /* eject は正規の手順なので警告は出さない */
     (void)storage_set_player();
     printf("# storage : ejected by host\n");
@@ -238,7 +252,20 @@ void storage_host_ejected(void) {
 
 /* ---- MSC からの通知 ---------------------------------------------------- */
 
+bool storage_take_media_change(void) {
+    if (!s_media_change) {
+        return false;
+    }
+    s_media_change = false;
+    return true;
+}
+
+void storage_note_host_read(void) {
+    s_host_used = true;
+}
+
 void storage_note_host_write(void) {
+    s_host_used = true;
     s_host_dirty = true;
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
 }

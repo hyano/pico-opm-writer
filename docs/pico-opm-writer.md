@@ -700,6 +700,22 @@ HOST --( storage player / ホストの eject )--> PLAYER
 
 `disk_status()` は HOST モード中に `STA_NOINIT` を返し、FatFs 側からも同時アクセスを塞ぐ。
 
+HOST へ入るとき `storage_take_media_change()` の合図を立て、MSC 側は最初の
+TEST UNIT READY で 1 回だけ UNIT ATTENTION（`0x06` / ASC `0x28`「メディアが
+入れ替わった」）を返す。`tud_msc_test_unit_ready_cb()` が false を返しても、
+sense を先に立てておけば TinyUSB は MEDIUM NOT PRESENT で上書きしない
+（`msc_device.c` は `sense_key` が 0 のときだけ既定値を入れる）。
+
+またホストがメディアを 1 度も読んでいないうちに来た LOEJ は無視する。
+これは利用者の操作ではなく「前に取り外したのだから入れ直すな」というホストの指示で、
+従うと `storage host` に戻せなくなる。
+
+**ただし macOS では、一度取り出すと USB を挿し直すまでディスクとして戻ってこない。**
+UNIT ATTENTION を返しても、TinyUSB がリムーバブルメディアとして申告していても、
+LOEJ 処理を完全に無効にしても変わらないことを実機で確認した。取り出した時点で
+ホスト側の USB マスストレージドライバがデバイスから切り離されるためで、
+ファームウェア側から回避する手段は無い（[README §7.2](../README.md#72-pc-から-vgm-をコピーする)）。
+
 ### 8.5 領域がファームウェアと重ならないこと
 
 `storage_init()` でリンカシンボル `__flash_binary_end` を読み、領域の先頭を超えていたら
