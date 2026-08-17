@@ -22,6 +22,7 @@
 #include "stats.h"
 #include "storage.h"
 #include "usb_pcm.h"
+#include "vgm.h"
 #include "ym3012.h"
 
 /* 1 行の最大長（これを超えたら ERR too long） */
@@ -54,6 +55,7 @@ static void service_all(void) {
     tud_task();
     bool worked = capture_service();
     worked |= i2s_service();
+    worked |= vgm_service();
     worked |= storage_service();
     led_service();
 
@@ -109,6 +111,8 @@ static void print_info(void) {
            (unsigned)storage_region_offset(),
            (unsigned)(storage_region_size() / 1024u),
            (unsigned)FLASH_DISK_ES, (unsigned)FLASH_DISK_SS);
+    printf("# vgm     : dir %s  rate %u Hz  budget %u us\n",
+           VGM_DIR, (unsigned)VGM_SAMPLE_RATE, (unsigned)VGM_BUDGET_US);
     reply_ok();
 }
 
@@ -143,6 +147,13 @@ static void print_stats(void) {
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
     printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",
            (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
+    const char *vgm_name = vgm_current_name();
+    printf("# VGM     : %s%s%s\n", vgm_state_name(), vgm_name[0] ? " " : "", vgm_name);
+    printf("# VGM POS : %llu/%u samples  loop %u\n",
+           (unsigned long long)vgm_position_samples(), (unsigned)vgm_total_samples(),
+           (unsigned)vgm_loop_count());
+    printf("# VGM LAG : max %u us  reslip %u\n",
+           (unsigned)stats_vgm_lag_max_us(), (unsigned)vgm_reslip_count());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();
@@ -160,6 +171,9 @@ static void print_help(void) {
     puts("# storage status                      : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
     puts("# storage format yes                  : make a new filesystem (FAT12)");
+    puts("# vgm list                            : list /VGM/*.vgm");
+    puts("# vgm play <filename>                 : play /VGM/<filename>");
+    puts("# vgm stop                            : stop playback");
     puts("# h | ?                               : show this help");
     reply_ok();
 }
@@ -188,6 +202,32 @@ static char *next_token(char **cursor) {
     }
 
     *cursor = p;
+    return start;
+}
+
+/*
+ * 残りの行をまるごと 1 引数として返す。前後の空白は落とす。空なら NULL。
+ * next_token() と違って区切らないので、空白を含むファイル名をそのまま扱える。
+ */
+static char *rest_of_line(char **cursor) {
+    char *p = *cursor;
+
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    if (*p == '\0') {
+        *cursor = p;
+        return NULL;
+    }
+
+    char *start = p;
+    char *end = p + strlen(p);
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    *end = '\0';
+
+    *cursor = end;
     return start;
 }
 
@@ -273,12 +313,30 @@ static bool expect_no_args(char **cursor) {
 }
 
 /*
+ * VGM 再生中はレジスタを直接叩かせない。VGM とユーザーの書き込みが混ざると
+ * 何が鳴っているのか分からなくなるうえ、チップの状態は VGM 側が持っている。
+ * 拒否したら true。
+ */
+static bool reject_while_playing(void) {
+    if (vgm_is_playing()) {
+        printf("# hint    : VGM 再生中。先に vgm stop を実行すること\n");
+        reply_err("wrong state");
+        return true;
+    }
+    return false;
+}
+
+/*
  * w <addr> <data> [<addr> <data> ...]
  *
  * ペアを読むそばから書き込むため、途中でエラーになってもそこまでの書き込みは
  * 実行済みのまま ERR を返す（仕様どおり）。
  */
 static void cmd_write(char **cursor) {
+    if (reject_while_playing()) {
+        return;
+    }
+
     int pairs = 0;
 
     for (;;) {
@@ -546,6 +604,65 @@ static void cmd_storage(char **cursor) {
     reply_err("unknown command");
 }
 
+/* ---- vgm ------------------------------------------------------------ */
+
+/*
+ * vgm list | play <filename> | stop
+ *
+ * ファイル名は行の残り全部を 1 引数として受けるので、空白を含む名前も扱える。
+ */
+static void cmd_vgm(char **cursor) {
+    char *sub = next_token(cursor);
+    if (sub == NULL) {
+        reply_err("wrong arity");
+        return;
+    }
+
+    if (tok_is(sub, "list")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        /* 行数が多いと printf の待ちが積もるので、1 行ごとにサービスを回す。 */
+        const char *err = vgm_list(service_all);
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "play")) {
+        char *name = rest_of_line(cursor);
+        if (name == NULL) {
+            reply_err("wrong arity");
+            return;
+        }
+        const char *err = vgm_play(name);
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "stop")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        const char *err = vgm_stop();
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    reply_err("unknown command");
+}
+
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
 static void cmd_selftest(void) {
     const char *detail = NULL;
@@ -577,6 +694,8 @@ static void process_line(char *line) {
     if (cmd[1] != '\0') {
         if (tok_is(cmd, "storage")) {
             cmd_storage(&cursor);
+        } else if (tok_is(cmd, "vgm")) {
+            cmd_vgm(&cursor);
         } else {
             reply_err("unknown command");
         }
@@ -589,12 +708,18 @@ static void process_line(char *line) {
         break;
     case 'r':
         if (expect_no_args(&cursor)) {
+            if (reject_while_playing()) {
+                break;
+            }
             opm_reset();
             reply_ok();
         }
         break;
     case 'c':
         if (expect_no_args(&cursor)) {
+            if (reject_while_playing()) {
+                break;
+            }
             opm_clear();
             reply_ok();
         }
@@ -659,6 +784,7 @@ int main(void) {
 
     /* 内蔵フラッシュ後半のファイルシステム。領域を検査して PLAYER でマウントする。 */
     storage_init();
+    vgm_init();
 
     bool connected = false;
 

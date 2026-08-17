@@ -1,0 +1,96 @@
+/*
+ * VGM ファイルの再生
+ *
+ * /VGM/ に置かれた VGM を FatFs から読みながら、YM2151 のレジスタ書き込みを
+ * VGM のタイムスタンプどおりに発行する。演奏対象は YM2151 だけで、他の音源の
+ * コマンドは長さぶん読み飛ばす。
+ *
+ * タイミングは time_us_64() のポーリングで作る。VGM のサンプルクロックは
+ * 常に 44100Hz。φM は sys_clk の整数分周で、どちらも同じ水晶から出ているので
+ * 長期的なずれは生じない。
+ *
+ * SPDX-License-Identifier: MIT
+ */
+#ifndef VGM_H
+#define VGM_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+/* VGM のサンプルクロック。仕様で固定。 */
+#define VGM_SAMPLE_RATE 44100u
+
+/*
+ * vgm_service() 1 回で opm_write() に使ってよい時間。
+ *
+ * メインループは 1 周回で標準入力を 1 文字しか読まないので、ここを大きくすると
+ * コマンド入力が遅くなる（1.5ms にすると 660 文字/秒まで落ちる）。500us なら
+ * 約 2000 文字/秒。追いつき能力は opm_write() が 32us なので約 28k writes/s で、
+ * VGM が要求する量に対して十分。
+ */
+#define VGM_BUDGET_US 500u
+
+/* この時間より遅れたら時計を張り直す（長い停止のあとに早送りしない） */
+#define VGM_RESYNC_LAG_US 200000u
+
+/* VGM ファイルを置くディレクトリ */
+#define VGM_DIR "/VGM"
+
+/* vgm list が並べられるファイル数の上限 */
+#define VGM_LIST_MAX 256u
+
+typedef enum {
+    VGM_STATE_STOPPED = 0,
+    VGM_STATE_PLAYING,
+    VGM_STATE_ERROR, /* ストリームの途中で壊れていた */
+} vgm_state_t;
+
+/* ---- 初期化とサービス -------------------------------------------------- */
+
+void vgm_init(void);
+
+/*
+ * メインループから毎周回呼ぶ。予定時刻に達したコマンドを VGM_BUDGET_US 分だけ
+ * 実行する。遅れた分は次の周回で詰める。戻り値は実仕事をしたかどうか。
+ */
+bool vgm_service(void);
+
+/* ---- 操作 -------------------------------------------------------------- */
+
+/*
+ * /VGM/<name> を開いてヘッダを検証し、再生を始める。
+ * 成功なら NULL、失敗ならエラー理由の文字列（capture_start() と同じ流儀）。
+ * ファイル形式のエラーはここで同期的に判明する。
+ */
+const char *vgm_play(const char *name);
+
+/* 再生を止めて全チャンネルをキーオフする。停止中なら "wrong state"。 */
+const char *vgm_stop(void);
+
+/*
+ * /VGM/ の .vgm を名前の昇順（大小無視）で 1 行ずつ出力する。
+ *
+ * tick は 1 行出すごとに呼ばれる。PICO_STDIO_USB_STDOUT_TIMEOUT_US が 10ms
+ * あるので、行数が多いと printf の合計待ち時間がリング一周 65.5ms を超えうる。
+ * ここに service_all() を渡してキャプチャと I2S を止めない。
+ *
+ * 成功なら NULL、失敗ならエラー理由の文字列。
+ */
+const char *vgm_list(void (*tick)(void));
+
+/* ---- 問い合わせ -------------------------------------------------------- */
+
+vgm_state_t vgm_state(void);
+const char *vgm_state_name(void);
+bool vgm_is_playing(void);
+
+const char *vgm_current_name(void); /* 再生中のファイル名。無ければ空文字列 */
+uint64_t vgm_position_samples(void); /* 発行済みのサンプル位置 */
+uint32_t vgm_total_samples(void);    /* ヘッダの総サンプル数。不明なら 0 */
+uint32_t vgm_loop_count(void);
+uint32_t vgm_reslip_count(void); /* 時計を張り直した回数 */
+
+/* ヘッダが申告する YM2151 のクロック [Hz]。不明なら 0。 */
+uint32_t vgm_file_clock_hz(void);
+
+#endif /* VGM_H */

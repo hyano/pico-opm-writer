@@ -15,6 +15,7 @@
 #include "capture.h"
 #include "flash_disk.h"
 #include "i2s.h"
+#include "vgm.h"
 #include "ym3012.h"
 
 /* リンカが置くファームウェア末尾。領域の重なり検査に使う。 */
@@ -147,6 +148,14 @@ const char *storage_set_host(void) {
         return NULL; /* 冪等 */
     }
 
+    /*
+     * HOST に渡すとファイルシステムをアンマウントするので、再生中の VGM が
+     * 読めなくなる。キャプチャも消去の停止に巻き込まれる。どちらも先に止めさせる。
+     */
+    if (vgm_is_playing()) {
+        printf("# hint    : VGM 再生中は切り替えられない。先に vgm stop を実行すること\n");
+        return "wrong state";
+    }
     if (capture_state() != CAPTURE_STATE_IDLE) {
         printf("# hint    : PCM キャプチャ中は切り替えられない。先に p 0 を実行すること\n");
         return "wrong state";
