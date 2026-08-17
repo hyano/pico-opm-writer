@@ -21,16 +21,25 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [usb_pcm.h](../usb_pcm.h) / [usb_pcm.c](../usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
 | [led.h](../led.h) / [led.c](../led.c) | 非ブロッキングな LED パターン表示 |
 | [stats.h](../stats.h) / [stats.c](../stats.c) | CPU 使用率・high-water・カウンタ |
-| [tusb_config.h](../tusb_config.h) / [usb_descriptors.c](../usb_descriptors.c) | USB CDC 2 本構成の TinyUSB 設定とディスクリプタ |
+| [flash_disk.h](../flash_disk.h) / [flash_disk.c](../flash_disk.c) | 内蔵フラッシュ後半のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
+| [ffconf.h](../ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
+| [diskio_flash.c](../diskio_flash.c) | FatFs の `disk_*` 実装 |
+| [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
+| [usb_msc.c](../usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
+| [vgm.h](../vgm.h) / [vgm.c](../vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
+| [tusb_config.h](../tusb_config.h) / [usb_descriptors.c](../usb_descriptors.c) | USB CDC 2 本 + MSC 1 本の TinyUSB 設定とディスクリプタ |
+| [external/fatfs/](../external/fatfs/) | FatFs R0.16（上流のまま。[external/README.md](../external/README.md)） |
 
 ### 1.1 メインループ
 
-メインループは `tud_task()` → キャプチャの送出 → I2S への供給 → LED → 統計 →
-コマンド 1 文字読み、を回すだけ。`d` の待機と `p 0` のドレイン待ちからも同じ処理を
-呼ぶので、コマンドの待ち時間の中でも PCM の送出・I2S への供給・USB の処理は止まらない。
+メインループは `tud_task()` → キャプチャの送出 → I2S への供給 → VGM の発行 →
+ストレージの書き出し → LED → 統計 → コマンド 1 文字読み、を回すだけ。
+`d` の待機、`p 0` のドレイン待ち、`vgm list` の行出力の合間からも同じ処理を呼ぶので、
+コマンドの待ち時間の中でも PCM の送出・I2S への供給・USB の処理は止まらない。
 
 **この周回は 2 つの DMA リングの位置を追いかけている**（キャプチャ側とI2S 側）。
 どちらもリング一周は 65.5ms なので、1 周回がこれを超えると位置を見失う。
+フラッシュの消去はこれを超えるので、専用の復帰手順を用意している（[§9.3](#93-書き込み中の停止とリング位置)）。
 
 コマンド側の入出力はすべて標準入出力 API 経由で行う。
 
@@ -55,6 +64,16 @@ uint32_t opm_clock_div_frac(void);          // PIO 分周比の小数部（/256�
 ```
 
 クロック照会の 3 関数は `i` の情報表示（[README §3.6](../README.md#36-i情報表示の出力例)）に使う。
+
+リングの位置を張り直す 2 つは、フラッシュ書き込みのように 65.5ms を超えて止まった
+あとに呼ぶ（[§9.3](#93-書き込み中の停止とリング位置)）。
+
+```c
+void ym3012_ring_resync(void); // DMA の書き込み位置を読み直し、既定カーソルを合わせる
+void i2s_resync(void);         // DMA の読み出し位置を読み直し、先行分を無音で埋め直す
+void i2s_set_enabled(bool);    // 無効中はソースを読まず無音だけを流す（クロックは止めない）
+```
+
 
 ## 2. φM の生成
 
@@ -505,7 +524,7 @@ OPM を繋がずに動かした場合はソースが供給されないため、1
 欠損量は `s` の `RATE` で確かめられる。`r` を含む 1 秒だけ 61870 frames/s 前後（= 62500 から
 620 ほど少ない）に落ち、/IC を使わない `c` では 62500 frames/s のまま減らない。
 
-## 6. USB CDC 2 本構成の実装
+## 6. USB CDC 2 本と MSC の実装
 
 コマンド用とキャプチャ用に CDC を 2 本並べる（利用者から見た構成は
 [README §3.1](../README.md#31-接続)）。Pico SDK の `stdio_usb` は CDC を 1 本しか
@@ -523,7 +542,24 @@ OPM を繋がずに動かした場合はソースが供給されないため、1
 
 `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を CMake で定義している。既定の 0.5 秒のままだと、
 ホストが CDC #0 を読まないときの `printf` が DMA リングの 65.5ms（[§4.4](#44-dma-リング)）を
-食い潰す。
+食い潰す。同じ理由で `vgm list` は行の出力ごとにメインループのサービスを回す。
+
+### 6.1 MSC の追加
+
+マスストレージは CDC の**後ろ**（インタフェース 4、EP `0x05` / `0x85`）に足す。
+CDC #0 をインタフェース 0 に固定したままにするためで、CDC #1 の番号も動かない。
+`USBD_ITF_MAX` がそのまま `bNumInterfaces` になるので、enum に 1 行足すだけで追従する。
+
+`CFG_TUD_MSC_EP_BUFSIZE` は論理セクタと同じ 512 にする。こうすると `read10` / `write10`
+コールバックの `offset` が常に 0 になり、1 回の呼び出しがちょうど 1 セクタになる。
+この define が無いと `msc_device.h` が `#error` で止まる。
+
+**モードの切り替えでインタフェースを付け外ししない。** `bNumInterfaces` を変えるには
+`tud_disconnect()` / `tud_connect()` が必要で、`storage host` と打った瞬間に CDC #0 が
+切れてしまい、同じセッションからモードを往復できなくなる。代わりに
+`tud_msc_test_unit_ready_cb()` の真偽で**メディアの挿抜**として表現する。
+false を返すと TinyUSB が自分で MEDIUM NOT PRESENT の sense を立てるので、
+PLAYER モードでは PC からの SCSI コマンドが `read10` / `write10` に到達する前に全部失敗する。
 
 ## 7. ビルド構成
 
@@ -538,7 +574,10 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 - `pico_generate_pio_header(... opm_clock.pio)` / `(... ym3012.pio)` / `(... i2s.pio)` →
   `build/opm_clock.pio.h` / `build/ym3012.pio.h` / `build/i2s.pio.h` を生成
 - `target_link_libraries` は `pico_stdlib` / `hardware_pio` / `hardware_dma` /
-  `hardware_clocks` / `tinyusb_device`
+  `hardware_clocks` / `hardware_flash` / `pico_flash` / `tinyusb_device` / `fatfs`
+- FatFs は `add_library(fatfs STATIC ...)` の別ターゲットにする。`-Wall -Wextra` が
+  `pico-opm-writer` に `PRIVATE` で付いているので、これで上流コードに波及せず、
+  警告抑止も改変も要らなくなる（[§8](#8-ストレージ)）
 - キャッシュ変数 `OPM_CLOCK_MODE` を持ち、指定時のみ同名マクロを
   `target_compile_definitions` で渡す（φM プリセットの切り替え、[§2](#2-φm-の生成)）
 - キャッシュ変数 `I2S_ENABLED`（既定 1）は**常に**マクロとして渡す。
@@ -546,7 +585,9 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   未定義のままにできない（[§4.6](#46-起動時の自己診断)）
 - キャッシュ変数 `YM3012_LOOPBACK` は指定時のみ `YM3012_LOOPBACK_ENABLED` として渡し、
   上の自動判定を上書きする
-- `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本構成の実装)）
+- キャッシュ変数 `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` は指定時のみ同名マクロを渡す。
+  未指定なら [flash_disk.h](../flash_disk.h) の既定値（[README §7.1](../README.md#71-領域の変え方)）
+- `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本と-msc-の実装)）
 - `pico_enable_stdio_usb 1` / `pico_enable_stdio_uart 0`
 - `target_include_directories` にリポジトリ直下を入れる。SDK の tusb_config.h は
   `-isystem` で入るので、これで自前の [tusb_config.h](../tusb_config.h) が優先される
@@ -559,3 +600,184 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 ここに書く。
 
 **新しい `.pio` を追加したときは `pico_generate_pio_header()` の行を足して再コンフィグする。**
+
+## 8. ストレージ
+
+内蔵 QSPI フラッシュ後半を FAT ファイルシステムとして使う。層の構成は次のとおり。
+
+```
+  VGM Player                USB MSC (usb_msc.c)
+      |                            |
+    FatFs (external/fatfs)         |
+      |                            |
+  diskio_flash.c                   |
+      |                            |
+      +---------> flash_disk.c <---+
+                       |
+             内蔵 QSPI フラッシュ
+```
+
+`flash_disk.c` は論理セクタ 512 バイトのブロックデバイスで、FatFs と USB MSC の
+**両方が同じサイズで見る**。所有権は `storage.c` のモードで排他にしており、
+同時に両方から触られることはない（[README §7.3](../README.md#73-書き込みの仕組みと制約)）。
+
+### 8.1 `ffconf.h` をプロジェクト側に置く仕組み
+
+FatFs 本体は無改変で `external/fatfs/` に置く。設定だけをリポジトリ直下の
+[ffconf.h](../ffconf.h) に持たせるために、**上流のテンプレート `ffconf.h` を
+`external/fatfs/` へ置かない**。
+
+`ff.h` の `#include "ffconf.h"` がツリー内で唯一の参照で（`ff.c` は `ff.h` と
+`diskio.h` しか include しない）、GCC は `"..."` をまず include 元のファイルがある
+ディレクトリから探す。そこに無ければ `-I` に入っているリポジトリ直下が拾われる。
+
+事故を検出するため [ffconf.h](../ffconf.h) は `OPM_FFCONF_H` を定義し、
+[diskio_flash.c](../diskio_flash.c) が `#if !defined(OPM_FFCONF_H)` で `#error` にする。
+`ff.h` 自身も `FF_DEFINED != FFCONF_DEF` をコンパイル時に弾くので、版のずれも検出される。
+
+出所・適用した公式パッチ・省いたファイルは [external/README.md](../external/README.md) に記録している。
+
+### 8.2 ライトバックキャッシュ
+
+フラッシュの消去単位は 4096 バイト、論理セクタは 512 バイトなので、書き込みには
+読み出し・修正・書き戻しが要る。8 行 × 4KiB（RAM 32KiB）のキャッシュを挟む。
+
+| 関数 | 性質 |
+| --- | --- |
+| `flash_disk_read()` | dirty な行はその行から、それ以外は XIP から `memcpy`。ブロックしない・消去しない・キャッシュを汚さない |
+| `flash_disk_write()` | キャッシュに載せるだけ。**絶対に消去しない**。空きが無ければ `FLASH_DISK_BUSY` |
+| `flash_disk_flush_one()` | 最も古い dirty 行を 1 つ書き出す。**唯一の停止点** |
+
+行数を 8 にしてあるのは、FAT12 のメタデータ（ブートセクタ + FAT + ルートディレクトリ
+= 4KiB ブロックで 5 個ほど）とデータクラスタを同時に載せておくため。PC のファイルコピーは
+FAT・ディレクトリ・データを交互に書くので、行が少ないとそのたびに追い出しが起きる。
+
+書き出す前に XIP を読んで全 `0xFF` なら消去を省く。新品の基板ではフラッシュ後半が
+まるごと消去済みなので、初回のフォーマットと最初のコピーが目に見えて速くなる。
+
+`flash_range_program()` へ渡すポインタは RAM を指している必要がある（書き込み中は
+XIP が止まる）。キャッシュ行のデータ部を別配列にしてあるのはそのため。
+
+### 8.3 書き出しをいつ行うか
+
+**`tud_msc_write10_cb()` の中でその場で書き出す。** 当初は「キャッシュが埋まったら 0 を
+返して呼び直してもらい、その隙にメインループのサービスが書き出す」設計にしたが、これは
+成立しない。`tud_task()` はイベントキューを空になるまで同じ呼び出しの中で回すので、
+0 を返してもメインループには戻らず、再試行が空回りするだけでコピーが止まる。
+
+HOST モードでは PCM キャプチャと I2S を止めてあるので（[§8.4](#84-所有権の切り替え)）、
+ここで数十 ms ブロックしても巻き込む相手がいない。
+
+先回りの書き出しはしない。「dirty が全行に達したら書き出す」ようにすると、ホストが
+FAT やディレクトリを何度も書き直すたびに書き出したそばから汚れ直し、書き込み回数が
+数倍になる。SCSI の `SYNCHRONIZE CACHE` でも書き出さない（macOS はコピー中にこれを
+頻繁に投げてくる）。確実に書き切るのは eject と `storage player` のときだけ。
+
+256KiB のコピー（macOS の `cp`）での実測:
+
+| 方式 | 書き出し回数 | 所要時間 |
+| --- | --- | --- |
+| 先回り + SYNCHRONIZE CACHE で全書き出し | 640 | 34 秒 |
+| 必要になったときだけ | **76** | **3 秒** |
+
+理論値は 256KiB / 4KiB = 64 回なので、1.19 倍まで詰められている。
+
+### 8.4 所有権の切り替え
+
+```
+PLAYER --( storage host )--> HOST
+    ガード: VGM 停止中 かつ capture_state() == IDLE
+    動作:   i2s_set_enabled(false) -> f_unmount() -> メディア挿入
+
+HOST --( storage player / ホストの eject )--> PLAYER
+    動作:   flash_disk_flush_all() -> メディア排出 -> f_mount()
+            -> i2s_set_enabled(true) -> ym3012_ring_resync() -> i2s_resync()
+```
+
+`STORAGE_MODE_PLAYER` を 0 にしてあるので、`.bss` のゼロ初期値が「メディア非挿入」に
+なる。`tusb_init()` から `storage_init()` までの隙間で MSC のコールバックが呼ばれても
+安全側に倒れる。
+
+`disk_status()` は HOST モード中に `STA_NOINIT` を返し、FatFs 側からも同時アクセスを塞ぐ。
+
+### 8.5 領域がファームウェアと重ならないこと
+
+`storage_init()` でリンカシンボル `__flash_binary_end` を読み、領域の先頭を超えていたら
+`STORAGE_FS_REGION_OVERLAP` にして**マウントも書き込みも一切しない**。
+
+`hard_assert` で止めないのは、基板が起動しなくなると復旧しづらいため。状態として
+持ち回り、`i` と `storage status` から常時見えるようにしている。
+
+領域自体の妥当性（フラッシュ全体に収まっているか、4096 バイト境界か）は
+`_Static_assert` でコンパイル時に検査する。
+
+## 9. VGM 再生
+
+### 9.1 コマンドの解釈
+
+`vgm_step()` が 1 コマンドずつ処理する。オペランド長は `operand_len()` の表で引き、
+`0xFF` は「未知なので中断」。**どの経路も必ず 1 バイト以上消費する**ので、
+壊れたファイルでも無限ループにならない。シークは必ず `f_size()` と突き合わせる。
+
+`0x54 aa dd`（YM2151 書き込み）の `aa` は 8bit のレジスタアドレスそのもので、
+**bit7 をマスクしてはいけない**。`0x80`-`0xFF` は D1L/RR・KC・KF・PMS/AMS の実レジスタで、
+落とすと音が出なくなる。2 個目の YM2151 は別オペコード `0xA4` で、固定長スキップで飛ばす。
+
+`0x67` のデータブロックは MB 単位になりうるので、`f_lseek()` で飛ばす（1 バイトずつ
+読んで飛ばすと破綻する）。
+
+### 9.2 スケジューラ
+
+```c
+s_due_us = s_start_us + (s_samples * 1000000ull) / VGM_SAMPLE_RATE;
+```
+
+**絶対サンプル数から毎回計算し直す**ので丸め誤差が累積しない。ループの継ぎ目でも
+`s_samples` と `s_start_us` を触らないため、時間の不連続も生じない。
+
+1 回の `vgm_service()` は `VGM_BUDGET_US`（500µs）で打ち切る。メインループは 1 周回で
+標準入力を 1 文字しか読まないので、ここを大きくするとコマンド入力が遅くなる
+（1.5ms にすると 660 文字/秒まで落ちる）。500µs なら約 2000 文字/秒で、
+追いつき能力は `opm_write()` が 32µs なので約 28k writes/s あり十分。
+
+ハードウェアタイマの割り込みは使わない。`opm_write()` が 32µs ブロックするため、
+キーオンが集中すると割り込み文脈を数 ms 占有して `i2s_service()` を飢えさせる。
+「アプリコードに割り込みハンドラを置かない」という既存の方針も崩れる。
+
+キャプチャのフレームカウンタ（φM/64）から時計を取る案も採らない。62500 → 44100 の
+換算が結局必要なうえ、再生タイミングがキャプチャ経路の健全性に依存してしまう。
+
+`VGM_RESYNC_LAG_US`（200ms）を超えて遅れたら、遅れを早送りで取り返さずに時計の方を
+現在時刻へ張り直す。回数は `s` の `reslip` に出る。
+
+### 9.3 書き込み中の停止とリング位置
+
+**これを外すと既存機能が無警告で壊れるので、実装で最も注意を要する点。**
+
+`ym3012_ring_poll()` と `i2s_poll()` は DMA ポインタの差分を**リング長 4096 フレームで
+剰余を取って**総フレーム数に積む（[§4.4](#44-dma-リング) / [§5.3](#53-出力リングと先行量の維持)）。
+フラッシュの消去・書き込みは IRQ を落として数十 ms 止まるので、リング一周 65.5ms を
+超えると進んだ分が一周単位で切り捨てられ、両方のカウンタに恒久的なずれが残る。
+
+そのままだと:
+
+- `i2s_service()` の `depth` が 4096 過大に見え、`depth <= 0` のアンダーラン復帰が**二度と発火しない**
+- I2S のソースカーソルがキャプチャ DMA の書き込み位置を一周遅れで追い続ける
+- `unread >= YM3012_RING_FRAMES` も成立しなくなり overrun 検出も死ぬ
+
+対策は 2 段構えにしてある。
+
+1. **HOST モード中は音声経路を止める。** `i2s_set_enabled(false)` で I2S はソースを
+   読まず無音だけを詰める。リング全体が無音なので、停止中に DMA が古い内容を再生しても
+   出てくるのは無音。BCK / LRCK と DMA は止めない（止めると PCM5102A がポップし、
+   [i2s.h](../i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
+2. **`ym3012_ring_resync()` / `i2s_resync()` で基準点を張り直す。**
+   `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）と、
+   `storage player` への遷移時の 2 か所で呼ぶ
+
+`i2s_resync()` が**自分の ym3012 カーソルも同期する**のが肝。既存のアンダーラン復帰路では
+やっているが、停止経路はそこを通らない。
+
+検証は `s` を見る。**フラッシュの書き出し回数 (`FLASH WRITE`) と `I2S UNDERRUN` が
+ほぼ同数**になり、復帰後に `RATE` が φM/64 ちょうどへ戻れば正しく繋がっている。
+`UNDERRUN` が 0 のままなら resync が効いておらず、静かに壊れている。

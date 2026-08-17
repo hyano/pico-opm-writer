@@ -17,9 +17,15 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `capture.c` / `capture.h` | キャプチャ状態機械 |
 | `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
 | `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
+| `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ後半のブロックデバイス（領域定数・ライトバックキャッシュ） |
+| `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
+| `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
+| `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
+| `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
-| `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本構成 |
+| `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
+| `external/fatfs/` | FatFs R0.16（**上流のまま。改変しない**。出所と適用パッチは `external/README.md`） |
 
 これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 3 本ある。リファレンスは `docs/` にあり、
 ファイル名は拡張子を落とした `docs/<スクリプト名>.md`（`docs/` にはこれらに加えて上記の
@@ -219,7 +225,8 @@ EOF
 
 **ファームウェア自身が持つ自己診断**：
 - `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート）
+- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ）
+- `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
 - `s 0` — 統計をリセット
 
 **ホスト側スクリプトの検証**は次の 4 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
