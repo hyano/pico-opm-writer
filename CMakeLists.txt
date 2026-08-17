@@ -52,6 +52,24 @@ target_include_directories(fatfs PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}
         )
 
+# miniz も同じ理由で別ターゲットにする。使うのは展開器 tinfl だけなので、
+# 圧縮側と zip アーカイブ側は MINIZ_NO_* で全部落とす。設定ヘッダを持たない
+# 造りなので、ここが ffconf.h の代わりになる（external/README.md）。
+add_library(miniz STATIC
+        external/miniz/miniz.c
+        )
+target_include_directories(miniz PUBLIC
+        ${CMAKE_CURRENT_LIST_DIR}/external/miniz
+        )
+target_compile_definitions(miniz PUBLIC
+        MINIZ_NO_STDIO
+        MINIZ_NO_TIME
+        MINIZ_NO_MALLOC
+        MINIZ_NO_DEFLATE_APIS
+        MINIZ_NO_ARCHIVE_APIS
+        MINIZ_NO_ZLIB_APIS
+        )
+
 add_executable(pico-opm-writer
         pico-opm-writer.c
         opm.c
@@ -65,6 +83,7 @@ add_executable(pico-opm-writer
         diskio_flash.c
         storage.c
         vgm.c
+        vgz.c
         usb_msc.c
         usb_descriptors.c
         )
@@ -89,6 +108,11 @@ endif()
 # I2S 出力（GP26-GP28）。ym3012.h のループバック自己診断の既定値もこれで決まる。
 set(I2S_ENABLED "1" CACHE STRING "I2S output: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE I2S_ENABLED=${I2S_ENABLED})
+
+# .vgz（gzip 圧縮された VGM）の再生。0 にすると展開器と 90KB 弱の
+# バッファがリンクされず、.vgz は bad file になる。
+set(VGM_VGZ_ENABLED "1" CACHE STRING "gzip (.vgz) playback: 1 = enabled, 0 = disabled")
+target_compile_definitions(pico-opm-writer PRIVATE VGM_VGZ_ENABLED=${VGM_VGZ_ENABLED})
 
 # FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
 # （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。
@@ -135,6 +159,7 @@ target_link_libraries(pico-opm-writer
         pico_flash
         tinyusb_device
         fatfs
+        miniz
         )
 
 pico_add_extra_outputs(pico-opm-writer)
