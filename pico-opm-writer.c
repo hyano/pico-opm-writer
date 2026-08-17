@@ -141,8 +141,8 @@ static void print_stats(void) {
     printf("# RATE    : %u frames/s (expect %u)\n",
            (unsigned)stats_frame_rate(), (unsigned)(opm_clock_hz_actual() / 64u));
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
-    printf("# FLASH   : ERASE %u   BLACKOUT max %u us\n",
-           (unsigned)stats_flash_erase(), (unsigned)stats_flash_blackout_max_us());
+    printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",
+           (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();
@@ -456,8 +456,8 @@ static void print_storage_status(void) {
     printf("# label   : %s\n", storage_label()[0] ? storage_label() : "-");
     printf("# cache   : %u lines  dirty %u\n",
            (unsigned)FLASH_DISK_CACHE_LINES, (unsigned)flash_disk_dirty_lines());
-    printf("# flash   : ERASE %u   BLACKOUT max %u us\n",
-           (unsigned)stats_flash_erase(), (unsigned)stats_flash_blackout_max_us());
+    printf("# flash   : WRITE %u   BLACKOUT max %u us\n",
+           (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
     reply_ok();
 }
 

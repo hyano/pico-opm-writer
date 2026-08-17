@@ -49,8 +49,18 @@
 /* フルスピードのバルクエンドポイントのパケットサイズ */
 #define CFG_TUD_CDC_EP_BUFSIZE 64
 
-/* CDC 以外のクラスは使わない */
-#define CFG_TUD_MSC 0
+/* 内蔵フラッシュ後半を PC へ見せるマスストレージ */
+#define CFG_TUD_MSC 1
+
+/*
+ * MSC クラス層のバッファサイズ。バルク EP のパケットサイズ (64) とは別物で、
+ * 論理セクタ長と同じ 512 にしておくと read10/write10 コールバックの offset が
+ * 常に 0 になり、1 回の呼び出しがちょうど 1 セクタになる。
+ * この define が無いと msc_device.h が #error になる。
+ */
+#define CFG_TUD_MSC_EP_BUFSIZE 512
+
+/* 残りのクラスは使わない */
 #define CFG_TUD_HID 0
 #define CFG_TUD_MIDI 0
 #define CFG_TUD_VENDOR 0

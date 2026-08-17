@@ -256,7 +256,7 @@ bool flash_disk_flush_one(void) {
     ym3012_ring_resync();
     i2s_resync();
 
-    stats_count_flash_erase();
+    stats_count_flash_write();
     stats_flash_blackout_add(elapsed);
 
     if (rc != PICO_OK) {

@@ -64,6 +64,7 @@ enum {
     USBD_ITF_CDC0_DATA,
     USBD_ITF_CDC1, /* PCM 用 CDC の control インタフェース */
     USBD_ITF_CDC1_DATA,
+    USBD_ITF_MSC, /* 内蔵フラッシュを PC へ見せるマスストレージ */
     USBD_ITF_MAX,
 };
 
@@ -74,6 +75,8 @@ enum {
 #define USBD_CDC1_EP_NOTIF (0x83)
 #define USBD_CDC1_EP_OUT (0x04)
 #define USBD_CDC1_EP_IN (0x84)
+#define USBD_MSC_EP_OUT (0x05)
+#define USBD_MSC_EP_IN (0x85)
 
 /* notification エンドポイントの最大パケットサイズ / data エンドポイントはフルスピードの 64 バイト */
 #define USBD_CDC_NOTIF_MAX_SIZE (8)
@@ -86,9 +89,10 @@ enum {
     USBD_STR_SERIAL,
     USBD_STR_CDC0,
     USBD_STR_CDC1,
+    USBD_STR_MSC,
 };
 
-#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN)
+#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
 
 static const uint8_t s_usbd_desc_cfg[USBD_DESC_LEN] = {
     /* コンフィグ番号, インタフェース数, 文字列インデックス, 総バイト長, 属性, 消費電流(mA) */
@@ -105,6 +109,16 @@ static const uint8_t s_usbd_desc_cfg[USBD_DESC_LEN] = {
 
     TUD_CDC_DESCRIPTOR(USBD_ITF_CDC1, USBD_STR_CDC1, USBD_CDC1_EP_NOTIF,
         USBD_CDC_NOTIF_MAX_SIZE, USBD_CDC1_EP_OUT, USBD_CDC1_EP_IN, USBD_CDC_DATA_MAX_SIZE),
+
+    /*
+     * MSC は CDC の後ろに置く。CDC #0 をインタフェース 0 に固定したままにするためで、
+     * ホスト側のツールがそれを前提にしている。CDC #1 の番号も動かない。
+     *
+     * TUD_MSC_DESCRIPTOR(インタフェース番号, 名前の文字列インデックス,
+     *                    data OUT EP, data IN EP, data EP サイズ)
+     */
+    TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN,
+        USBD_CDC_DATA_MAX_SIZE),
 };
 
 const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
@@ -124,6 +138,7 @@ static const char *const s_usbd_desc_str[] = {
     [USBD_STR_SERIAL] = s_usbd_serial_str,
     [USBD_STR_CDC0] = "pico-opm-writer command",
     [USBD_STR_CDC1] = "pico-opm-writer PCM",
+    [USBD_STR_MSC] = "pico-opm-writer storage",
 };
 
 /* UTF-16 変換後の文字列バッファ（終端の長さ+種別ワードを含む）の最大ワード数 */

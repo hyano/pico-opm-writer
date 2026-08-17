@@ -48,8 +48,8 @@ typedef enum {
 void storage_init(void);
 
 /*
- * メインループから毎周回呼ぶ。HOST モードのとき、必要なら dirty な行を
- * 1 つだけフラッシュへ書き出す。戻り値は実仕事をしたかどうか。
+ * メインループから毎周回呼ぶ。HOST モードでホストの書き込みが途切れたら、
+ * dirty な行を 1 周回 1 つずつフラッシュへ書き出す。戻り値は実仕事をしたかどうか。
  */
 bool storage_service(void);
 
@@ -76,7 +76,7 @@ bool storage_medium_present(void);
 /* FatFs 側からブロックデバイスを触ってよいか。PLAYER モードでのみ true。 */
 bool storage_fatfs_may_access(void);
 
-/* PC が書いたあと SYNCHRONIZE CACHE も eject も来ていない */
+/* PC が書いたあと eject が来ていない */
 bool storage_host_dirty(void);
 
 /* ---- 情報 -------------------------------------------------------------- */
@@ -111,13 +111,7 @@ const char *storage_format(void);
 /* PC が書き込んだ。アイドル期限を張り直す。 */
 void storage_note_host_write(void);
 
-/*
- * キャッシュが埋まって書き込みを受けられなかった。次の storage_service() で
- * 必ず 1 行書き出す。MSC 側は 0 を返して再試行する。
- */
-void storage_request_flush(void);
-
-/* PC がキャッシュの同期を要求した。即座に書き出す。 */
+/* PC がキャッシュの同期を要求した。 */
 bool storage_sync_now(void);
 
 #endif /* STORAGE_H */

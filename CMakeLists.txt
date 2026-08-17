@@ -64,6 +64,7 @@ add_executable(pico-opm-writer
         flash_disk.c
         diskio_flash.c
         storage.c
+        usb_msc.c
         usb_descriptors.c
         )
 

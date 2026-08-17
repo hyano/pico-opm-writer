@@ -84,11 +84,11 @@ static struct {
 /* ---- フラッシュ書き込み / VGM ------------------------------------------ */
 
 static struct {
-    uint32_t flash_erase;          /* 4KiB ブロックの書き出し回数 */
+    uint32_t flash_write;          /* 4KiB ブロックの書き出し回数 */
     uint32_t flash_blackout_max_us;/* 書き出しでメインループが止まった最大時間 */
     uint32_t vgm_lag_max_us;       /* VGM スケジューラの遅れの最大値 */
 } s_ext = {
-    .flash_erase = 0,
+    .flash_write = 0,
     .flash_blackout_max_us = 0,
     .vgm_lag_max_us = 0,
 };
@@ -242,8 +242,8 @@ uint32_t stats_frame_rate(void) {
 
 /* ---- フラッシュ書き込み ------------------------------------------------ */
 
-void stats_count_flash_erase(void) {
-    s_ext.flash_erase++;
+void stats_count_flash_write(void) {
+    s_ext.flash_write++;
 }
 
 void stats_flash_blackout_add(uint32_t us) {
@@ -252,8 +252,8 @@ void stats_flash_blackout_add(uint32_t us) {
     }
 }
 
-uint32_t stats_flash_erase(void) {
-    return s_ext.flash_erase;
+uint32_t stats_flash_write(void) {
+    return s_ext.flash_write;
 }
 
 uint32_t stats_flash_blackout_max_us(void) {
@@ -298,7 +298,7 @@ void stats_init(void) {
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
 
-    s_ext.flash_erase = 0;
+    s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
     s_ext.vgm_lag_max_us = 0;
 }
@@ -317,7 +317,7 @@ void stats_reset(void) {
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
 
-    s_ext.flash_erase = 0;
+    s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
     s_ext.vgm_lag_max_us = 0;
 

@@ -32,7 +32,6 @@ static FATFS s_fs;
 static uint32_t s_fw_end;
 
 static bool s_host_dirty; /* PC が書いたが同期も eject も来ていない */
-static bool s_flush_forced;
 static absolute_time_t s_flush_deadline;
 
 static char s_label[16];
@@ -72,7 +71,6 @@ void storage_init(void) {
 
     s_mode = STORAGE_MODE_PLAYER;
     s_host_dirty = false;
-    s_flush_forced = false;
     s_flush_deadline = get_absolute_time();
     s_label[0] = '\0';
 
@@ -106,16 +104,23 @@ bool storage_service(void) {
     }
 
     /*
-     * 書き出しは 4KiB あたり数十 ms かかり、そのあいだメインループが止まる。
-     * 1 周回につき 1 行までにして、間に tud_task() を挟む。
+     * 書き出す条件は 2 つだけ。
+     *
+     * ホストからの書き込みが STORAGE_FLUSH_IDLE_MS 途切れたら（コピーが終わったら）
+     * dirty が無くなるまで 1 周回 1 行で流し切る。それだけ。
+     *
+     * キャッシュが埋まったときの書き出しは tud_msc_write10_cb() がその場で行う。
+     * ここで先回りして書き出すことはしない。ホストは同じブロック（FAT や
+     * ディレクトリ）を何度も書き直すので、先回りすると書き出したそばから汚れ直し、
+     * 書き込み回数が数倍になる（実測: 256KiB のコピーで 640 回 vs 必要なのは約 210 回）。
+     *
+     * SCSI の SYNCHRONIZE CACHE でも書き出さない。macOS (fskit) はコピー中に
+     * これを頻繁に投げてくるため。確実に書き切るのは eject と storage player の
+     * ときで、そこでは全部書き出す。
      */
-    bool due = s_flush_forced || (dirty >= FLASH_DISK_CACHE_LINES) ||
-               time_reached(s_flush_deadline);
-    if (!due) {
+    if (!time_reached(s_flush_deadline)) {
         return false;
     }
-
-    s_flush_forced = false;
 
     if (!flash_disk_flush_one()) {
         s_fs_state = STORAGE_FS_IO_ERROR;
@@ -123,8 +128,12 @@ bool storage_service(void) {
         return true;
     }
 
-    /* まだ残っているなら次の周回で続ける */
-    s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
+    /*
+     * 期限切れで始まった書き出しは、期限を過去のままにしておくことで
+     * 次の周回も続き、dirty が無くなるまで 1 周回 1 行で流し切る。
+     * 途中でホストが書き始めれば storage_note_host_write() が期限を張り直すので
+     * 自然に中断され、中途半端なブロックを何度も書かずに済む。
+     */
     return true;
 }
 
@@ -162,7 +171,6 @@ const char *storage_set_host(void) {
     s_fs_state = STORAGE_FS_UNMOUNTED;
     s_label[0] = '\0';
     s_host_dirty = false;
-    s_flush_forced = false;
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
     s_mode = STORAGE_MODE_HOST;
 
@@ -226,16 +234,18 @@ void storage_note_host_write(void) {
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
 }
 
-void storage_request_flush(void) {
-    s_flush_forced = true;
-}
-
 bool storage_sync_now(void) {
-    if (!flash_disk_flush_all()) {
-        s_fs_state = STORAGE_FS_IO_ERROR;
-        return false;
-    }
-    s_host_dirty = false;
+    /*
+     * ここで全部書き出さないのは意図的。macOS はコピー中に何度もこれを投げるので、
+     * 素直に従うと消去回数が 1 桁増える（storage_service() のコメント参照）。
+     * 書き込みと同じくアイドル期限を張り直すだけにして、実際の書き出しは
+     * storage_service() のアイドル判定に任せる。
+     *
+     * ACK 済みのデータは RAM のキャッシュに載っており、eject と storage player で
+     * 必ず全部フラッシュへ落とす。失うとすればその前に電源が切れた場合だけで、
+     * これは書き戻しキャッシュを持つ USB メモリと同じ性質。
+     */
+    s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
     return true;
 }
 
