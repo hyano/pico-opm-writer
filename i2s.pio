@@ -32,6 +32,21 @@
 ; I2S は「LRCK が遷移した 1 BCK 後から新しいワードの MSB が始まる」。下では
 ; 各 16bit ブロックの最終ビットを出すところで LRCK を先に反転させており、
 ; その最終ビットは遷移前のチャンネルの LSB として拾われる。
+;
+; ---- ビットカウンタ X の出どころ ----
+;
+; プログラムの先頭は X を読む `jmp x--` から始まるが、X は下の
+; i2s_out_program_init() が pio_sm_exec() で 14 を入れてから SM を起動する。
+; 走り出したあとは各位相の 16bit 目の `set x, 14` が次の位相ぶんを仕込むので、
+; 以後はプログラム内で回る。
+;
+; 1 bit = 2 サイクル / 1 フレーム = 64 サイクルに厳密に収まっており、各位相の
+; 16bit 目の BCK H 区間がその `set x, 14` そのものなので、ym3012.pio のように
+; .wrap_target の直後へ初期化用の `set x` を置く余地は無い（1 命令足すと
+; サンプリングレートが狂う）。
+;
+; SM を再起動する経路を足すときは X を入れ直すこと。PC だけ先頭へ戻すと X が
+; 中途半端な値のまま最初の位相のビット数がずれ、以後恒久的に位相が狂う。
 
 .program i2s_out
 .side_set 2                         ;  bit1 = LRCK / bit0 = BCK
@@ -79,9 +94,9 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset, uint data
 
     pio_sm_init(pio, sm, offset, &c);
 
-    // PC は bitloop_r の先頭にあるが、X は pio_sm_init では初期化されない。
-    // X != 14 のまま走り出すと最初の R ブロックのビット数が 16 からずれ、
-    // 以後ワード境界と LRCK の位相が恒久的にずれる。ここで必ず入れておく。
+    // X は pio_sm_init() では初期化されないのでここで入れる。SM 停止中の
+    // pio_sm_exec() は即時実行されるため、呼び出し側が pio_sm_set_enabled() を
+    // 呼ぶ時点で X = 14 になっている。ずれたときの影響は冒頭のコメント参照。
     pio_sm_exec(pio, sm, pio_encode_set(pio_x, 14));
 }
 %}
