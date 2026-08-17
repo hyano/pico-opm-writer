@@ -66,3 +66,60 @@ SHA256 と検証手順は、パッチを適用したコミットのメッセー�
 
 素の vendoring とパッチ適用は**コミットを分ける**。上流そのままとの差分が
 git 上で 1 コミットとして読めるようにするため。
+
+## miniz — miniz 3.1.2
+
+zlib / DEFLATE 互換の圧縮・展開ライブラリ。作者 Rich Geldreich ほか。
+ライセンスは [miniz/LICENSE](miniz/LICENSE)（MIT。本プロジェクトと同一）。
+
+`.vgz`（gzip 圧縮された VGM）のストリーム展開に、展開器 `tinfl` だけを使う。
+
+| 項目 | 値 |
+| --- | --- |
+| 版 | 3.1.2（2026-07-01） |
+| 取得元 | https://github.com/richgel999/miniz/releases/download/3.1.2/miniz-3.1.2.zip |
+| SHA256 | `f0446d863f9c19926ad9483c523fdc42e42b8d4a6a431d27e09d49c79a140d9a` |
+
+### 置いてあるファイル
+
+配布物は amalgamated（1 対のソースとヘッダ）なので、そのまま置く。
+
+```
+miniz.c  miniz.h  LICENSE  readme.md  ChangeLog.md
+```
+
+`miniz.h` は `miniz_export.h` を include せず、`MINIZ_EXPORT` が未定義なら空に
+展開する。CMake で生成するヘッダは要らない。
+
+### 意図的に置いていないファイル
+
+| ファイル | 理由 |
+| --- | --- |
+| `examples/` | 使用例。ホスト向けで `stdio` を使う |
+
+### 設定
+
+FatFs と違い設定ヘッダを持たないので、`CMakeLists.txt` の `miniz` ターゲットで
+マクロを定義する。圧縮側と zip アーカイブ側を全部落とし、`tinfl` だけを残す。
+
+| マクロ | 意図 |
+| --- | --- |
+| `MINIZ_NO_STDIO` | `fopen` 等を使わせない |
+| `MINIZ_NO_TIME` | `time.h` を使わせない |
+| `MINIZ_NO_MALLOC` | ヒープを使わせない（`tinfl_decompress` は元々使わない） |
+| `MINIZ_NO_DEFLATE_APIS` | 圧縮は不要 |
+| `MINIZ_NO_ARCHIVE_APIS` | zip 読み書きは不要 |
+| `MINIZ_NO_ARCHIVE_WRITING_APIS` | 同上 |
+| `MINIZ_NO_ZLIB_APIS` | `mz_stream` 系は不要。使うのは `tinfl_decompress` だけ |
+
+`MINIZ_LITTLE_ENDIAN` / `MINIZ_USE_UNALIGNED_LOADS_AND_STORES` /
+`MINIZ_HAS_64BIT_REGISTERS` は上書きしない。`miniz.h` が `__BYTE_ORDER__` と
+CPU 判定から Arm 向けに `1 / 0 / 0` を選ぶので、そのままで正しい。
+
+### 更新するとき
+
+1. 新しいアーカイブを展開し、上記 5 ファイルだけを差し替えて `diff` で一致を確認する
+2. `tinfl_decompressor` の構造体にポインタが増えていないことを確認する
+   （`vgz.c` はこの構造体を `memcpy` で保存・復元する。ポインタが入ると壊れる）
+3. `MINIZ_NO_*` の名前が変わっていないか `miniz.h` の冒頭コメントで確認する
+4. この表を書き換える
