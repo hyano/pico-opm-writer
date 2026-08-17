@@ -5,6 +5,10 @@
  * VGM のタイムスタンプどおりに発行する。演奏対象は YM2151 だけで、他の音源の
  * コマンドは長さぶん読み飛ばす。
  *
+ * gzip 圧縮された .vgz も、一時ファイルを作らずストリームのまま展開して再生する
+ * （vgz.h）。圧縮の有無はファイル先頭のマジックで判定するので、拡張子には依存
+ * しない。
+ *
  * タイミングは time_us_64() のポーリングで作る。VGM のサンプルクロックは
  * 常に 44100Hz。φM は sys_clk の整数分周で、どちらも同じ水晶から出ているので
  * 長期的なずれは生じない。
@@ -32,6 +36,15 @@
 
 /* この時間より遅れたら時計を張り直す（長い停止のあとに早送りしない） */
 #define VGM_RESYNC_LAG_US 200000u
+
+/*
+ * .vgz のとき 1 回のバッファ補充で展開するバイト数。
+ *
+ * 非圧縮なら 4096 バイトの f_read は XIP からの memcpy 1 回で終わるが、
+ * 展開は 1 バイトあたり十数サイクルかかるので同じ量にすると 1ms を超えて
+ * VGM_BUDGET_US を割る。1024 バイトなら約 250us に収まる。
+ */
+#define VGM_GZ_CHUNK 1024u
 
 /* VGM ファイルを置くディレクトリ */
 #define VGM_DIR "/VGM"
@@ -68,7 +81,7 @@ const char *vgm_play(const char *name);
 const char *vgm_stop(void);
 
 /*
- * /VGM/ の .vgm を名前の昇順（大小無視）で 1 行ずつ出力する。
+ * /VGM/ の .vgm と .vgz を名前の昇順（大小無視）で 1 行ずつ出力する。
  *
  * tick は 1 行出すごとに呼ばれる。PICO_STDIO_USB_STDOUT_TIMEOUT_US が 10ms
  * あるので、行数が多いと printf の合計待ち時間がリング一周 65.5ms を超えうる。
@@ -89,6 +102,14 @@ uint64_t vgm_position_samples(void); /* 発行済みのサンプル位置 */
 uint32_t vgm_total_samples(void);    /* ヘッダの総サンプル数。不明なら 0 */
 uint32_t vgm_loop_count(void);
 uint32_t vgm_reslip_count(void); /* 時計を張り直した回数 */
+
+bool vgm_is_compressed(void); /* 再生中のファイルが .vgz か */
+
+/*
+ * ループ先頭の展開器の状態を保存できず、先頭から展開し直した回数。
+ * 0 でないと、ループのたびに音が数百 ms 途切れている。
+ */
+uint32_t vgm_gz_reload_count(void);
 
 /* ヘッダが申告する YM2151 のクロック [Hz]。不明なら 0。 */
 uint32_t vgm_file_clock_hz(void);

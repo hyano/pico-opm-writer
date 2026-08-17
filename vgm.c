@@ -16,6 +16,7 @@
 #include "opm.h"
 #include "stats.h"
 #include "storage.h"
+#include "vgz.h"
 
 /* ---- ヘッダのオフセット ------------------------------------------------ */
 
@@ -57,14 +58,32 @@ static uint32_t s_loops;
 static uint32_t s_reslips;
 
 /*
- * ストリーム用のバッファ。1 クラスタぶん読むので f_read は FIL の 512 バイト窓を
- * 通らず disk_read(count=8) に直行し、XIP からの memcpy 1 回で済む。
+ * ストリーム用のバッファ。非圧縮なら 1 クラスタぶん読むので f_read は FIL の
+ * 512 バイト窓を通らず disk_read(count=8) に直行し、XIP からの memcpy 1 回で済む。
  * 複数バイトのコマンドは vgm_getc() を繰り返し呼ぶだけなので、境界処理は要らない。
+ *
+ * .vgz のときもこの同じバッファを使い、補充だけを vgz_read() に切り替える。
+ * vgm_getc() 以降のコマンド解釈は圧縮の有無を知らない。
  */
 static uint8_t s_buf[4096];
 static uint32_t s_buf_len;
 static uint32_t s_buf_pos;
-static uint32_t s_buf_base; /* s_buf[0] のファイル内位置 */
+static uint32_t s_buf_base; /* s_buf[0] の（展開後の）ファイル内位置 */
+
+/* ---- .vgz の状態 ------------------------------------------------------- */
+
+static bool s_gz;            /* 再生中のファイルが .vgz か */
+static uint32_t s_skip_left; /* 分割中の前方読み捨ての残り */
+static uint32_t s_gz_reloads;
+
+/*
+ * ループ先頭を通過するときは s_buf ごと保存する。展開器の状態だけ戻しても、
+ * 復元位置が s_buf の途中になってしまうため。
+ */
+static uint8_t s_snap_buf[sizeof(s_buf)];
+static uint32_t s_snap_buf_len;
+static uint32_t s_snap_buf_pos;
+static uint32_t s_snap_buf_base;
 
 /* ---- バイト列の読み出し ------------------------------------------------ */
 
@@ -73,12 +92,29 @@ static uint32_t rd32(const uint8_t *p) {
            ((uint32_t)p[3] << 24);
 }
 
-/* 現在のファイル内位置 */
+/* 現在の（展開後の）ファイル内位置 */
 static uint32_t vgm_tell(void) {
     return s_buf_base + s_buf_pos;
 }
 
+/*
+ * ファイル全体の長さ。.vgz では gzip トレーラの ISIZE を使う。
+ * ISIZE が信用できないときは VGZ_SIZE_UNKNOWN が返り、上限の判定は
+ * ヘッダの EOF / GD3 オフセットに委ねられる。
+ */
+static uint32_t vgm_size(void) {
+    return s_gz ? vgz_isize() : (uint32_t)f_size(&s_fp);
+}
+
 static bool vgm_refill(void) {
+    if (s_gz) {
+        s_buf_base = vgz_tell();
+        uint32_t n = vgz_read(s_buf, VGM_GZ_CHUNK);
+        s_buf_len = n;
+        s_buf_pos = 0;
+        return n > 0u;
+    }
+
     UINT n = 0;
     s_buf_base = (uint32_t)f_tell(&s_fp);
     if (f_read(&s_fp, s_buf, sizeof(s_buf), &n) != FR_OK || n == 0u) {
@@ -101,6 +137,37 @@ static int vgm_getc(void) {
     return s_buf[s_buf_pos++];
 }
 
+/*
+ * ヘッダなど、決まった長さをまとめて読む。
+ * 全部読めたら true。
+ */
+static bool vgm_read(uint8_t *dst, uint32_t n) {
+    bool ok;
+    if (s_gz) {
+        ok = vgz_read(dst, n) == n;
+        s_buf_base = vgz_tell();
+    } else {
+        UINT rd = 0;
+        ok = f_read(&s_fp, dst, n, &rd) == FR_OK && rd == n;
+        s_buf_base = (uint32_t)f_tell(&s_fp);
+    }
+    /* s_buf を経由しないので、vgm_tell() が合うように畳んでおく。 */
+    s_buf_len = 0;
+    s_buf_pos = 0;
+    return ok;
+}
+
+/*
+ * .vgz の前方読み捨てを予約する。展開しながら捨てるしかないので、
+ * ここでは残り数を積むだけにして vgm_step() が予算内で少しずつ消化する。
+ */
+static void gz_skip_ahead(uint32_t n) {
+    s_buf_base = vgm_tell();
+    s_buf_len = 0;
+    s_buf_pos = 0;
+    s_skip_left = n;
+}
+
 /* n バイト読み飛ばす */
 static bool vgm_skip(uint32_t n) {
     uint32_t in_buf = s_buf_len - s_buf_pos;
@@ -110,12 +177,18 @@ static bool vgm_skip(uint32_t n) {
     }
 
     /*
-     * バッファに無い分はシークで飛ばす。0x67 のデータブロックは MB 単位に
-     * なりうるので、1 バイトずつ読んで飛ばしてはいけない。
+     * バッファに無い分は飛ばす。0x67 のデータブロックは MB 単位になりうるので、
+     * 1 バイトずつ読んで飛ばしてはいけない。
      */
     uint32_t target = vgm_tell() + n;
-    if (target > (uint32_t)f_size(&s_fp)) {
+    if (target > vgm_size()) {
         return false;
+    }
+    if (s_gz) {
+        /* gzip は途中から読めないので、展開して捨てるしかない。 */
+        s_buf_pos = s_buf_len; /* バッファに残っている分は消費済みにする */
+        gz_skip_ahead(n - in_buf);
+        return true;
     }
     if (f_lseek(&s_fp, target) != FR_OK) {
         return false;
@@ -127,9 +200,44 @@ static bool vgm_skip(uint32_t n) {
 }
 
 static bool vgm_seek(uint32_t pos) {
-    if (pos > (uint32_t)f_size(&s_fp)) {
+    if (pos > vgm_size()) {
         return false;
     }
+
+    if (s_gz) {
+        /*
+         * ループ先頭なら、保存しておいた展開器の状態へ即座に戻す。
+         * 保存位置は s_buf まで含めた論理位置で見る（vgz 側は s_buf に
+         * 先読みしたぶんだけ先を指している）。
+         */
+        if (vgz_snapshot_valid() && s_snap_buf_base + s_snap_buf_pos == pos) {
+            if (!vgz_restore()) {
+                return false;
+            }
+            memcpy(s_buf, s_snap_buf, sizeof(s_buf));
+            s_buf_len = s_snap_buf_len;
+            s_buf_pos = s_snap_buf_pos;
+            s_buf_base = s_snap_buf_base;
+            return true;
+        }
+        /*
+         * 保存が無い。後ろへ戻るなら先頭から展開し直すしかない。
+         * ここに来ると継ぎ目で音が数百 ms 途切れるので、回数を数えて s で見せる。
+         */
+        if (pos < vgm_tell()) {
+            if (!vgz_rewind()) {
+                return false;
+            }
+            s_buf_len = 0;
+            s_buf_pos = 0;
+            s_buf_base = 0;
+            s_gz_reloads++;
+            printf("# warn    : .vgz のループ先頭を保存できなかった。先頭から展開し直す\n");
+        }
+        gz_skip_ahead(pos - vgm_tell());
+        return true;
+    }
+
     if (f_lseek(&s_fp, pos) != FR_OK) {
         return false;
     }
@@ -211,12 +319,16 @@ static void key_off_all(void) {
 }
 
 static void close_file(void) {
+    vgz_close();
     if (s_open) {
         f_close(&s_fp);
         s_open = false;
     }
+    s_gz = false;
+    s_skip_left = 0;
     s_buf_len = 0;
     s_buf_pos = 0;
+    s_buf_base = 0;
 }
 
 /* ---- 1 コマンドの実行 -------------------------------------------------- */
@@ -231,9 +343,48 @@ static void advance_samples(uint32_t n) {
     s_due_us = s_start_us + (s_samples * 1000000ull) / VGM_SAMPLE_RATE;
 }
 
+/*
+ * .vgz の前方読み捨てを 1 チャンクだけ進める。s_buf を捨て先に使う
+ * （読み捨て中は s_buf に有効なデータが無い）。続行できるなら true。
+ */
+static bool gz_skip_chunk(void) {
+    uint32_t n = (s_skip_left > VGM_GZ_CHUNK) ? VGM_GZ_CHUNK : s_skip_left;
+    uint32_t got = vgz_read(s_buf, n);
+    s_skip_left -= got;
+    s_buf_base = vgz_tell();
+    s_buf_len = 0;
+    s_buf_pos = 0;
+    if (got < n) {
+        vgm_fail("truncated", s_buf_base);
+        return false;
+    }
+    return true;
+}
+
 /* 続行できるなら true。停止・エラーなら false。 */
 static bool vgm_step(void) {
+    if (s_skip_left > 0u) {
+        /*
+         * .vgz の読み捨ての途中。vgm_service() の予算ループにそのまま乗せて、
+         * 1 周回で 500us ぶんずつ進める。ここで生じた遅れは
+         * VGM_RESYNC_LAG_US による時計の張り直しが吸収する。
+         */
+        return gz_skip_chunk();
+    }
+
     uint32_t at = vgm_tell();
+
+    /*
+     * ループ先頭をはじめて通過する瞬間に展開器の状態を保存する。gzip は後方
+     * シークできないので、これが 2 周目以降の唯一の戻り道になる。
+     */
+    if (s_gz && s_loop_target != 0u && at == s_loop_target && !vgz_snapshot_valid()) {
+        vgz_snapshot();
+        memcpy(s_snap_buf, s_buf, sizeof(s_snap_buf));
+        s_snap_buf_len = s_buf_len;
+        s_snap_buf_pos = s_buf_pos;
+        s_snap_buf_base = s_buf_base;
+    }
 
     if (at >= s_end_bound) {
         /* GD3 や EOF の境界に当たった。終端扱いにする。 */
@@ -366,6 +517,9 @@ end_of_data:
 void vgm_init(void) {
     s_state = VGM_STATE_STOPPED;
     s_open = false;
+    s_gz = false;
+    s_skip_left = 0;
+    s_gz_reloads = 0;
     s_name[0] = '\0';
 }
 
@@ -419,19 +573,14 @@ bool vgm_service(void) {
 /* 成功なら NULL、失敗ならエラー理由 */
 static const char *parse_header(void) {
     uint8_t hdr[VGM_HDR_SIZE];
-    UINT n = 0;
 
-    if (f_size(&s_fp) < VGM_HDR_SIZE) {
+    if (vgm_size() < VGM_HDR_SIZE) {
         return "bad file";
     }
-    if (f_read(&s_fp, hdr, sizeof(hdr), &n) != FR_OK || n != sizeof(hdr)) {
-        return "io error";
-    }
-
-    if (hdr[0] == 0x1Fu && hdr[1] == 0x8Bu) {
-        printf("# hint    : .vgz (gzip) は非対応。gunzip してから転送すること\n");
+    if (!vgm_read(hdr, sizeof(hdr))) {
         return "bad file";
     }
+
     if (memcmp(hdr + VGM_OFF_MAGIC, "Vgm ", 4) != 0) {
         return "bad file";
     }
@@ -445,7 +594,7 @@ static const char *parse_header(void) {
     bool dual_chip = (clock & 0x40000000u) != 0u;
     s_file_clock_hz = clock & 0x3FFFFFFFu;
 
-    uint32_t size = (uint32_t)f_size(&s_fp);
+    uint32_t size = vgm_size();
 
     /* データ開始位置。v1.50 より前と、0 のときは 0x40 固定。 */
     uint32_t data_rel = rd32(hdr + VGM_OFF_DATA);
@@ -486,9 +635,10 @@ static const char *parse_header(void) {
         /* 範囲外ならループ無しとして扱う（再生自体は続けられる） */
     }
 
-    printf("# vgm     : version %u.%02x  samples %u  loop %s\n",
+    printf("# vgm     : version %u.%02x  samples %u  loop %s%s\n",
            (unsigned)((s_version >> 8) & 0xffu), (unsigned)(s_version & 0xffu),
-           (unsigned)s_total_samples, s_loop_target ? "yes" : "no");
+           (unsigned)s_total_samples, s_loop_target ? "yes" : "no",
+           s_gz ? "  gzip" : "");
 
     if (dual_chip) {
         printf("# warn    : dual chip ファイル。2 個目 (0xA4) は無視する\n");
@@ -548,6 +698,33 @@ const char *vgm_play(const char *name) {
     }
     s_open = true;
 
+    /*
+     * 圧縮の有無は拡張子ではなく先頭のマジックで決める。中身が gzip の .vgm も
+     * 世の中にあるし、その逆もある。
+     */
+    uint8_t magic[2];
+    UINT nm = 0;
+    if (f_read(&s_fp, magic, sizeof(magic), &nm) != FR_OK || nm != sizeof(magic)) {
+        close_file();
+        return "bad file";
+    }
+    if (magic[0] == 0x1Fu && magic[1] == 0x8Bu) {
+#if VGM_VGZ_ENABLED
+        if (!vgz_open(&s_fp)) {
+            close_file();
+            return "bad file";
+        }
+        s_gz = true;
+#else
+        printf("# hint    : .vgz (gzip) は VGM_VGZ_ENABLED=0 で無効。gunzip してから転送すること\n");
+        close_file();
+        return "bad file";
+#endif
+    } else if (f_lseek(&s_fp, 0) != FR_OK) {
+        close_file();
+        return "io error";
+    }
+
     const char *err = parse_header();
     if (err != NULL) {
         close_file();
@@ -569,6 +746,7 @@ const char *vgm_play(const char *name) {
     s_samples = 0;
     s_loops = 0;
     s_reslips = 0;
+    s_gz_reloads = 0;
     s_start_us = time_us_64();
     s_due_us = s_start_us;
     s_state = VGM_STATE_PLAYING;
@@ -608,15 +786,19 @@ static int name_cmp(const char *a, const char *b) {
     return strcmp(a, b);
 }
 
-/* 拡張子が .vgm（大小無視）か */
+/* 拡張子が .vgm または .vgz（大小無視）か */
 static bool has_vgm_ext(const char *name) {
     size_t len = strlen(name);
     if (len < 5u) { /* "x.vgm" が最短 */
         return false;
     }
     const char *ext = name + len - 4u;
-    return ext[0] == '.' && tolower((unsigned char)ext[1]) == 'v' &&
-           tolower((unsigned char)ext[2]) == 'g' && tolower((unsigned char)ext[3]) == 'm';
+    if (ext[0] != '.' || tolower((unsigned char)ext[1]) != 'v' ||
+        tolower((unsigned char)ext[2]) != 'g') {
+        return false;
+    }
+    int c = tolower((unsigned char)ext[3]);
+    return c == 'm' || c == 'z';
 }
 
 static bool is_listable(const FILINFO *fi) {
@@ -748,6 +930,14 @@ uint32_t vgm_loop_count(void) {
 
 uint32_t vgm_reslip_count(void) {
     return s_reslips;
+}
+
+bool vgm_is_compressed(void) {
+    return s_gz;
+}
+
+uint32_t vgm_gz_reload_count(void) {
+    return s_gz_reloads;
 }
 
 uint32_t vgm_file_clock_hz(void) {

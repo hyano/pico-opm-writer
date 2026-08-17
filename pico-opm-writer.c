@@ -148,12 +148,14 @@ static void print_stats(void) {
     printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",
            (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
     const char *vgm_name = vgm_current_name();
-    printf("# VGM     : %s%s%s\n", vgm_state_name(), vgm_name[0] ? " " : "", vgm_name);
+    printf("# VGM     : %s%s%s%s\n", vgm_state_name(), vgm_name[0] ? " " : "", vgm_name,
+           vgm_is_compressed() ? "  (gzip)" : "");
     printf("# VGM POS : %llu/%u samples  loop %u\n",
            (unsigned long long)vgm_position_samples(), (unsigned)vgm_total_samples(),
            (unsigned)vgm_loop_count());
-    printf("# VGM LAG : max %u us  reslip %u\n",
-           (unsigned)stats_vgm_lag_max_us(), (unsigned)vgm_reslip_count());
+    printf("# VGM LAG : max %u us  reslip %u  gz reload %u\n",
+           (unsigned)stats_vgm_lag_max_us(), (unsigned)vgm_reslip_count(),
+           (unsigned)vgm_gz_reload_count());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();
@@ -171,7 +173,7 @@ static void print_help(void) {
     puts("# storage status                      : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
     puts("# storage format yes                  : make a new filesystem (FAT12)");
-    puts("# vgm list                            : list /VGM/*.vgm");
+    puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
     puts("# vgm play <filename>                 : play /VGM/<filename>");
     puts("# vgm stop                            : stop playback");
     puts("# h | ?                               : show this help");
