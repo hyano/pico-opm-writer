@@ -37,15 +37,25 @@ static uint32_t s_clock_hz_actual;
 static uint32_t s_setup_cycles;
 
 /*
- * φM の分周比を算出して PIO を起動する。
+ * φM の分周比と、それに付随する sys_clk 依存の値を算出する。
  *
  * φM = sys_clk / (2 x div) なので div = sys_clk / (2 x φM)。
  * これを 1/256 刻みの固定小数にすると div256 = sys_clk x 128 / φM。
+ *
+ * round_up を立てると 1/256 刻みではなく整数へ切り上げる。分周比が大きくなる方向
+ * なので φM は目標以下にしかならず、H/L 期間が公称値より短くならない。クロック
+ * 切り替えの途中（sys_clk が中途半端な 48MHz のとき）に使う。
  */
-static void opm_clock_start(void) {
-    uint32_t sys_hz = clock_get_hz(clk_sys);
+static void opm_clock_compute(uint32_t sys_hz, uint32_t phim_hz, bool round_up) {
+    uint64_t div256;
 
-    uint64_t div256 = ((uint64_t)sys_hz * 128u + OPM_CLOCK_HZ / 2u) / OPM_CLOCK_HZ;
+    if (round_up) {
+        uint64_t den = 2ull * phim_hz;
+        uint64_t div = ((uint64_t)sys_hz + den - 1u) / den;
+        div256 = div << 8;
+    } else {
+        div256 = ((uint64_t)sys_hz * 128u + phim_hz / 2u) / phim_hz;
+    }
     if (div256 < 256u) {
         div256 = 256u; /* 分周比 1 未満にはできない */
     }
@@ -54,11 +64,45 @@ static void opm_clock_start(void) {
     s_div_frac = (uint32_t)(div256 & 0xffu);
     s_clock_hz_actual = (uint32_t)(((uint64_t)sys_hz * 128u) / div256);
 
+    /* ns 指定のセットアップ時間をサイクル数へ（切り上げ） */
+    s_setup_cycles =
+        (uint32_t)(((uint64_t)sys_hz * OPM_T_SETUP_NS + 999999999u) / 1000000000u);
+}
+
+/*
+ * 算出済みの分周比を、走っている SM へ反映する。
+ *
+ * 走ったまま SMx_CLKDIV を書くと進行中のカウントの扱いが規定されていないので、
+ * 一瞬止めてから書く。停止中は SM が最後に出したレベルをピンが保持するため、
+ * 進行中の H/L 期間は数百 ns 伸びるだけで、短くはならない。
+ * clkdiv_restart は分周カウンタを 0 に戻すだけで PC / X / Y には触らない。
+ */
+static void opm_clock_apply(void) {
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_set_clkdiv_int_frac8(s_pio, s_sm, s_div_int, (uint8_t)s_div_frac);
+    pio_sm_clkdiv_restart(s_pio, s_sm);
+    pio_sm_set_enabled(s_pio, s_sm, true);
+}
+
+/* φM の分周比を算出して PIO を起動する。 */
+static void opm_clock_start(void) {
+    opm_clock_compute(clock_get_hz(clk_sys), OPM_CLOCK_HZ, false);
+
     bool ok = pio_claim_free_sm_and_add_program(&opm_clock_program, &s_pio, &s_sm, &s_offset);
     hard_assert(ok);
 
     opm_clock_program_init(s_pio, s_sm, s_offset, OPM_PIN_PHIM, s_div_int, (uint8_t)s_div_frac);
     pio_sm_set_enabled(s_pio, s_sm, true);
+}
+
+void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz) {
+    opm_clock_compute(sys_hz, phim_hz, false);
+    opm_clock_apply();
+}
+
+void opm_clock_retune_up(uint32_t phim_hz) {
+    opm_clock_compute(clock_get_hz(clk_sys), phim_hz, true);
+    opm_clock_apply();
 }
 
 /*
@@ -102,12 +146,7 @@ void opm_init(void) {
     gpio_set_dir(OPM_PIN_IRQ, GPIO_IN);
     gpio_pull_up(OPM_PIN_IRQ);
 
-    /* ns 指定のセットアップ時間をサイクル数へ（切り上げ） */
-    uint32_t sys_hz = clock_get_hz(clk_sys);
-    s_setup_cycles =
-        (uint32_t)(((uint64_t)sys_hz * OPM_T_SETUP_NS + 999999999u) / 1000000000u);
-
-    /* /IC を操作する前に φM を動かしておく必要がある */
+    /* /IC を操作する前に φM を動かしておく必要がある。s_setup_cycles もここで決まる。 */
     opm_clock_start();
 
     opm_reset();

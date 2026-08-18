@@ -19,11 +19,13 @@
  *
  *   _4MHZ : φM 4.000000MHz x 36 = sys 144MHz   → clkdiv 18。RP2350 定格 150MHz 以内
  *   _NTSC : φM 3.579545MHz x 44 = sys 157.5MHz → clkdiv 22。定格比 約 +5% の OC
+ *
+ * 実行時の切り替えは clockmode.h が持つ。ここの定数が決めるのは起動時の既定だけ。
  */
 #define OPM_CLOCK_MODE_4MHZ 0
 #define OPM_CLOCK_MODE_NTSC 1
 
-/* 切り替えはこの行の値、または cmake -DOPM_CLOCK_MODE=1 で行う。 */
+/* 起動時のプリセット。この行の値、または cmake -DOPM_CLOCK_MODE=1 で決まる。 */
 #ifndef OPM_CLOCK_MODE
 #define OPM_CLOCK_MODE OPM_CLOCK_MODE_4MHZ
 #endif
@@ -69,5 +71,18 @@ bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true
 uint32_t opm_clock_hz_actual(void); /* 実際に生成されている φM 周波数 */
 uint32_t opm_clock_div_int(void);   /* PIO 分周比の整数部 */
 uint32_t opm_clock_div_frac(void);  /* PIO 分周比の小数部（/256） */
+
+/*
+ * 走ったまま φM の分周比を張り替える（clockmode.c が使う）。
+ *
+ * _for : 指定した sys_clk を前提に、φM がちょうど phim_hz になる分周比を入れる。
+ *        clk_sys を上げる「前」に、上げたあとの値で呼ぶこと。
+ * _up  : 現在の sys_clk を前提に、分周比を整数へ切り上げて入れる。φM は目標以下に
+ *        しかならないので、H/L 期間が公称値より短くならない。
+ *
+ * どちらも SM を一瞬止めてから書くので、進行中の H/L 期間は伸びるだけで短くならない。
+ */
+void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz);
+void opm_clock_retune_up(uint32_t phim_hz);
 
 #endif /* OPM_H */

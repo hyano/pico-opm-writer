@@ -15,6 +15,7 @@
 #include "tusb.h"
 
 #include "capture.h"
+#include "clockmode.h"
 #include "flash_disk.h"
 #include "i2s.h"
 #include "led.h"
@@ -82,6 +83,9 @@ static void print_info(void) {
            (unsigned)opm_clock_hz_actual(),
            (unsigned)opm_clock_div_int(),
            (unsigned)opm_clock_div_frac());
+    printf("# preset  : %s  (vgm %s)\n",
+           clockmode_preset_name(clockmode_preset()),
+           clockmode_auto() ? "auto" : "fixed");
     printf("# pins    : D0-D7=GP%d-GP%d A0=GP%d /CS=GP%d /WR=GP%d /RD=GP%d /IC=GP%d\n",
            OPM_PIN_D0, OPM_PIN_D0 + 7, OPM_PIN_A0, OPM_PIN_CS, OPM_PIN_WR, OPM_PIN_RD, OPM_PIN_IC);
     printf("# pins    : phiM=GP%d /IRQ=GP%d\n",
@@ -170,6 +174,9 @@ static void print_help(void) {
     puts("# s | s 0                             : show / reset statistics");
     puts("# t                                   : run PCM conversion self test");
     puts("# i                                   : show info");
+    puts("# clock                               : show phiM / sys_clk / i2s rate");
+    puts("# clock 4 | clock 3.58                : switch phiM to 4.000000 / 3.579545 MHz");
+    puts("# clock auto | clock fixed            : follow / ignore the clock in a VGM header");
     puts("# storage status                      : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
     puts("# storage format yes                  : make a new filesystem (FAT12)");
@@ -521,6 +528,64 @@ static void print_storage_status(void) {
     reply_ok();
 }
 
+/* `clock` の出力。切り替え後の確認にも使う。 */
+static void print_clock_status(void) {
+    printf("# phiM    : %u Hz (clkdiv %u + %u/256)\n",
+           (unsigned)opm_clock_hz_actual(),
+           (unsigned)opm_clock_div_int(), (unsigned)opm_clock_div_frac());
+    printf("# sys_clk : %u Hz\n", (unsigned)clock_get_hz(clk_sys));
+    printf("# preset  : %s  (vgm %s)\n",
+           clockmode_preset_name(clockmode_preset()),
+           clockmode_auto() ? "auto" : "fixed");
+#if I2S_ENABLED
+    printf("# i2s     : clkdiv %u + %u/256  rate %u Hz  bck %u Hz\n",
+           (unsigned)i2s_clkdiv_int(), (unsigned)i2s_clkdiv_frac(),
+           (unsigned)i2s_rate_hz(), (unsigned)i2s_bck_hz());
+#endif
+    printf("# capture : rate %u Hz\n", (unsigned)(opm_clock_hz_actual() / 64u));
+    reply_ok();
+}
+
+/*
+ * clock | clock 4 | clock 3.58 | clock auto | clock fixed
+ *
+ * VGM 再生中でも許す。レジスタを叩くわけではないので reject_while_playing() は
+ * 使わない（音程が変わるだけで、テンポは time_us_64() 基準なので狂わない）。
+ */
+static void cmd_clock(char **cursor) {
+    char *sub = next_token(cursor);
+    if (sub == NULL) {
+        print_clock_status();
+        return;
+    }
+    if (!expect_no_args(cursor)) {
+        return;
+    }
+
+    if (tok_is(sub, "auto") || tok_is(sub, "fixed")) {
+        clockmode_set_auto(tok_is(sub, "auto"));
+        reply_ok();
+        return;
+    }
+
+    clock_preset_t target;
+    if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_4MHZ))) {
+        target = CLOCK_PRESET_4MHZ;
+    } else if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_NTSC))) {
+        target = CLOCK_PRESET_NTSC;
+    } else {
+        reply_err("bad argument");
+        return;
+    }
+
+    const char *err = clockmode_set(target);
+    if (err != NULL) {
+        reply_err(err);
+        return;
+    }
+    print_clock_status();
+}
+
 /*
  * storage status | host | player | format yes
  *
@@ -694,7 +759,9 @@ static void process_line(char *line) {
 
     /* 複数文字のコマンド。1 文字コマンドの経路には手を入れない。 */
     if (cmd[1] != '\0') {
-        if (tok_is(cmd, "storage")) {
+        if (tok_is(cmd, "clock")) {
+            cmd_clock(&cursor);
+        } else if (tok_is(cmd, "storage")) {
             cmd_storage(&cursor);
         } else if (tok_is(cmd, "vgm")) {
             cmd_vgm(&cursor);
@@ -760,7 +827,10 @@ static void process_line(char *line) {
 /* ---- メイン ------------------------------------------------------------ */
 
 int main(void) {
-    /* φM を整数分周で作るため、stdio 初期化より前にシステムクロックを上げる。 */
+    /*
+     * φM を整数分周で作るため、stdio 初期化より前にシステムクロックを上げる。
+     * ここで決まるのは起動時のプリセットだけで、以後は clockmode.c が張り替える。
+     */
     set_sys_clock_khz(OPM_SYS_CLOCK_KHZ, true);
 
     /*
@@ -783,6 +853,9 @@ int main(void) {
      * GP26-GP28 を握るのでループバック自己診断を含む ym3012_init() より後に置く。
      */
     i2s_init();
+
+    /* φM の実行時切り替え。現在のプリセットを控えるだけなので i2s_init() の後。 */
+    clockmode_init();
 
     /* 内蔵フラッシュ後半のファイルシステム。領域を検査して PLAYER でマウントする。 */
     storage_init();

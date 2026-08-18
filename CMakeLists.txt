@@ -73,6 +73,7 @@ target_compile_definitions(miniz PUBLIC
 add_executable(pico-opm-writer
         pico-opm-writer.c
         opm.c
+        clockmode.c
         ym3012.c
         capture.c
         i2s.c
@@ -99,8 +100,9 @@ pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/opm_clock.pio
 pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/ym3012.pio)
 pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/i2s.pio)
 
-# φM プリセット（0 = 4MHz / 1 = 3.579545MHz）。未指定なら opm.h の既定値を使う。
-set(OPM_CLOCK_MODE "" CACHE STRING "phiM preset: 0 = 4MHz, 1 = 3.579545MHz")
+# 起動時の φM プリセット（0 = 4MHz / 1 = 3.579545MHz）。未指定なら opm.h の既定値を使う。
+# 実行時は clock コマンドと VGM の追従でどちらへも切り替えられる。
+set(OPM_CLOCK_MODE "" CACHE STRING "boot phiM preset: 0 = 4MHz, 1 = 3.579545MHz")
 if(NOT OPM_CLOCK_MODE STREQUAL "")
     target_compile_definitions(pico-opm-writer PRIVATE OPM_CLOCK_MODE=${OPM_CLOCK_MODE})
 endif()
@@ -155,6 +157,7 @@ target_link_libraries(pico-opm-writer
         hardware_pio
         hardware_dma
         hardware_clocks
+        hardware_pll
         hardware_flash
         pico_flash
         tinyusb_device

@@ -95,18 +95,25 @@ static void fill_silence(uint32_t frames) {
 
 /* ---- 初期化 ------------------------------------------------------------ */
 
+/*
+ * 1 フレーム = 32bit = 64 SM サイクル、fs = φM/64 なので
+ *   clkdiv_i2s = sys_clk / (64 x fs) = sys_clk / φM
+ * φM 側は 2 命令のループなので clkdiv_opm = sys_clk / (2 x φM)、
+ * つまり clkdiv_i2s = 2 x clkdiv_opm。256 倍固定小数のまま 2 倍すれば
+ * 丸めが入らず、サンプリングレートがキャプチャ側と厳密に一致する。
+ *
+ * φM 側が何を入れていてもこの関係だけで決まるので、クロック切り替えの途中で
+ * 使う切り上げ分周比にもそのまま追従する。
+ */
+static void i2s_compute_div(void) {
+    s_div256 = (((opm_clock_div_int() << 8) | opm_clock_div_frac()) * 2u);
+}
+
 void i2s_init(void) {
     bool ok = pio_claim_free_sm_and_add_program(&i2s_out_program, &s_pio, &s_sm, &s_offset);
     hard_assert(ok);
 
-    /*
-     * 1 フレーム = 32bit = 64 SM サイクル、fs = φM/64 なので
-     *   clkdiv_i2s = sys_clk / (64 x fs) = sys_clk / φM
-     * φM 側は 2 命令のループなので clkdiv_opm = sys_clk / (2 x φM)、
-     * つまり clkdiv_i2s = 2 x clkdiv_opm。256 倍固定小数のまま 2 倍すれば
-     * 丸めが入らず、サンプリングレートがキャプチャ側と厳密に一致する。
-     */
-    s_div256 = (((opm_clock_div_int() << 8) | opm_clock_div_frac()) * 2u);
+    i2s_compute_div();
 
     i2s_out_program_init(s_pio, s_sm, s_offset, I2S_PIN_DIN, I2S_PIN_BCK,
                          s_div256 >> 8, (uint8_t)(s_div256 & 0xffu));
@@ -210,6 +217,26 @@ bool i2s_service(void) {
     return worked;
 }
 
+/* ---- クロック切り替え -------------------------------------------------- */
+
+void i2s_retune(void) {
+    i2s_compute_div();
+
+    /*
+     * 走ったまま SMx_CLKDIV を書くと進行中のカウントの扱いが規定されていないので、
+     * 一瞬止めてから書く。停止中は BCK / LRCK が最後のレベルを保持するため、
+     * H/L 期間は数百 ns 伸びるだけで短くはならない。
+     *
+     * pio_sm_restart() は使わない。PC を先頭へ戻すと X が中途半端なまま最初の
+     * 位相のビット数がずれ、以後恒久的に位相が狂う（i2s.pio の注意書き）。
+     * clkdiv_restart は分周カウンタを 0 に戻すだけで PC / X / Y には触らない。
+     */
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_set_clkdiv_int_frac8(s_pio, s_sm, s_div256 >> 8, (uint8_t)(s_div256 & 0xffu));
+    pio_sm_clkdiv_restart(s_pio, s_sm);
+    pio_sm_set_enabled(s_pio, s_sm, true);
+}
+
 /* ---- 停止をまたいだ復帰 ------------------------------------------------ */
 
 void i2s_resync(void) {
@@ -276,6 +303,9 @@ void i2s_init(void) {
 
 bool i2s_service(void) {
     return false;
+}
+
+void i2s_retune(void) {
 }
 
 void i2s_resync(void) {
