@@ -22,10 +22,12 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
+| `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
 | `external/fatfs/` | FatFs R0.16（**上流のまま。改変しない**。出所と適用パッチは `external/README.md`） |
+| `external/miniz/` | miniz 3.1.2（**上流のまま。改変しない**。展開器 `tinfl` だけを使う。設定は `CMakeLists.txt` の `miniz` ターゲットの `MINIZ_NO_*`） |
 
 これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 3 本ある。リファレンスは `docs/` にあり、
 ファイル名は拡張子を落とした `docs/<スクリプト名>.md`（`docs/` にはこれらに加えて上記の
@@ -153,6 +155,16 @@ export PATH=~/.pico-sdk/toolchain/15_2_Rel1/bin:~/.pico-sdk/picotool/2.3.0/picot
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 ```
 
+主なキャッシュ変数（いずれも `-D<名前>=<値>` で再コンフィグして切り替える）:
+
+| 変数 | 既定 | 効果 |
+| --- | --- | --- |
+| `OPM_CLOCK_MODE` | 空（`opm.h` の既定） | φM プリセット（0 = 4MHz / 1 = 3.579545MHz） |
+| `I2S_ENABLED` | 1 | I2S 出力（GP26-GP28） |
+| `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
+| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
+| `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
+
 ### 実機への書き込み（SWD / PicoProbe が既定）
 
 PicoProbe (Debugprobe on Pico, CMSIS-DAP, VID:PID `2e8a:000c`) がターゲット pico2 の SWD に常時接続されている。**CLI からはこれで焼くのが既定**（BOOTSEL 操作もターゲットの USB 状態も不要）:
@@ -225,7 +237,7 @@ EOF
 
 **ファームウェア自身が持つ自己診断**：
 - `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ）
+- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数）
 - `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
 - `s 0` — 統計をリセット
 
@@ -262,7 +274,9 @@ EOF
 
 ### ライブラリの追加
 
-`target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_clocks`）。
+`target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_dma` + `hardware_clocks` + `hardware_flash` + `pico_flash` + `tinyusb_device` + `fatfs` + `miniz`）。
+
+`external/` の上流コードは `add_library(... STATIC ...)` の別ターゲットにする（`fatfs` / `miniz`）。`-Wall -Wextra` が `pico-opm-writer` に `PRIVATE` で付いているので、これで上流へ波及せず警告抑止も改変も要らなくなる。
 
 ### システムクロックは φM とペア（既定 144MHz / φM 4MHz）
 

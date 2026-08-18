@@ -27,8 +27,10 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
 | [usb_msc.c](../usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
 | [vgm.h](../vgm.h) / [vgm.c](../vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
+| [vgz.h](../vgz.h) / [vgz.c](../vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
 | [tusb_config.h](../tusb_config.h) / [usb_descriptors.c](../usb_descriptors.c) | USB CDC 2 本 + MSC 1 本の TinyUSB 設定とディスクリプタ |
 | [external/fatfs/](../external/fatfs/) | FatFs R0.16（上流のまま。[external/README.md](../external/README.md)） |
+| [external/miniz/](../external/miniz/) | miniz 3.1.2（上流のまま。展開器 `tinfl` だけを使う。[external/README.md](../external/README.md)） |
 
 ### 1.1 メインループ
 
@@ -574,10 +576,13 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 - `pico_generate_pio_header(... opm_clock.pio)` / `(... ym3012.pio)` / `(... i2s.pio)` →
   `build/opm_clock.pio.h` / `build/ym3012.pio.h` / `build/i2s.pio.h` を生成
 - `target_link_libraries` は `pico_stdlib` / `hardware_pio` / `hardware_dma` /
-  `hardware_clocks` / `hardware_flash` / `pico_flash` / `tinyusb_device` / `fatfs`
-- FatFs は `add_library(fatfs STATIC ...)` の別ターゲットにする。`-Wall -Wextra` が
+  `hardware_clocks` / `hardware_flash` / `pico_flash` / `tinyusb_device` / `fatfs` / `miniz`
+- FatFs と miniz は `add_library(... STATIC ...)` の別ターゲットにする。`-Wall -Wextra` が
   `pico-opm-writer` に `PRIVATE` で付いているので、これで上流コードに波及せず、
   警告抑止も改変も要らなくなる（[§8](#8-ストレージ)）
+- miniz は設定ヘッダを持たないので、`miniz` ターゲットの `target_compile_definitions` で
+  `MINIZ_NO_STDIO` / `MINIZ_NO_TIME` / `MINIZ_NO_MALLOC` / `MINIZ_NO_DEFLATE_APIS` /
+  `MINIZ_NO_ARCHIVE_APIS` / `MINIZ_NO_ZLIB_APIS` を定義し、展開器 `tinfl` だけを残す
 - キャッシュ変数 `OPM_CLOCK_MODE` を持ち、指定時のみ同名マクロを
   `target_compile_definitions` で渡す（φM プリセットの切り替え、[§2](#2-φm-の生成)）
 - キャッシュ変数 `I2S_ENABLED`（既定 1）は**常に**マクロとして渡す。
@@ -585,6 +590,9 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   未定義のままにできない（[§4.6](#46-起動時の自己診断)）
 - キャッシュ変数 `YM3012_LOOPBACK` は指定時のみ `YM3012_LOOPBACK_ENABLED` として渡し、
   上の自動判定を上書きする
+- キャッシュ変数 `VGM_VGZ_ENABLED`（既定 1）は**常に**マクロとして渡す。
+  [vgz.h](../vgz.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  （0 にすると展開器と約 86KiB のバッファがリンクされない。[§9.4](#94-vgz-のストリーム展開)）
 - キャッシュ変数 `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` は指定時のみ同名マクロを渡す。
   未指定なら [flash_disk.h](../flash_disk.h) の既定値（[README §7.1](../README.md#71-領域の変え方)）
 - `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本と-msc-の実装)）
@@ -733,14 +741,15 @@ LOEJ 処理を完全に無効にしても変わらないことを実機で確認
 
 `vgm_step()` が 1 コマンドずつ処理する。オペランド長は `operand_len()` の表で引き、
 `0xFF` は「未知なので中断」。**どの経路も必ず 1 バイト以上消費する**ので、
-壊れたファイルでも無限ループにならない。シークは必ず `f_size()` と突き合わせる。
+壊れたファイルでも無限ループにならない。シークは必ずファイル全体の長さと突き合わせる
+（`.vgz` では `f_size()` の代わりに gzip トレーラの ISIZE を使う。[§9.4](#94-vgz-のストリーム展開)）。
 
 `0x54 aa dd`（YM2151 書き込み）の `aa` は 8bit のレジスタアドレスそのもので、
 **bit7 をマスクしてはいけない**。`0x80`-`0xFF` は D1L/RR・KC・KF・PMS/AMS の実レジスタで、
 落とすと音が出なくなる。2 個目の YM2151 は別オペコード `0xA4` で、固定長スキップで飛ばす。
 
 `0x67` のデータブロックは MB 単位になりうるので、`f_lseek()` で飛ばす（1 バイトずつ
-読んで飛ばすと破綻する）。
+読んで飛ばすと破綻する）。`.vgz` はシークできないので別扱いになる（[§9.4](#94-vgz-のストリーム展開)）。
 
 ### 9.2 スケジューラ
 
@@ -797,3 +806,92 @@ s_due_us = s_start_us + (s_samples * 1000000ull) / VGM_SAMPLE_RATE;
 検証は `s` を見る。**フラッシュの書き出し回数 (`FLASH WRITE`) と `I2S UNDERRUN` が
 ほぼ同数**になり、復帰後に `RATE` が φM/64 ちょうどへ戻れば正しく繋がっている。
 `UNDERRUN` が 0 のままなら resync が効いておらず、静かに壊れている。
+
+### 9.4 `.vgz` のストリーム展開
+
+gzip 圧縮された VGM を、一時ファイルを作らずに展開しながら再生する。層の構成は次のとおり。
+
+```
+  vgm.c        ヘッダ解析・コマンド解釈・スケジューラ（圧縮の有無を知らない）
+    |          s_buf[4096] の補充だけが分岐する
+  vgz.c        gzip ヘッダ / トレーラの解析、出力リング、スナップショット
+    |          VGM の知識は持たない
+  miniz tinfl  DEFLATE の展開（external/miniz）
+    |
+  FatFs (FIL)  圧縮されたままのバイト列を読む
+```
+
+`vgm_getc()` 以降のコマンド解釈は非圧縮と共通で、`s_buf` も同じものを使う。
+違うのは補充が `f_read()` か `vgz_read()` かだけ。
+
+**圧縮の判定は拡張子ではなくファイル先頭のマジック（`1F 8B`）で行う。** 中身が gzip の
+`.vgm` も、`.vgm` そのままの `.vgz` も世の中にあるため。`vgm list` と `has_vgm_ext()` は
+拡張子で拾うが、それは一覧に何を出すかの話であって展開するかどうかとは独立している。
+
+**出力リングが DEFLATE の履歴窓を兼ねる。** `tinfl` は出力バッファをリングとして扱い、
+窓のマスクを
+
+```c
+mask = (pOut_buf_next - pOut_buf_start) + *pOut_buf_size - 1;
+```
+
+から作って、これが 2 の冪 -1 でないと弾く。**つまり「毎回リングの末尾まで埋めさせる」
+呼び方しかできず、1 回の出力バイト数を選べない。** DEFLATE の距離は最大 32768 なので、
+リングを 32KiB (`VGZ_DICT_SIZE`) にすればそれがそのまま履歴窓になり、別に窓を持つ必要も
+無くなる。
+
+出力長を選べない代わりに、**1 回の `tinfl_decompress()` の仕事量は入力量で抑える**。
+`VGZ_IN_CHUNK`（256 バイト）だけ渡すと、通常の圧縮率（3〜10 倍）で 1〜3KiB の展開に
+相当する。圧縮率が極端に高い箇所では 1 回でリング末尾まで（最大 32KiB）展開しうるが、
+それでも数 ms で、I2S のリングが 65.5ms あるので破綻しない（[§5.3](#53-出力リングと先行量の維持)）。
+圧縮率 72 倍のファイルを実機で再生したときの `VGM LAG` の最大値は 11ms、
+`I2S UNDERRUN` は 0 だった。
+
+`vgm.c` 側の補充単位も非圧縮とは別にしてある。`VGM_GZ_CHUNK` は 1024 バイトで、
+展開が 1 バイトあたり十数サイクルかかるため `s_buf` 全体（4096 バイト）を一度に埋めると
+`VGM_BUDGET_US`（500µs）を割ってしまう（[§9.2](#92-スケジューラ)）。
+
+**ループの戻り方が、実装で最も注意を要する点。** gzip は後方シークできないので、
+素直に作ると 2 周目の頭出しのたびに先頭から展開し直すことになり、継ぎ目で音が
+数百 ms 途切れる。
+
+そうならないよう、**ループ先頭 (`s_loop_target`) をはじめて通過する瞬間に展開器の状態を
+丸ごと保存する**。保存するのは次の 5 つ。
+
+| 保存するもの | 大きさ |
+| --- | --- |
+| `tinfl_decompressor`（ビットバッファ・ハフマン表・状態） | 約 8KiB |
+| 32KiB の出力リングとその書き込み位置 | 32KiB |
+| 消費済みの圧縮オフセット（ファイル内位置） | - |
+| 展開後の位置と、未消費の展開データの位置・長さ | - |
+| `vgm.c` 側の `s_buf` とその位置（`vgz` 側は `s_buf` に先読みしたぶん先を指しているため） | 4KiB |
+
+2 周目以降は `memcpy` と `f_lseek()` で戻すだけなので、**継ぎ目に停止は出ない**
+（非圧縮の `.vgm` と同じ）。これが成り立つのは `tinfl_decompressor` が**ポインタを含まない
+POD** で、出力リングを呼び出しごとに引数で渡す造りだからで、miniz を更新するときは
+この前提を確認する（[external/README.md](../external/README.md)）。
+
+保存できないままループ先頭を過ぎてしまった場合の保険として `vgz_rewind()` があり、
+先頭から展開し直す。この経路を通った回数は `s` の `gz reload` に出す
+（[README §3.11](../README.md#311-s統計)）。**0 でなければループのたびに音が途切れている。**
+
+**前方への読み飛ばしは展開して捨てるしかない。** `0x67` のデータブロックを gzip の
+途中から飛ばすことはできないため。データブロックは MB 単位になりうるので、
+1 回のサービスで消化しきると I2S が飢える。
+
+`vgm_skip()` は残りバイト数を `s_skip_left` に積むだけにして、`vgm_step()` の頭で
+`VGM_GZ_CHUNK`（1024 バイト）ずつ消化する。`vgm_service()` の 500µs 予算ループに
+そのまま乗るので、読み飛ばしのあいだもキャプチャと I2S へのサービスが挟まる。
+ここで生じた遅れは `VGM_RESYNC_LAG_US`（200ms）による時計の張り直しが吸収する
+（[§9.2](#92-スケジューラ)）。256KiB のデータブロックを含む `.vgz` を実機で再生したときの
+`VGM LAG` の最大値は 20ms、`I2S UNDERRUN` は 0 だった。
+
+**gzip トレーラの CRC32 は検証しない。** 読むのは ISIZE（展開後サイズ）だけで、
+`vgm_size()` が `f_size()` の代わりに使う。**ループ再生では終端に到達しないことが普通**で、
+全部展開しないと計算できない CRC を待っても壊れたファイルの検出は早まらないため。
+壊れていれば `tinfl` の展開エラーか、VGM 側の未知オペコード
+（[§9.1](#91-コマンドの解釈)）として必ず捕まる。
+
+`VGM_VGZ_ENABLED=0` にすると [vgz.c](../vgz.c) は「常に失敗する」スタブだけになり、
+展開器も約 86KiB のバッファもリンクされない（[§7](#7-ビルド構成)）。
+`vgm_play()` は gzip のファイルを `bad file` で拒否し、理由を `# hint` 行で出す。
