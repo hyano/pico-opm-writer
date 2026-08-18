@@ -109,8 +109,10 @@ FatFs と違い設定ヘッダを持たないので、`CMakeLists.txt` の `mini
 | `MINIZ_NO_MALLOC` | ヒープを使わせない（`tinfl_decompress` は元々使わない） |
 | `MINIZ_NO_DEFLATE_APIS` | 圧縮は不要 |
 | `MINIZ_NO_ARCHIVE_APIS` | zip 読み書きは不要 |
-| `MINIZ_NO_ARCHIVE_WRITING_APIS` | 同上 |
 | `MINIZ_NO_ZLIB_APIS` | `mz_stream` 系は不要。使うのは `tinfl_decompress` だけ |
+
+`MINIZ_NO_ARCHIVE_WRITING_APIS` は指定しない。`MINIZ_NO_DEFLATE_APIS` から
+`miniz.h` が自分で定義するので、外から渡すと再定義の警告になる。
 
 `MINIZ_LITTLE_ENDIAN` / `MINIZ_USE_UNALIGNED_LOADS_AND_STORES` /
 `MINIZ_HAS_64BIT_REGISTERS` は上書きしない。`miniz.h` が `__BYTE_ORDER__` と
