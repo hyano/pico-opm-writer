@@ -13,6 +13,7 @@
 
 #include "ff.h"
 
+#include "clockmode.h"
 #include "opm.h"
 #include "stats.h"
 #include "storage.h"
@@ -644,11 +645,23 @@ static const char *parse_header(void) {
         printf("# warn    : dual chip ファイル。2 個目 (0xA4) は無視する\n");
     }
 
-    /*
-     * VGM の wait は 44.1kHz の絶対サンプル数なので、クロックが違ってもテンポは
-     * 正確なまま。ずれるのは音程と包絡線の速さだけ。だから wait を伸縮させるのは
-     * 逆効果（テンポまで狂う）。
-     */
+    return NULL;
+}
+
+/*
+ * ヘッダが申告するクロックへ φM を合わせ、それでも残るずれを警告する。
+ *
+ * VGM の wait は 44.1kHz の絶対サンプル数なので、クロックが違ってもテンポは
+ * 正確なまま。ずれるのは音程と包絡線の速さだけ。だから wait を伸縮させるのは
+ * 逆効果（テンポまで狂う）。合わせるのは φM の方。
+ */
+static const char *apply_file_clock(void) {
+    const char *err = clockmode_follow_file(s_file_clock_hz);
+    if (err != NULL) {
+        return err;
+    }
+
+    /* 寄せたあとも残るずれだけを出す（3546895Hz の PAL 物など）。 */
     uint32_t actual = opm_clock_hz_actual();
     if (s_file_clock_hz != 0u && s_file_clock_hz != actual) {
         printf("# clock   : file %u Hz / phiM %u Hz (%s)\n",
@@ -734,6 +747,13 @@ const char *vgm_play(const char *name) {
     if (!vgm_seek(s_data_start)) {
         close_file();
         return "bad file";
+    }
+
+    /* φM をファイルのクロックへ合わせる。s_start_us を打つ前に済ませる。 */
+    err = apply_file_clock();
+    if (err != NULL) {
+        close_file();
+        return err;
     }
 
     /*
