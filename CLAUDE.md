@@ -13,6 +13,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `pico-opm-writer.c` | main・コマンドパーサ |
 | `opm.c` / `opm.h` | YM2151 バス制御（GPIO / PIO） |
 | `opm_clock.pio` | φM 生成（PIO） |
+| `clockmode.c` / `clockmode.h` | φM プリセットの実行時切り替え（sys_clk と PIO 分周比の張り替え順序） |
 | `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 |
 | `capture.c` / `capture.h` | キャプチャ状態機械 |
 | `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
