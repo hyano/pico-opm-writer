@@ -24,6 +24,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
+| `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 の仕様に準拠**（ソースは同梱していない）。ADPCM は発音しないがシーケンサとしては回す |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
@@ -163,6 +164,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `OPM_CLOCK_MODE` | 空（`opm.h` の既定） | φM プリセット（0 = 4MHz / 1 = 3.579545MHz） |
 | `I2S_ENABLED` | 1 | I2S 出力（GP26-GP28） |
 | `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
+| `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
 
@@ -237,8 +239,8 @@ EOF
 **ファームウェアの検証**は **増分ビルド → SWD で書き込み → `/dev/cu.usbmodem112101` の出力を確認** の 3 ステップで行う（上記の各節そのまま）。ホスト上で走るファームウェアのテストは存在しない。
 
 **ファームウェア自身が持つ自己診断**：
-- `t` コマンド — PCM 変換の既知ベクタ検証と起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数）
+- `t` コマンド — PCM 変換と MDX の音程 / テンポ換算の既知ベクタ検証、起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
+- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ）
 - `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
 - `s 0` — 統計をリセット
 
