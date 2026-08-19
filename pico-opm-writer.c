@@ -19,6 +19,7 @@
 #include "flash_disk.h"
 #include "i2s.h"
 #include "led.h"
+#include "mdx.h"
 #include "opm.h"
 #include "stats.h"
 #include "storage.h"
@@ -57,6 +58,7 @@ static void service_all(void) {
     bool worked = capture_service();
     worked |= i2s_service();
     worked |= vgm_service();
+    worked |= mdx_service();
     worked |= storage_service();
     led_service();
 
@@ -117,6 +119,8 @@ static void print_info(void) {
            (unsigned)FLASH_DISK_ES, (unsigned)FLASH_DISK_SS);
     printf("# vgm     : dir %s  rate %u Hz  budget %u us\n",
            VGM_DIR, (unsigned)VGM_SAMPLE_RATE, (unsigned)VGM_BUDGET_US);
+    printf("# mdx     : dir %s  max %u KiB  budget %u us\n",
+           MDX_DIR, (unsigned)(MDX_MAX_BYTES / 1024u), (unsigned)MDX_BUDGET_US);
     reply_ok();
 }
 
@@ -158,8 +162,15 @@ static void print_stats(void) {
            (unsigned long long)vgm_position_samples(), (unsigned)vgm_total_samples(),
            (unsigned)vgm_loop_count());
     printf("# VGM LAG : max %u us  reslip %u  gz reload %u\n",
-           (unsigned)stats_vgm_lag_max_us(), (unsigned)vgm_reslip_count(),
+           (unsigned)stats_seq_lag_max_us(), (unsigned)vgm_reslip_count(),
            (unsigned)vgm_gz_reload_count());
+    const char *mdx_name = mdx_current_name();
+    printf("# MDX     : %s%s%s\n", mdx_state_name(), mdx_name[0] ? " " : "", mdx_name);
+    printf("# MDX POS : %llu clocks  loopjump %u  ch %u\n",
+           (unsigned long long)mdx_tick_count(), (unsigned)mdx_loop_count(),
+           (unsigned)mdx_channels());
+    printf("# MDX TEMPO: @t %u  tick %u us  reslip %u\n",
+           (unsigned)mdx_tempo(), (unsigned)mdx_tick_us(), (unsigned)mdx_reslip_count());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();
@@ -183,6 +194,9 @@ static void print_help(void) {
     puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
     puts("# vgm play <filename>                 : play /VGM/<filename>");
     puts("# vgm stop                            : stop playback");
+    puts("# mdx list                            : list /MDX/*.mdx");
+    puts("# mdx play <filename>                 : play /MDX/<filename>");
+    puts("# mdx stop                            : stop playback");
     puts("# h | ?                               : show this help");
     reply_ok();
 }
@@ -329,6 +343,11 @@ static bool expect_no_args(char **cursor) {
 static bool reject_while_playing(void) {
     if (vgm_is_playing()) {
         printf("# hint    : VGM 再生中。先に vgm stop を実行すること\n");
+        reply_err("wrong state");
+        return true;
+    }
+    if (mdx_is_playing()) {
+        printf("# hint    : MDX 再生中。先に mdx stop を実行すること\n");
         reply_err("wrong state");
         return true;
     }
@@ -730,15 +749,75 @@ static void cmd_vgm(char **cursor) {
     reply_err("unknown command");
 }
 
+/*
+ * mdx list | play <filename> | stop
+ *
+ * vgm と同じく、ファイル名は行の残り全部を 1 引数として受ける。
+ */
+static void cmd_mdx(char **cursor) {
+    char *sub = next_token(cursor);
+    if (sub == NULL) {
+        reply_err("wrong arity");
+        return;
+    }
+
+    if (tok_is(sub, "list")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        const char *err = mdx_list(service_all);
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "play")) {
+        char *name = rest_of_line(cursor);
+        if (name == NULL) {
+            reply_err("wrong arity");
+            return;
+        }
+        const char *err = mdx_play(name);
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "stop")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        const char *err = mdx_stop();
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    reply_err("unknown command");
+}
+
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
 static void cmd_selftest(void) {
     const char *detail = NULL;
     bool pcm_ok = ym3012_pcm_selftest(&detail);
 
+    const char *mdx_detail = NULL;
+    bool mdx_ok = mdx_selftest(&mdx_detail);
+
     printf("# pcm     : %s\n", detail);
     printf("# pio     : %s\n", ym3012_selftest_detail());
+    printf("# mdx     : %s\n", mdx_detail);
 
-    if (pcm_ok && ym3012_selftest_passed()) {
+    if (pcm_ok && mdx_ok && ym3012_selftest_passed()) {
         reply_ok();
     } else {
         reply_err("self test failed");
@@ -765,6 +844,8 @@ static void process_line(char *line) {
             cmd_storage(&cursor);
         } else if (tok_is(cmd, "vgm")) {
             cmd_vgm(&cursor);
+        } else if (tok_is(cmd, "mdx")) {
+            cmd_mdx(&cursor);
         } else {
             reply_err("unknown command");
         }
@@ -860,6 +941,7 @@ int main(void) {
     /* 内蔵フラッシュ後半のファイルシステム。領域を検査して PLAYER でマウントする。 */
     storage_init();
     vgm_init();
+    mdx_init();
 
     bool connected = false;
 

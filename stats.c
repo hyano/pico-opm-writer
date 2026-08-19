@@ -86,11 +86,11 @@ static struct {
 static struct {
     uint32_t flash_write;          /* 4KiB ブロックの書き出し回数 */
     uint32_t flash_blackout_max_us;/* 書き出しでメインループが止まった最大時間 */
-    uint32_t vgm_lag_max_us;       /* VGM スケジューラの遅れの最大値 */
+    uint32_t seq_lag_max_us;       /* シーケンサの遅れの最大値 */
 } s_ext = {
     .flash_write = 0,
     .flash_blackout_max_us = 0,
-    .vgm_lag_max_us = 0,
+    .seq_lag_max_us = 0,
 };
 
 /* ---- CPU 使用率 -------------------------------------------------------- */
@@ -260,16 +260,16 @@ uint32_t stats_flash_blackout_max_us(void) {
     return s_ext.flash_blackout_max_us;
 }
 
-/* ---- VGM 再生 ---------------------------------------------------------- */
+/* ---- シーケンサ再生 (VGM / MDX で共用) ---------------------------------- */
 
-void stats_vgm_lag_update(uint32_t us) {
-    if (us > s_ext.vgm_lag_max_us) {
-        s_ext.vgm_lag_max_us = us;
+void stats_seq_lag_update(uint32_t us) {
+    if (us > s_ext.seq_lag_max_us) {
+        s_ext.seq_lag_max_us = us;
     }
 }
 
-uint32_t stats_vgm_lag_max_us(void) {
-    return s_ext.vgm_lag_max_us;
+uint32_t stats_seq_lag_max_us(void) {
+    return s_ext.seq_lag_max_us;
 }
 
 /* ---- 初期化・リセット -------------------------------------------------- */
@@ -300,7 +300,7 @@ void stats_init(void) {
 
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
-    s_ext.vgm_lag_max_us = 0;
+    s_ext.seq_lag_max_us = 0;
 }
 
 void stats_reset(void) {
@@ -319,7 +319,7 @@ void stats_reset(void) {
 
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
-    s_ext.vgm_lag_max_us = 0;
+    s_ext.seq_lag_max_us = 0;
 
     /* 窓をリセット */
     s_window.window_start_us = time_us_32();

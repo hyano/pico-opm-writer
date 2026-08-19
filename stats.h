@@ -76,11 +76,11 @@ void stats_flash_blackout_add(uint32_t us);
 uint32_t stats_flash_write(void);
 uint32_t stats_flash_blackout_max_us(void);
 
-/* ---- VGM 再生 ---------------------------------------------------------- */
+/* ---- シーケンサ再生 (VGM / MDX で共用) ---------------------------------- */
 
 /* スケジューラが予定時刻からどれだけ遅れたか。最大値を残す。 */
-void stats_vgm_lag_update(uint32_t us);
-uint32_t stats_vgm_lag_max_us(void);
+void stats_seq_lag_update(uint32_t us);
+uint32_t stats_seq_lag_max_us(void);
 
 /* ---- 初期化・リセット -------------------------------------------------- */
 

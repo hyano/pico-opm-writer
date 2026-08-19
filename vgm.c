@@ -14,6 +14,7 @@
 #include "ff.h"
 
 #include "clockmode.h"
+#include "mdx.h"
 #include "opm.h"
 #include "stats.h"
 #include "storage.h"
@@ -535,7 +536,7 @@ bool vgm_service(void) {
     }
 
     uint32_t lag = (uint32_t)(now - s_due_us);
-    stats_vgm_lag_update(lag);
+    stats_seq_lag_update(lag);
 
     if (lag > VGM_RESYNC_LAG_US) {
         /*
@@ -681,7 +682,7 @@ const char *vgm_play(const char *name) {
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
         return "no filesystem";
     }
-    if (s_state == VGM_STATE_PLAYING) {
+    if (s_state == VGM_STATE_PLAYING || mdx_is_playing()) {
         return "wrong state";
     }
 

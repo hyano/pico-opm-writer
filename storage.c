@@ -15,6 +15,7 @@
 #include "capture.h"
 #include "flash_disk.h"
 #include "i2s.h"
+#include "mdx.h"
 #include "vgm.h"
 #include "ym3012.h"
 
@@ -153,9 +154,16 @@ const char *storage_set_host(void) {
     /*
      * HOST に渡すとファイルシステムをアンマウントするので、再生中の VGM が
      * 読めなくなる。キャプチャも消去の停止に巻き込まれる。どちらも先に止めさせる。
+     *
+     * MDX はファイルを丸ごと RAM に載せていてアンマウントされても読めるが、
+     * 消去中はフラッシュが止まるので同じく先に止めさせる。
      */
     if (vgm_is_playing()) {
         printf("# hint    : VGM 再生中は切り替えられない。先に vgm stop を実行すること\n");
+        return "wrong state";
+    }
+    if (mdx_is_playing()) {
+        printf("# hint    : MDX 再生中は切り替えられない。先に mdx stop を実行すること\n");
         return "wrong state";
     }
     if (capture_state() != CAPTURE_STATE_IDLE) {
@@ -440,6 +448,10 @@ const char *storage_format(void) {
     }
 
     if (f_mkdir("/VGM") != FR_OK) {
+        return "io error";
+    }
+
+    if (f_mkdir(MDX_DIR) != FR_OK) {
         return "io error";
     }
 

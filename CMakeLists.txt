@@ -85,6 +85,7 @@ add_executable(pico-opm-writer
         storage.c
         vgm.c
         vgz.c
+        mdx.c
         usb_msc.c
         usb_descriptors.c
         )
@@ -115,6 +116,11 @@ target_compile_definitions(pico-opm-writer PRIVATE I2S_ENABLED=${I2S_ENABLED})
 # バッファがリンクされず、.vgz は bad file になる。
 set(VGM_VGZ_ENABLED "1" CACHE STRING "gzip (.vgz) playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE VGM_VGZ_ENABLED=${VGM_VGZ_ENABLED})
+
+# MDX（X68000 / MXDRV）の再生。0 にするとシーケンサと 64KB のファイルバッファが
+# リンクされず、mdx コマンドは wrong state になる。
+set(MDX_ENABLED "1" CACHE STRING "MDX (X68000/MXDRV) playback: 1 = enabled, 0 = disabled")
+target_compile_definitions(pico-opm-writer PRIVATE MDX_ENABLED=${MDX_ENABLED})
 
 # FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
 # （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。
