@@ -647,6 +647,18 @@ CDC #0 をインタフェース 0 に固定したままにするためで、CDC 
 false を返すと TinyUSB が自分で MEDIUM NOT PRESENT の sense を立てるので、
 PLAYER モードでは PC からの SCSI コマンドが `read10` / `write10` に到達する前に全部失敗する。
 
+### 6.2 SCSI トレース
+
+MSC はホスト側の挙動が見えないので、コールバックが受け取った SCSI をリングに控える
+（`usb_msc.c` の `trace()`、直近 320 件）。表示は `storage trace`
+（[README §7.4](../README.md#74-マウントされないときの調べ方)）。
+
+**記録だけしてその場では表示しない。** MSC のコールバックは `tud_task()` の中から
+呼ばれるので、ここで `printf` すると `stdio_usb` が `tud_task()` を再入しうる。
+
+記録の開始は `storage_set_host()` が `usb_msc_trace_reset()` を呼ぶところ。
+PLAYER に戻しても消さないので、イジェクトされたあとでも読み出せる。
+
 ## 7. ビルド構成
 
 Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` / `toolchainVersion` /

@@ -196,7 +196,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `i` | `i` | 情報表示（[§3.6](#36-i情報表示の出力例)） |
 | `h` | `h` / `?` | コマンド一覧を表示 |
 | `clock` | `clock` / `clock 4` / `clock 3.58` / `clock auto` / `clock fixed` | φM の表示と切り替え（[§3.16](#316-clockクロック切り替え)） |
-| `storage` | `storage status` / `host` / `player` / `format yes` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
+| `storage` | `storage status` / `host` / `player` / `format yes` / `trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
 | `vgm` | `vgm list` / `vgm play <filename>` / `vgm stop` | VGM の一覧と再生（[§3.14](#314-vgmvgm-再生)） |
 | `mdx` | `mdx list` / `mdx play <filename>` / `mdx stop` | MDX の一覧と再生（[§3.15](#315-mdxmdx-再生)） |
 
@@ -397,6 +397,7 @@ OK
 | `storage host` | フラッシュを PC へ渡す。PC にリムーバブルディスクとして現れる |
 | `storage player` | フラッシュを Pico 側へ戻す。FatFs をマウントし直す |
 | `storage format yes` | 領域を作り直す。既にファイルシステムがある場合は `storage format force yes` |
+| `storage trace` | 直前に PC が投げた SCSI コマンドの記録を表示する（[§7.4](#74-マウントされないときの調べ方)） |
 
 `storage status` の出力例:
 
@@ -915,6 +916,69 @@ SCSI の `SYNCHRONIZE CACHE` では書き出さない。macOS はコピー中に
 | `picotool erase` / BOOTSEL の nuke UF2 | フラッシュ全体を消すので**ファイルシステムも消える** |
 | 容量 | 2MiB。macOS が `.fseventsd` を作るぶん少し減る（Spotlight は `/.metadata_never_index` で抑止済み） |
 | 同時アクセス | `PLAYER` では MSC がメディア非挿入を返し、`HOST` では FatFs をアンマウントするので、両者が同時にフラッシュを触ることはない |
+
+### 7.4 マウントされないときの調べ方
+
+`storage host` を実行しても PC にディスクが現れず、すぐに
+
+```
+# storage : ejected by host
+```
+
+が出ることがある。**まず疑うのは macOS の画面ロック。** macOS は画面がロックされている
+あいだ、リムーバブルメディアの自動マウントを拒否してイジェクトする。ファイルシステムの
+判別（`msdos_fskit`）まで成功したうえで `loginwindow` がマウント承認を拒否するので、
+症状は「認識すらされない」ように見える。**画面のロックを解除してから `storage host` を
+実行すれば、そのままマウントされる。**
+
+macOS 側のログでは次のように出る。
+
+```
+$ log stream --style compact --level info
+diskarbitrationd  probed disk, id = /dev/disk6, with msdos_fskit, success.
+diskarbitrationd  dispatched callback, kind = disk mount approval, disk = /dev/disk6.
+loginwindow       CopySLMountApprovalCallback | DiskArb - wholeDisk != nil, calling DADiskEject
+diskarbitrationd  dispatched response, kind = disk mount approval, dissented, status = 0xF8DA0008
+diskarbitrationd  ejected disk, id = /dev/disk6, success.
+```
+
+画面ロックが原因でないときは、ファーム側が受け取った SCSI を `storage trace` で見る。
+`storage host` に入った時点で記録が始まり、直近 320 件が残る。
+
+```
+> storage trace
+# msc     : 131 events (showing 131)
+# msc 000 : T 01 01 00
+# msc 001 : T 01 00 01
+# msc 002 : P 01 00 00
+# msc 003 : C 00 00 00
+# msc 004 : W 01 00 00
+# msc 005 : I 00 00 00
+# msc 006 : R x115
+# msc 121 : P 00 00 00
+# msc 122 : S 00 00 01
+OK
+```
+
+| 記号 | 意味 | 欄 |
+| --- | --- | --- |
+| `T` | TEST UNIT READY | メディア有無 / メディア交換の通知を返したか / 成功したか |
+| `I` | INQUIRY | — |
+| `C` | READ CAPACITY | — |
+| `W` | 書き込み可否の問い合わせ（MODE SENSE の一部） | 書き込み可か |
+| `P` | PREVENT/ALLOW MEDIUM REMOVAL | 取り出し禁止か |
+| `S` | START STOP UNIT | 電源状態 / start / **load_eject** |
+| `R` | READ10 | 連続する分は `R xN` とまとめる |
+| `X` | 上記以外の SCSI | オペコード / 第 2 バイト / 転送長 |
+
+読み方の要点:
+
+- `T 01 01 00` → `T 01 00 01` と続いていれば、メディア交換の通知（UNIT ATTENTION）が
+  正しく受理されている。ここで `T 00 ...` しか出ないならメディアを見せられていない
+- `R` が数十件出ていれば、**ファイルシステムは読めている**。そのあとの
+  `S 00 00 01`（load_eject）が PC 側からのイジェクト
+- `R` が 1 件も無いまま `S 00 00 01` が来るなら、PC はファイルシステムを読む前に
+  諦めている。ディスクリプタや容量の申告を疑う
 
 ## 8. VGM 再生
 

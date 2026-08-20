@@ -193,6 +193,7 @@ const char *storage_set_host(void) {
     s_media_change = true;
     s_host_used = false;
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
+    usb_msc_trace_reset();
     s_mode = STORAGE_MODE_HOST;
 
     return NULL;

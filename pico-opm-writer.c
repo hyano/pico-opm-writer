@@ -192,6 +192,7 @@ static void print_help(void) {
     puts("# storage status                      : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
     puts("# storage format yes                  : make a new filesystem (FAT12)");
+    puts("# storage trace                       : show the SCSI commands the PC sent");
     puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
     puts("# vgm play <filename>                 : play /VGM/<filename>");
     puts("# vgm stop                            : stop playback");
@@ -616,6 +617,15 @@ static void cmd_storage(char **cursor) {
     char *sub = next_token(cursor);
     if (sub == NULL) {
         reply_err("wrong arity");
+        return;
+    }
+
+    if (tok_is(sub, "trace")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        usb_msc_trace_dump();
+        reply_ok();
         return;
     }
 

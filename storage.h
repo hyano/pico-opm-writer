@@ -130,4 +130,9 @@ void storage_note_host_write(void);
 /* PC がキャッシュの同期を要求した。 */
 bool storage_sync_now(void);
 
+/* ---- MSC の診断 -------------------------------------------------------- */
+
+void usb_msc_trace_reset(void);
+void usb_msc_trace_dump(void);
+
 #endif /* STORAGE_H */
