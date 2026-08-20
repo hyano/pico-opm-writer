@@ -161,16 +161,17 @@ static void print_stats(void) {
     printf("# VGM POS : %llu/%u samples  loop %u\n",
            (unsigned long long)vgm_position_samples(), (unsigned)vgm_total_samples(),
            (unsigned)vgm_loop_count());
-    printf("# VGM LAG : max %u us  reslip %u  gz reload %u\n",
-           (unsigned)stats_seq_lag_max_us(), (unsigned)vgm_reslip_count(),
-           (unsigned)vgm_gz_reload_count());
+    printf("# VGM LAG : reslip %u  gz reload %u\n",
+           (unsigned)vgm_reslip_count(), (unsigned)vgm_gz_reload_count());
     const char *mdx_name = mdx_current_name();
     printf("# MDX     : %s%s%s\n", mdx_state_name(), mdx_name[0] ? " " : "", mdx_name);
     printf("# MDX POS : %llu clocks  loopjump %u  ch %u\n",
            (unsigned long long)mdx_tick_count(), (unsigned)mdx_loop_count(),
            (unsigned)mdx_channels());
-    printf("# MDX TEMPO: @t %u  tick %u us  reslip %u\n",
+    printf("# MDX TICK: @t %u  %u us  reslip %u\n",
            (unsigned)mdx_tempo(), (unsigned)mdx_tick_us(), (unsigned)mdx_reslip_count());
+    /* スケジューラの遅れは VGM と MDX で共用（同時に走らないので 1 個で足りる） */
+    printf("# SEQ LAG : max %u us\n", (unsigned)stats_seq_lag_max_us());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
     printf("# IRQ     : %s\n", opm_irq_level() ? "H" : "L");
     reply_ok();

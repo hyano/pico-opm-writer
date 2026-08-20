@@ -330,10 +330,11 @@ CDC #1 への PCM 送信を制御する。**取り込み側の PIO と DMA は�
 # FLASH   : WRITE 76   BLACKOUT max 42711 us
 # VGM     : PLAYING AFTERBURNER.VGM
 # VGM POS : 507150/2205000 samples  loop 7
-# VGM LAG : max 657 us  reslip 0  gz reload 0
+# VGM LAG : reslip 0  gz reload 0
 # MDX     : STOPPED
 # MDX POS : 0 clocks  loopjump 0  ch 0
-# MDX TEMPO: @t 200  tick 14336 us  reslip 0
+# MDX TICK: @t 200  14336 us  reslip 0
+# SEQ LAG : max 657 us
 # PIOTEST : SKIP (disabled)
 # IRQ     : H
 OK
@@ -354,7 +355,11 @@ OK
 | `FLASH` | 内蔵フラッシュへ 4KiB ブロックを書き出した回数と、その間メインループが止まった最大時間（[§3.13](#313-storageストレージ)） |
 | `VGM` | VGM の再生状態（`STOPPED` / `PLAYING` / `ERROR`）と再生中のファイル名。gzip 圧縮されたファイルなら末尾に `(gzip)` が付く（[§8.5](#85-vgzgzipの再生)） |
 | `VGM POS` | 発行済みのサンプル位置 / ヘッダの総サンプル数と、ループした回数 |
-| `VGM LAG` | VGM スケジューラが予定時刻から遅れた最大時間と、時計を張り直した回数（[§3.14](#314-vgmvgm-再生)）。`gz reload` は `.vgz` のループで先頭から展開し直した回数で、**0 でなければループのたびに音が数百 ms 途切れている**（[§8.5](#85-vgzgzipの再生)） |
+| `VGM LAG` | VGM の時計を張り直した回数（[§3.14](#314-vgmvgm-再生)）。`gz reload` は `.vgz` のループで先頭から展開し直した回数で、**0 でなければループのたびに音が数百 ms 途切れている**（[§8.5](#85-vgzgzipの再生)） |
+| `MDX` | MDX 再生の状態とファイル名（[§3.15](#315-mdxmdx-再生)） |
+| `MDX POS` | 発行済みの clock 数、ループジャンプの回数、チャンネル数。`loopjump` は全チャンネルの合計なので「曲が何周したか」ではない |
+| `MDX TICK` | 現在の Timer-B 値と 1 clock の長さ、時計を張り直した回数（[§9.2](#92-タイミング)） |
+| `SEQ LAG` | シーケンサが予定時刻から遅れた最大時間。**VGM と MDX で共用**（同時には再生できないので 1 個で足りる） |
 | `PIOTEST` | 起動時の PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。既定では `SKIP (disabled)`（[§5.4](#54-無効化)） |
 | `IRQ` | OPM の /IRQ の現在のレベル |
 
@@ -941,7 +946,7 @@ VGM の wait は 44100Hz の絶対サンプル数で表される。予定時刻�
 φM は sys_clk の整数分周で、どちらも同じ水晶から出ているため長期的なずれも生じない。
 
 1 回の処理は 500µs で打ち切り、遅れた分は次の周回で詰める。遅れの最大値は
-`s` の `VGM LAG` で見える（実測で 700µs 程度）。ループの継ぎ目でも時計を
+`s` の `SEQ LAG` で見える（実測で 700µs 程度）。ループの継ぎ目でも時計を
 リセットしないので、時間の不連続は生じない。
 
 **ハードウェアタイマの割り込みは使わない。** レジスタ書き込み 1 回が 32µs
@@ -1047,7 +1052,7 @@ VGM は 3〜10 倍に縮む）。`vgm list` は `.vgm` と `.vgz` を区別せ�
 | --- | --- | --- |
 | 20 秒後の `VGM POS` | 889,033 samples | 889,633 samples |
 | `CPU` | 32% | 32% |
-| `VGM LAG` の最大 | 621µs | 798µs |
+| `SEQ LAG` の最大 | 621µs | 798µs |
 | `I2S UNDERRUN` | 0 | 0 |
 
 テンポは非圧縮と変わらない。VGM の wait は 44.1kHz の絶対サンプル数なので、
