@@ -21,6 +21,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ後半のブロックデバイス（領域定数・ライトバックキャッシュ） |
 | `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
 | `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
+| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧の出力（`vgm list` / `mdx list` で共用） |
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
@@ -174,6 +175,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
+| `STATS_PROFILE` | 0 | サービスごとの滞在時間の計測。1 にすると `s` に `SVCTIME` 行（µs/s）が増える。区間ごとに時刻を 2 回読むので常用しない |
 
 ### 実機への書き込み（SWD / PicoProbe が既定）
 

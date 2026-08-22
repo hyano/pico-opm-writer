@@ -26,6 +26,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [ffconf.h](../ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
 | [diskio_flash.c](../diskio_flash.c) | FatFs の `disk_*` 実装 |
 | [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
+| [filelist.h](../filelist.h) / [filelist.c](../filelist.c) | FatFs 上のファイル一覧の出力。`vgm list` / `mdx list` で共用（[§1.3](#13-ファイル一覧の共用)） |
 | [usb_msc.c](../usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
 | [vgm.h](../vgm.h) / [vgm.c](../vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
 | [vgz.h](../vgz.h) / [vgz.c](../vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
@@ -52,11 +53,26 @@ LED → 統計 → コマンド 1 文字読み、を回すだけ。
 どちらもリング一周は 65.5ms なので、1 周回がこれを超えると位置を見失う。
 フラッシュの消去はこれを超えるので、専用の復帰手順を用意している（[§9.3](#93-書き込み中の停止とリング位置)）。
 
+**各サービスは毎周回ではなく、グループごとに最短間隔を決めて呼ぶ。** 間隔と決め手は
+[README §3.11.1](../README.md#3111-サービスの呼び出し間隔) にある。判定は `due()` が
+受け持ち、「最短でもこの間隔を空ける」であって「この周期ちょうどで回す」ではない。
+長く止まったあとは 1 回だけ真になり、取りこぼしを溜めない。
+
+間引く理由は 2 つ。1 つは、フレームが 62500/s しか届かないのにループは数十万周/秒
+あるので、毎周回回すと 1 回あたり 1 フレーム未満のために毎回支度をすることになる点
+（[§10.7](#107-adpcm-pcm8-の再生) の `PCM8_BATCH_FRAMES` と同じ理屈）。もう 1 つは、
+**ここはビジーループなので 1 周が軽くなるとその分だけ周回数が増える**点。片方のグループ
+だけを間引くと、浮いた時間を残りのグループが周回数ぶん食い返す（実測: 音声チェーンだけを
+間引いたら `LOOP` が 3.4 倍になり `tud_task()` の占有率が 15% から 26% へ上がった）。
+だから `tud_task()` も含めて全部を間引く。
+
 コマンド側の入出力はすべて標準入出力 API 経由で行う。
 
 - 出力: `printf()` / `puts()`
-- 入力: `getchar_timeout_us()` でノンブロッキングに 1 文字ずつ受け取り、行バッファに溜める
-- 接続検出: `stdio_usb_connected()`
+- 入力: `getchar_timeout_us()` でノンブロッキングに 1 文字ずつ受け取り、行バッファに溜める。
+  受信 FIFO が空のときに SDK のドライバ走査まで降りないよう、`tud_cdc_n_available()` で
+  先に見る
+- 接続検出: `stdio_usb_connected()`（100ms ごと）
 
 パーサ側の上限は [pico-opm-writer.c](../pico-opm-writer.c) に定義がある。1 行の最大長が
 `LINE_MAX_LEN`（255 文字）、`d` に指定できる待機時間の上限が `DELAY_MAX_MS`（60000 ms）。
@@ -76,12 +92,17 @@ uint32_t opm_clock_div_frac(void);          // PIO 分周比の小数部（/256�
 
 クロック照会の 3 関数は `i` の情報表示（[README §3.6](../README.md#36-i情報表示の出力例)）に使う。
 
-リングの位置を張り直す 2 つは、フラッシュ書き込みのように 65.5ms を超えて止まった
-あとに呼ぶ（[§9.3](#93-書き込み中の停止とリング位置)）。
+フラッシュ書き込みのように 65.5ms を超えて止まったあとは、リングの位置を張り直す
+（[§9.3](#93-書き込み中の停止とリング位置)）。呼び出し側は集約した 1 本だけを使う。
+個別の 3 本を直接呼ばないのは、消費者が増えたときに呼び忘れが起きないようにするため。
 
 ```c
+void capture_resync_after_blackout(void); // 下の 3 つをまとめて呼ぶ。呼び出し側はこれだけ
+
 void ym3012_ring_resync(void); // DMA の書き込み位置を読み直し、既定カーソルを合わせる
 void i2s_resync(void);         // DMA の読み出し位置を読み直し、先行分を無音で埋め直す
+void pcm8_resync(void);        // ミックスリングを無音で埋めてレンダリング位置を張り直す
+
 void i2s_set_enabled(bool);    // 無効中はソースを読まず無音だけを流す（クロックは止めない）
 ```
 
@@ -92,6 +113,30 @@ void i2s_set_enabled(bool);    // 無効中はソースを読まず無音だけ�
 void ym3012_set_mixer(ym3012_mixer_t fn); // 変換直後に呼ぶ。加算と飽和はフック側で行う
 void ym3012_set_mix_ready(uint64_t frame);// 描き終えた位置。カーソルはここを超えて読まない
 ```
+
+### 1.3 ファイル一覧の共用
+
+`vgm list` と `mdx list` は、ディレクトリ・拡張子・件数上限を除いて同じ処理をするので
+[filelist.c](../filelist.c) にまとめてある。`vgm_list()` / `mdx_list()` は引数を渡すだけ。
+
+```c
+const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_exts,
+                           uint32_t max_entries, void (*tick)(void));
+```
+
+名前を全部ためてからソートすると数十 KB のバッファが要るので、「直前に出した名前より
+大きいものの中で最小」を毎回ディレクトリ走査で探す。必要な RAM は名前 2 個ぶんで、
+これは `FILINFO.fname` と同じ `FF_LFN_BUF + 1`（256 バイト）。
+
+**並べ替えの比較子と等値判定は別に持つ。**
+
+- `filelist_name_cmp()` は大小無視で比較し、**大小無視で等しいときは `strcmp()` の結果を
+  返す**。上の走査は順序が一意に決まらないと同じ名前を出し続けるか取りこぼすため。
+- 拡張子の判定にはこれを使えない。`".MDX"` と `".mdx"` は大小無視では等しくても
+  `strcmp()` は 0 を返さないので、一致しなくなる。等値判定は専用の `ext_equal()` が行う。
+
+`tick` は 1 行出すごとに呼ばれる。呼び出し側は `service_all` を渡していて、
+一覧の出力中も PCM の送出と I2S への供給が止まらないようにしてある。
 
 
 ## 2. φM の生成
@@ -821,7 +866,7 @@ PLAYER --( storage host )--> HOST
 
 HOST --( storage player / ホストの eject )--> PLAYER
     動作:   flash_disk_flush_all() -> メディア排出 -> f_mount()
-            -> i2s_set_enabled(true) -> ym3012_ring_resync() -> i2s_resync()
+            -> i2s_set_enabled(true) -> capture_resync_after_blackout()
 ```
 
 `STORAGE_MODE_PLAYER` を 0 にしてあるので、`.bss` のゼロ初期値が「メディア非挿入」に
@@ -928,12 +973,14 @@ s_due_us = s_start_us + (s_samples * 1000000ull) / VGM_SAMPLE_RATE;
    読まず無音だけを詰める。リング全体が無音なので、停止中に DMA が古い内容を再生しても
    出てくるのは無音。BCK / LRCK と DMA は止めない（止めると PCM5102A がポップし、
    [i2s.h](../i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
-2. **`ym3012_ring_resync()` / `i2s_resync()` で基準点を張り直す。**
+2. **`capture_resync_after_blackout()` で基準点を張り直す。**
    `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）と、
    `storage player` への遷移時の 2 か所で呼ぶ
 
-`i2s_resync()` が**自分の ym3012 カーソルも同期する**のが肝。既存のアンダーラン復帰路では
-やっているが、停止経路はそこを通らない。
+**張り直しは 3 本を 1 本にまとめてある**（[§1.2](#12-主要-api)）。`ym3012_ring_resync()` /
+`i2s_resync()` / `pcm8_resync()` を個別に呼ばないのは、消費者が増えたときに呼び忘れが
+起きないようにするため。`i2s_resync()` が**自分の ym3012 カーソルも同期する**のが肝で、
+既存のアンダーラン復帰路ではやっているが停止経路はそこを通らない。
 
 検証は `s` を見る。**フラッシュの書き出し回数 (`FLASH WRITE`) と `I2S UNDERRUN` が
 ほぼ同数**になり、復帰後に `RATE` が φM/64 ちょうどへ戻れば正しく繋がっている。
