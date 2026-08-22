@@ -27,6 +27,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "filelist.h"
+
 #ifndef MDX_ENABLED
 #define MDX_ENABLED 1
 #endif
@@ -104,6 +106,12 @@ const char *mdx_stop(void);
  * tick は 1 行出すごとに呼ばれる（vgm_list() と同じ理由）。
  */
 const char *mdx_list(void (*tick)(void));
+
+/*
+ * mdx_list() と同じ対象を、出力せずに buf へ集める（autoplay のプレイリスト用）。
+ * buf は追記されるので、呼び出し側が filelist_buf_reset() の要否を決める。
+ */
+const char *mdx_collect(filelist_buf_t *buf);
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 

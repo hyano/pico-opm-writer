@@ -12,6 +12,7 @@
 
 #include "ff.h"
 
+#include "autoplay.h"
 #include "capture.h"
 #include "flash_disk.h"
 #include "i2s.h"
@@ -157,6 +158,14 @@ const char *storage_set_host(void) {
      * MDX はファイルを丸ごと RAM に載せていてアンマウントされても読めるが、
      * 消去中はフラッシュが止まるので同じく先に止めさせる。
      */
+    /*
+     * autoplay は曲間（GAP）だと VGM も MDX も鳴っていないので、下の 2 つでは
+     * 素通りしてしまう。通したところで次の曲で必ず失敗するので、先に止めさせる。
+     */
+    if (autoplay_is_running()) {
+        printf("# hint    : cannot switch while autoplay is running; run autoplay stop first\n");
+        return "wrong state";
+    }
     if (vgm_is_playing()) {
         printf("# hint    : cannot switch while VGM is playing; run vgm stop first\n");
         return "wrong state";

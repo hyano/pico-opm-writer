@@ -820,6 +820,13 @@ const char *vgm_list(void (*tick)(void)) {
                           VGM_LIST_MAX, tick);
 }
 
+const char *vgm_collect(filelist_buf_t *buf) {
+    /* 名前の上限は s_name に収まる長さ。長い名前は vgm_play() が弾く。 */
+    return filelist_collect(VGM_DIR, VGM_EXTS,
+                            (uint32_t)(sizeof(VGM_EXTS) / sizeof(VGM_EXTS[0])),
+                            (uint32_t)(sizeof(s_name) - 1u), buf);
+}
+
 /* ---- 問い合わせ -------------------------------------------------------- */
 
 vgm_state_t vgm_state(void) {

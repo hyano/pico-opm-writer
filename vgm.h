@@ -21,6 +21,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "filelist.h"
+
 /* VGM のサンプルクロック。仕様で固定。 */
 #define VGM_SAMPLE_RATE 44100u
 
@@ -93,6 +95,12 @@ const char *vgm_stop(void);
  * 成功なら NULL、失敗ならエラー理由の文字列。
  */
 const char *vgm_list(void (*tick)(void));
+
+/*
+ * vgm_list() と同じ対象を、出力せずに buf へ集める（autoplay のプレイリスト用）。
+ * buf は追記されるので、呼び出し側が filelist_buf_reset() の要否を決める。
+ */
+const char *vgm_collect(filelist_buf_t *buf);
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 

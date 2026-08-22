@@ -14,6 +14,7 @@
 #include "pico/stdlib.h"
 #include "tusb.h"
 
+#include "autoplay.h"
 #include "capture.h"
 #include "clockmode.h"
 #include "flash_disk.h"
@@ -183,6 +184,11 @@ static void service_all(void) {
     if (due(&s_seq_last_us, t1, SEQ_SERVICE_INTERVAL_US)) {
         STATS_SVC(STATS_SVC_VGM, vgm_service());
         STATS_SVC(STATS_SVC_MDX, mdx_service());
+        /*
+         * 曲送りはシーケンサの後。同じ周回で更新された再生状態をそのまま見られる。
+         * 判定は比較が数回で済むので STATS_SVC では包まない。
+         */
+        autoplay_service();
     }
 
     if (due(&s_storage_last_us, t1, STORAGE_SERVICE_INTERVAL_US)) {
@@ -379,6 +385,14 @@ static void print_help(void) {
     puts("# mdx play <filename>                 : play /MDX/<filename>");
     puts("# mdx stop                            : stop playback");
     puts("# mdx pcm | mdx pcm on | mdx pcm off  : show / toggle ADPCM (PCM8) mixing");
+    puts("# autoplay | autoplay status          : show autoplay state");
+    puts("# autoplay list                       : show the playlist");
+    puts("# autoplay start | autoplay stop      : start / stop unattended playback");
+    puts("# autoplay next | autoplay prev       : skip to the next / previous track");
+    puts("# autoplay mode list | mode random    : play in list order / shuffled");
+    puts("# autoplay loop <n>                   : loops before fade-out, 0 = endless");
+    puts("# autoplay fade <ms> | gap <ms>       : fade-out / silence between tracks");
+    puts("# autoplay source vgm | mdx | both    : which directories to play");
     puts("# h | ? | help                        : show this help");
     reply_ok();
 }
@@ -954,6 +968,8 @@ static void cmd_vgm(char **cursor) {
             reply_err("wrong arity");
             return;
         }
+        /* 手で曲を選んだら自動再生は降りる（曲送りと食い違わせない） */
+        autoplay_stop();
         const char *err = vgm_play(name);
         if (err != NULL) {
             reply_err(err);
@@ -967,6 +983,7 @@ static void cmd_vgm(char **cursor) {
         if (!expect_no_args(cursor)) {
             return;
         }
+        autoplay_stop();
         const char *err = vgm_stop();
         if (err != NULL) {
             reply_err(err);
@@ -1032,6 +1049,7 @@ static void cmd_mdx(char **cursor) {
             reply_err("wrong arity");
             return;
         }
+        autoplay_stop();
         const char *err = mdx_play(name);
         if (err != NULL) {
             reply_err(err);
@@ -1045,6 +1063,7 @@ static void cmd_mdx(char **cursor) {
         if (!expect_no_args(cursor)) {
             return;
         }
+        autoplay_stop();
         const char *err = mdx_stop();
         if (err != NULL) {
             reply_err(err);
@@ -1099,6 +1118,182 @@ static void cmd_mdx(char **cursor) {
     reply_err("unknown command");
 }
 
+/* ---- autoplay ------------------------------------------------------- */
+
+/*
+ * autoplay status | list | start | stop | next | prev
+ *          | mode <list|random> | loop <n> | fade <ms> | gap <ms>
+ *          | source <vgm|mdx|both>
+ */
+/* `autoplay`（引数なし）と `autoplay status` の出力。 */
+static void print_autoplay_status(void) {
+    printf("# autoplay: %s  mode %s  source %s\n", autoplay_state_name(),
+           autoplay_mode_name(), autoplay_source_name());
+
+    const char *name = autoplay_current_name();
+    if (name[0] != '\0') {
+        printf("# track   : %u/%u  %s %s\n", (unsigned)autoplay_position(),
+               (unsigned)autoplay_count(), autoplay_current_is_vgm() ? "vgm" : "mdx", name);
+    } else {
+        printf("# track   : -/%u\n", (unsigned)autoplay_count());
+    }
+
+    /* loop 0 は無限。数値のままだと「0 周でフェード」と読めるので語で出す。 */
+    if (autoplay_loop() == 0u) {
+        printf("# timing  : loop endless  fade %u ms  gap %u ms\n",
+               (unsigned)autoplay_fade_ms(), (unsigned)autoplay_gap_ms());
+    } else {
+        printf("# timing  : loop %u  fade %u ms  gap %u ms\n", (unsigned)autoplay_loop(),
+               (unsigned)autoplay_fade_ms(), (unsigned)autoplay_gap_ms());
+    }
+    reply_ok();
+}
+
+/* エラーなら ERR、成功なら変更後の状態を出す（`storage host` などと同じ扱い）。 */
+static void autoplay_reply(const char *err) {
+    if (err != NULL) {
+        reply_err(err);
+    } else {
+        print_autoplay_status();
+    }
+}
+
+static void cmd_autoplay(char **cursor) {
+    char *sub = next_token(cursor);
+    if (sub == NULL) {
+        print_autoplay_status();
+        return;
+    }
+
+    if (tok_is(sub, "status")) {
+        if (expect_no_args(cursor)) {
+            print_autoplay_status();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "list")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        /* 行数が多いと printf の待ちが積もるので、1 行ごとにサービスを回す。 */
+        const char *err = autoplay_print_list(service_all);
+        if (err != NULL) {
+            reply_err(err);
+        } else {
+            reply_ok();
+        }
+        return;
+    }
+
+    if (tok_is(sub, "start")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        autoplay_reply(autoplay_start());
+        return;
+    }
+
+    if (tok_is(sub, "stop")) {
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        autoplay_reply(autoplay_stop());
+        return;
+    }
+
+    if (tok_is(sub, "next") || tok_is(sub, "prev")) {
+        bool forward = tok_is(sub, "next");
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        autoplay_reply(autoplay_skip(forward ? 1 : -1));
+        return;
+    }
+
+    if (tok_is(sub, "mode")) {
+        char *arg = next_token(cursor);
+        if (arg == NULL) {
+            reply_err("wrong arity");
+            return;
+        }
+        autoplay_mode_t mode;
+        if (tok_is(arg, "list")) {
+            mode = AUTOPLAY_MODE_LIST;
+        } else if (tok_is(arg, "random")) {
+            mode = AUTOPLAY_MODE_RANDOM;
+        } else {
+            reply_err("bad argument");
+            return;
+        }
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        autoplay_set_mode(mode);
+        print_autoplay_status();
+        return;
+    }
+
+    if (tok_is(sub, "source")) {
+        char *arg = next_token(cursor);
+        if (arg == NULL) {
+            reply_err("wrong arity");
+            return;
+        }
+        autoplay_source_t source;
+        if (tok_is(arg, "vgm")) {
+            source = AUTOPLAY_SOURCE_VGM;
+        } else if (tok_is(arg, "mdx")) {
+            source = AUTOPLAY_SOURCE_MDX;
+        } else if (tok_is(arg, "both")) {
+            source = AUTOPLAY_SOURCE_BOTH;
+        } else {
+            reply_err("bad argument");
+            return;
+        }
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        autoplay_set_source(source);
+        printf("# hint    : run autoplay start to rebuild the playlist\n");
+        print_autoplay_status();
+        return;
+    }
+
+    /* 数値を取る 3 つ。基数は 10 進（`w` 以外は全部そう）。 */
+    bool is_loop = tok_is(sub, "loop");
+    bool is_fade = tok_is(sub, "fade");
+    bool is_gap = tok_is(sub, "gap");
+    if (is_loop || is_fade || is_gap) {
+        char *arg = next_token(cursor);
+        if (arg == NULL) {
+            reply_err("wrong arity");
+            return;
+        }
+        uint32_t v = 0;
+        const char *err =
+            parse_dec_u32(arg, is_loop ? AUTOPLAY_LOOP_MAX : AUTOPLAY_MS_MAX, &v);
+        if (err != NULL) {
+            reply_err(err);
+            return;
+        }
+        if (!expect_no_args(cursor)) {
+            return;
+        }
+        if (is_loop) {
+            autoplay_set_loop(v);
+        } else if (is_fade) {
+            autoplay_set_fade_ms(v);
+        } else {
+            autoplay_set_gap_ms(v);
+        }
+        print_autoplay_status();
+        return;
+    }
+
+    reply_err("unknown command");
+}
+
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
 static void cmd_selftest(void) {
     const char *detail = NULL;
@@ -1144,6 +1339,8 @@ static void process_line(char *line) {
             cmd_vgm(&cursor);
         } else if (tok_is(cmd, "mdx")) {
             cmd_mdx(&cursor);
+        } else if (tok_is(cmd, "autoplay")) {
+            cmd_autoplay(&cursor);
         } else if (tok_is(cmd, "help")) {
             if (expect_no_args(&cursor)) {
                 print_help();
@@ -1247,6 +1444,7 @@ int main(void) {
     storage_init();
     vgm_init();
     mdx_init();
+    autoplay_init();
 
     bool connected = false;
     uint32_t connect_poll_us = time_us_32();

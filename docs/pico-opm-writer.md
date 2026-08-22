@@ -32,6 +32,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [vgz.h](../vgz.h) / [vgz.c](../vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
 | [mdx.h](../mdx.h) / [mdx.c](../mdx.c) | MDX のヘッダ解析、MML の解釈、チャンネル状態機械、tick スケジューラ、一覧（[§10](#10-mdx-再生)） |
 | [pcm8.h](../pcm8.h) / [pcm8.c](../pcm8.c) | MDX の ADPCM パート。PDX のストリーム読み出し、MSM6258 デコード、FM への加算（[§10.7](#107-adpcm-pcm8-の再生)） |
+| [autoplay.h](../autoplay.h) / [autoplay.c](../autoplay.c) | VGM / MDX の自動連続再生。プレイリスト、曲順、曲送りの状態機械（[§11](#11-自動連続再生-autoplay)） |
 | [tusb_config.h](../tusb_config.h) / [usb_descriptors.c](../usb_descriptors.c) | USB CDC 2 本 + MSC 1 本の TinyUSB 設定とディスクリプタ |
 | [external/fatfs/](../external/fatfs/) | FatFs R0.16（上流のまま。[external/README.md](../external/README.md)） |
 | [external/miniz/](../external/miniz/) | miniz 3.1.2（上流のまま。展開器 `tinfl` だけを使う。[external/README.md](../external/README.md)） |
@@ -114,6 +115,14 @@ void ym3012_set_mixer(ym3012_mixer_t fn); // 変換直後に呼ぶ。加算と�
 void ym3012_set_mix_ready(uint64_t frame);// 描き終えた位置。カーソルはここを超えて読まない
 ```
 
+ミキサの後段に掛ける出力ゲイン。autoplay のフェードアウトがこれを使う
+（[§11.3](#113-フェードアウト)）。
+
+```c
+void ym3012_fade_start(uint64_t start_frame, uint32_t frames); // 1.0 -> 0.0
+void ym3012_fade_clear(void);  // これから取り込む分から 1.0 へ戻す
+```
+
 ### 1.3 ファイル一覧の共用
 
 `vgm list` と `mdx list` は、ディレクトリ・拡張子・件数上限を除いて同じ処理をするので
@@ -137,6 +146,28 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
 
 `tick` は 1 行出すごとに呼ばれる。呼び出し側は `service_all` を渡していて、
 一覧の出力中も PCM の送出と I2S への供給が止まらないようにしてある。
+
+#### 一覧を RAM へ集める
+
+autoplay のプレイリストは任意の位置の名前を後から引く必要があり、上の「毎回全走査」では
+足りない。同じフィルタを使いつつ、1 回の走査で呼び出し側のバッファへ詰める口を別に持つ。
+
+```c
+const char *filelist_collect(const char *dir, const char *const *exts, uint32_t n_exts,
+                             uint32_t name_max, filelist_buf_t *buf);
+```
+
+- 名前は `'\0'` 区切りでプールへ、オフセットは `uint16_t` の配列へ入れる。走査しながら
+  **二分挿入**するので、全部ためてから並べ替えるための追加バッファが要らず、動かすのは
+  `uint16_t` の配列だけで済む。
+- `buf->count` をリセットせず**追記**し、**今回足した範囲だけ**を並べる。`vgm_collect()` →
+  `mdx_collect()` の順に呼べば「`/VGM` の昇順 → `/MDX` の昇順」が 1 個のバッファにできる
+  （[§11.1](#111-プレイリスト)）。
+- `name_max` より長い名前は飛ばす。`vgm_play()` / `mdx_play()` が 63 文字までしか
+  受け付けないので、集めても鳴らせない。
+
+`FILINFO` は 300 バイト近くあるのでスタックには置かず、`filelist_print()` と `static` で
+共用する。**この 2 本は互いに再入できない。**
 
 
 ## 2. φM の生成
@@ -1416,3 +1447,108 @@ MDX にもそのまま掛かる。MDX はファイルを丸ごと RAM に載せ�
 読めるが、**PDX は再生中もファイルを開いたまま読み続ける**（[§10.7](#107-adpcm-pcm8-の再生)）。
 どちらにせよフラッシュの消去中は数十 ms 止まるので `storage host` は再生中拒否する。
 `mdx stop` と曲の終わりで PDX は閉じる。
+
+
+## 11. 自動連続再生 (autoplay)
+
+[autoplay.c](../autoplay.c) は「曲が終わったら次を鳴らす」だけの薄い層で、**音を出す仕事は
+一切しない。** VGM と MDX の再生系はそのままで、こちらは状態を見て `vgm_play()` /
+`mdx_play()` を呼ぶ。ループを持つ曲は [vgm.c](../vgm.c) / [mdx.c](../mdx.c) だけでは
+止まらない（どちらもループ回数を数えるだけ）ので、**打ち切りの判断だけがここにある。**
+
+利用者側の仕様は [README §3.17](../README.md#317-autoplay自動再生)。
+
+### 11.1 プレイリスト
+
+名前は `'\0'` 区切りでプールへ詰め、`filelist_collect()`（[§1.3](#13-ファイル一覧の共用)）
+が名前の昇順に並べたオフセット配列を持つ。
+
+```c
+static char     s_pool[AUTOPLAY_POOL_BYTES];    // 12KiB
+static uint16_t s_offs[AUTOPLAY_MAX_ENTRIES];   // 名前の昇順。VGM の後ろに MDX
+static uint16_t s_order[AUTOPLAY_MAX_ENTRIES];  // 鳴らす順。値は s_offs の添字
+static uint32_t s_vgm_count;                    // s_offs の [0, s_vgm_count) が VGM
+```
+
+**曲の種別を持つ配列は無い。** `vgm_collect()` を先に、`mdx_collect()` を後に呼んで
+同じバッファへ追記するので、`s_offs` 上の位置が `s_vgm_count` 未満かどうかがそのまま
+「VGM か MDX か」になる。
+
+`s_order` を `s_offs` と分けてあるのは、シャッフルしても「一覧としての並び」を壊さない
+ため。`list` では恒等写像、`random` では Fisher-Yates（`get_rand_32()`）で並べ替える。
+前方へ一巡したところで並べ直し、**並べ直した直後の先頭が直前に鳴らした曲だったら 1 個
+ずらす**（切れ目で同じ曲が 2 回続かないように）。
+
+プレイリストを作るのは `autoplay start` のときだけ。再生中にディレクトリを走査し直すと、
+曲の途中で数十 ms 止まるうえ、鳴らしている曲の位置を見失う。
+
+### 11.2 状態機械
+
+`autoplay_service()` は [§1.1](#11-メインループ) のシーケンサ群の**後ろ**で回す。同じ周回で
+更新された `vgm_state()` / `mdx_state()` をそのまま見られる。
+
+| 状態 | 抜ける条件 | 次 |
+| --- | --- | --- |
+| `PLAYING` | 再生系が `PLAYING` でなくなった（終端 / `ERROR`） | `GAP` |
+| `PLAYING` | `loop != 0` かつループカウンタが `loop` に達した | `FADING`（`fade == 0` なら `GAP`） |
+| `FADING` | フェードの期限が来た、または曲が先に終わった | `GAP` |
+| `GAP` | 無音の期限が来た | 次の曲を鳴らして `PLAYING` |
+
+**終わりの検出はポーリングしかできない。** 再生系にコールバックの口は無く、終了は
+`vgm_service()` / `mdx_service()` が状態を落として 1 行出すだけ。`ERROR` は `STOPPED` に
+ならず残るので、`*_stop()` を呼んで `STOPPED` へ正規化してから次へ送る。
+
+**曲名は autoplay 側が持つ。** `vgm_current_name()` は停止した瞬間に空文字列を返すので、
+「いま何番目の何を鳴らしていたか」は再生系からは引けない。
+
+`start_track()` は鳴らせる曲が見つかるまで送り、1 曲ずつ理由を出す。プレイリストを
+一巡しても 1 曲も鳴らせなければ自動再生ごと止める（`p 1` 中に φM の違う曲へ進むと
+`clockmode_follow_file()` が拒否するので、この経路は普通に通る）。
+
+`s_busy` は `autoplay_service()` を抑止するフラグ。`vgm list` / `mdx list` /
+`autoplay list` は 1 行ごとに `service_all()` を tick として呼ぶので、一覧を出している
+最中にここから曲送りが走りうる。プレイリストを作る間と出す間は動かさない。
+
+### 11.3 フェードアウト
+
+`ym3012_reader_read_pcm()` の**ミキサ適用後**に掛けるデジタルゲインで作る
+（[§4.3](#43-pcm-への変換) の合流点）。ADPCM を混ぜたあとなので FM と ADPCM の両方が
+一緒に落ち、I2S と USB キャプチャの両方に同じように効く。
+
+**ゲインは絶対フレーム番号の関数にしてある。** カーソルは I2S とキャプチャで 2 本あり
+読み出し位置も読む量も違うので、経過時刻で決めると 2 本で違う音になる。ミキサフックが
+`first_frame` を受けているのと同じ理屈。
+
+```
+残り比 q = 1 - (frame - start) / frames      (Q16)
+ゲイン   = q * q                              (線形だと終わり際で急に消えて聞こえる)
+```
+
+除算はフレームごとには行わない。開始時に `1/frames` を Q32 で 1 回だけ求め、以後は
+乗算とシフトで引く。
+
+**解除もフレーム番号で持つ。** ゲインを即座に 1.0 へ戻すと、リングにまだ残っている
+「フェード済みのはずの区間」が全音量で読み出されて十数 ms のノイズになる。
+`ym3012_fade_clear()` は「このフレーム以降だけ 1.0 に戻す」境界を置くだけで、
+それより前は落とし切ったままにする。
+
+そのうえで **autoplay はフェードが終わってもゲインを戻さない。** 戻すのは次の曲を始める
+直前（`GAP` を抜けるとき）で、曲間はゲインを 0 に張り付けておく。キーオフはチップに
+効くだけで、**取り込み済みのフレームには遡って効かない**ので、フェード終了の時点で
+戻すと「キーオフ前の全音量の区間」がそのまま出てしまう。
+
+**基板の YM3012 のアナログ出力には効かない。** Pico は OPM から DAC へのシリアル線を
+傍受しているだけで、その経路には入っていない。アナログ側で音が止まるのは、フェードが
+終わったあとのキーオフの時点になる。
+
+MDX は MXDRV 由来の TL フェード（`0xE7 0x01`）を別に持っているが、autoplay はそちらを
+使わない。VGM に相当物が無く、曲の種類でフェードの効く出力先が変わってしまうため。
+
+### 11.4 他のモジュールとの関係
+
+- **手動の `vgm play` / `mdx play` / `*_stop` はコマンド層で `autoplay_stop()` を先に呼ぶ。**
+  autoplay 自身も `vgm_play()` を呼ぶので、区別はコマンド層に置くのが一番単純になる。
+- **`storage host` は `autoplay_is_running()` でも拒否する**（[§8.4](#84-所有権の切り替え)）。
+  曲間（`GAP`）は VGM も MDX も鳴っておらず、既存の 2 つの判定では素通りしてしまう。
+- 統計（`STATS_SVC_*`）は足していない。`autoplay_service()` は比較が数回で、`s` の
+  `SVC` 行を増やすほどの滞在時間にならない。

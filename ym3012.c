@@ -46,6 +46,19 @@ static ym3012_reader_t s_reader;
 static ym3012_mixer_t s_mixer;
 static uint64_t s_mix_ready;
 
+/*
+ * 出力ゲイン（フェードアウト）。s_fade_frames が 0 なら掛けない。
+ * s_fade_inv は「残り比」を除算なしで引くための 1/frames（Q32）。
+ *
+ * s_fade_release は「このフレーム以降はゲインを 1.0 に戻す」境界。ゲインを即座に
+ * 戻すと、リングにまだ残っている**フェード済みのはずの区間**が全音量で読み出されて
+ * しまう（カーソルは書き込み位置より後ろに居る）。解除もフレーム番号で持つ。
+ */
+static uint64_t s_fade_start;
+static uint32_t s_fade_frames;
+static uint32_t s_fade_inv;
+static uint64_t s_fade_release = UINT64_MAX;
+
 static bool s_selftest_ok;
 static char s_selftest_detail[80];
 
@@ -276,6 +289,31 @@ void __not_in_flash_func(ym3012_set_mix_ready)(uint64_t frame) {
     s_mix_ready = frame;
 }
 
+/* ---- 出力ゲイン（フェードアウト）-------------------------------------- */
+
+void ym3012_fade_start(uint64_t start_frame, uint32_t frames) {
+    if (frames == 0u) {
+        ym3012_fade_clear();
+        return;
+    }
+    /* 1/frames を Q32 で持つ。以後は乗算とシフトだけで残り比を引ける。 */
+    s_fade_inv = (uint32_t)((1ull << 32) / frames);
+    s_fade_start = start_frame;
+    s_fade_release = UINT64_MAX;
+    s_fade_frames = frames;
+}
+
+void ym3012_fade_clear(void) {
+    if (s_fade_frames == 0u) {
+        return;
+    }
+    /*
+     * 解除するのは「まだ取り込んでいない」フレームから。ここより前は消費者が
+     * 読む前でも落とし切った音のままにする（戻すと切り替わりで音が跳ねる）。
+     */
+    s_fade_release = s_write_total;
+}
+
 void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden) {
     rd->read_total = s_write_total;
     rd->count_forbidden = count_forbidden;
@@ -292,6 +330,40 @@ void __not_in_flash_func(ym3012_reader_sync)(ym3012_reader_t *rd) {
 
 uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd) {
     return rd->read_total;
+}
+
+/*
+ * フェードアウトのゲインを掛ける。ゲインはフレーム番号だけで決まるので、
+ * どのカーソルから何フレーム単位で読まれても同じ結果になる。
+ */
+static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frames,
+                                            int16_t *inout) {
+    if (first_frame >= s_fade_release) {
+        return; /* 解除済みの区間。まるごと素通し */
+    }
+
+    for (uint32_t i = 0; i < frames; i++) {
+        uint32_t g = 0;
+        uint64_t f = first_frame + i;
+
+        if (f < s_fade_start || f >= s_fade_release) {
+            g = 65536u; /* まだ始まっていない / もう解除された */
+        } else {
+            uint64_t d = f - s_fade_start;
+            if (d < (uint64_t)s_fade_frames) {
+                /* 残り比 q を Q16 で求め、その 2 乗をゲインにする */
+                uint32_t t = (uint32_t)(((uint64_t)(uint32_t)d * s_fade_inv) >> 16);
+                uint32_t q = (t < 65536u) ? (65536u - t) : 0u;
+                g = (uint32_t)((q * q) >> 16);
+            }
+        }
+
+        if (g == 65536u) {
+            continue;
+        }
+        inout[2u * i] = (int16_t)(((int32_t)inout[2u * i] * (int32_t)g) >> 16);
+        inout[2u * i + 1u] = (int16_t)(((int32_t)inout[2u * i + 1u] * (int32_t)g) >> 16);
+    }
 }
 
 uint32_t __not_in_flash_func(ym3012_reader_read_pcm)(ym3012_reader_t *rd, int16_t *out,
@@ -349,6 +421,11 @@ uint32_t __not_in_flash_func(ym3012_reader_read_pcm)(ym3012_reader_t *rd, int16_
      */
     if (s_mixer != NULL) {
         s_mixer(rd->read_total, n, out);
+    }
+
+    /* フェードアウト。混ぜたあとに掛けるので ADPCM も一緒に落ちる。 */
+    if (s_fade_frames != 0u) {
+        fade_apply(rd->read_total, n, out);
     }
 
     rd->read_total += n;

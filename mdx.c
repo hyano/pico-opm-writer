@@ -1362,6 +1362,13 @@ const char *mdx_list(void (*tick)(void)) {
                           MDX_LIST_MAX, tick);
 }
 
+const char *mdx_collect(filelist_buf_t *buf) {
+    /* 名前の上限は s_name に収まる長さ。長い名前は mdx_play() が弾く。 */
+    return filelist_collect(MDX_DIR, MDX_EXTS,
+                            (uint32_t)(sizeof(MDX_EXTS) / sizeof(MDX_EXTS[0])),
+                            (uint32_t)(sizeof(s_name) - 1u), buf);
+}
+
 /* ---- チャンネルの初期化 ------------------------------------------------ */
 
 /*
@@ -1868,6 +1875,7 @@ bool mdx_service(void) { return false; }
 const char *mdx_play(const char *name) { (void)name; return mdx_disabled(); }
 const char *mdx_stop(void) { return mdx_disabled(); }
 const char *mdx_list(void (*tick)(void)) { (void)tick; return mdx_disabled(); }
+const char *mdx_collect(filelist_buf_t *buf) { (void)buf; return mdx_disabled(); }
 mdx_state_t mdx_state(void) { return MDX_STATE_STOPPED; }
 const char *mdx_state_name(void) { return "DISABLED"; }
 bool mdx_is_playing(void) { return false; }

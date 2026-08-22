@@ -84,6 +84,7 @@ add_executable(pico-opm-writer
         diskio_flash.c
         storage.c
         filelist.c
+        autoplay.c
         vgm.c
         vgz.c
         mdx.c
@@ -132,6 +133,11 @@ set(PCM8_ENABLED "" CACHE STRING "MDX ADPCM (PCM8) mixing: 1 = on, 0 = off, empt
 if(NOT PCM8_ENABLED STREQUAL "")
     target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
 endif()
+
+# VGM / MDX の自動連続再生。0 にするとプレイリスト（約 19KB）と状態機械が
+# リンクされず、autoplay コマンドは unsupported になる。
+set(AUTOPLAY_ENABLED "1" CACHE STRING "unattended VGM/MDX playback: 1 = enabled, 0 = disabled")
+target_compile_definitions(pico-opm-writer PRIVATE AUTOPLAY_ENABLED=${AUTOPLAY_ENABLED})
 
 # サービスごとの滞在時間の計測。1 にすると service_all() の各呼び出しが
 # time_us_32() を 2 回読むようになり、`s` の SVC 行に us/s が付く。
@@ -183,6 +189,7 @@ target_link_libraries(pico-opm-writer
         hardware_pll
         hardware_flash
         pico_flash
+        pico_rand
         tinyusb_device
         fatfs
         miniz

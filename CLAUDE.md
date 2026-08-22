@@ -21,12 +21,13 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ後半のブロックデバイス（領域定数・ライトバックキャッシュ） |
 | `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
 | `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
-| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧の出力（`vgm list` / `mdx list` で共用） |
+| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧。出力（`vgm list` / `mdx list`）と、RAM へ集める `filelist_collect()`（autoplay 用）。**この 2 本は `FILINFO` を共用していて再入できない** |
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
 | `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+16 Rel.3+25 の仕様に準拠**（ソースは同梱していない） |
 | `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない** |
+| `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。フェードアウトは `ym3012_fade_start()` の出力ゲインで作るので **I2S と USB キャプチャにしか効かない**（YM3012 のアナログ出力は素通り） |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
@@ -173,6 +174,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
 | `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
+| `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 14KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
 | `STATS_PROFILE` | 0 | サービスごとの滞在時間の計測。1 にすると `s` に `SVCTIME` 行（µs/s）が増える。区間ごとに時刻を 2 回読むので常用しない |
@@ -251,6 +253,7 @@ EOF
 - `t` コマンド — PCM 変換、MDX の音程 / テンポ換算、ADPCM デコーダの既知ベクタ検証と、起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
 - `s` コマンド — 実行時統計を表示（サービス関数に居た時間の割合と `tud_task()` の占有率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
 - `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
+- `autoplay status` / `autoplay list` コマンド — 自動再生の状態とプレイリスト
 - `s 0` — 統計をリセット
 
 **ホスト側スクリプトの検証**は次の 4 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:

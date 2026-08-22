@@ -175,7 +175,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `# <tag>   : ...` | 通常の情報。`<tag>` は主題（`vgm` / `adpcm` / `capture` など）を表す |
 | `# hint    : ...` | 直前の `ERR` の理由と対処。**`ERR wrong state` には必ず付く** |
 | `# warn    : ...` | 処理は続いたが注意が要ること |
-| `# ERR ...` | コマンドの応答ではない非同期の通知（[§3.17](#317-非同期通知)） |
+| `# ERR ...` | コマンドの応答ではない非同期の通知（[§3.18](#318-非同期通知)） |
 
 **ファームウェアの応答はすべて英語。** 例外は `mdx play` / `mdx status` の `# title` 行
 だけで、これは MDX ファイル中の Shift_JIS をそのまま流している（[§3.15](#315-mdxmdx-再生)）。
@@ -189,7 +189,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `ERR wrong arity` | 引数の個数が合わない |
 | `ERR out of range` | 引数が許容範囲外 |
 | `ERR too long` | 行が長すぎる |
-| `ERR wrong state` | いまの状態では実行できない。**直前に必ず理由を示す `# hint` 行が出る。** どのコマンドがどの状態で拒否されるかは [§3.18](#318-状態による拒否の一覧) にまとめてある |
+| `ERR wrong state` | いまの状態では実行できない。**直前に必ず理由を示す `# hint` 行が出る。** どのコマンドがどの状態で拒否されるかは [§3.19](#319-状態による拒否の一覧) にまとめてある |
 | `ERR no filesystem` | ストレージが未フォーマット、または領域がファームウェアと重なっている |
 | `ERR not found` | 指定したファイルが無い、または `/VGM` / `/MDX` が無い |
 | `ERR bad file` | VGM / MDX として読めない（マジック不正 / ヘッダが壊れている / gzip ストリームが壊れている / MDX が 64KiB を超える） |
@@ -197,7 +197,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `ERR not connected` | CDC #1 が開かれていない状態で `p 1`（[§3.10](#310-ppcm-出力)） |
 | `ERR drain timeout` | `p 0` のドレインが 2 秒で終わらなかった（[§3.10](#310-ppcm-出力)） |
 | `ERR self test failed` | `t` の自己テストのどれかが失敗した（[§3.12](#312-t自己テスト)） |
-| `ERR unsupported` | この構成に機能が無い。`clock` の切り替え先の sys_clk をこのチップで生成できない（[§3.16](#316-clockクロック切り替え)）か、ビルド時に無効化されている（`MDX_ENABLED=0` / `PCM8_ENABLED=0`。[§9.8](#98-無効化)） |
+| `ERR unsupported` | この構成に機能が無い。`clock` の切り替え先の sys_clk をこのチップで生成できない（[§3.16](#316-clockクロック切り替え)）か、ビルド時に無効化されている（`MDX_ENABLED=0` / `PCM8_ENABLED=0`。[§9.8](#98-無効化)、`AUTOPLAY_ENABLED=0`。[§3.17](#317-autoplay自動再生)） |
 
 ### 3.4 コマンド一覧
 
@@ -216,6 +216,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `storage` | `storage` / `storage status` / `storage host` / `storage player` / `storage format [force] yes` / `storage trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
 | `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <filename>` / `vgm stop` | VGM の状態表示・一覧・再生（[§3.14](#314-vgmvgm-再生)） |
 | `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <filename>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
+| `autoplay` | `autoplay` / `autoplay status` / `autoplay list` / `autoplay start` / `autoplay stop` / `autoplay next` / `autoplay prev` / `autoplay mode <list\|random>` / `autoplay loop <n>` / `autoplay fade <ms>` / `autoplay gap <ms>` / `autoplay source <vgm\|mdx\|both>` | VGM と MDX の自動連続再生（[§3.17](#317-autoplay自動再生)） |
 
 コマンド体系の規則:
 
@@ -553,7 +554,7 @@ OK
 
 **`storage host` は、VGM 再生中・MDX 再生中・PCM キャプチャ中だと `ERR wrong state` で
 拒否する。** どれで落ちたかは直前の `# hint` 行に出る。先に `vgm stop` / `mdx stop` /
-`p 0` を実行すること（[§3.18](#318-状態による拒否の一覧)）。
+`p 0` を実行すること（[§3.19](#319-状態による拒否の一覧)）。
 
 ```
 > storage host
@@ -637,7 +638,7 @@ OK
 **再生中は `w` / `r` / `c` と `storage host` を `ERR wrong state` で拒否する。**
 VGM とユーザーのレジスタ書き込みが混ざると何が鳴っているのか分からなくなるため。
 `p 1` / `p 0` / `s` / `i` / `t` / `d` は再生中も使える（VGM を鳴らしながら
-CDC #1 へ録音できる）。全体は [§3.18](#318-状態による拒否の一覧)。
+CDC #1 へ録音できる）。全体は [§3.19](#319-状態による拒否の一覧)。
 
 **`vgm play` / `mdx play` は再生中でも受け付ける。** 走っている方を止めてから
 新しいファイルを開くので、曲を変えるのは 1 コマンドで済む。止めた曲は 1 行で報告する。
@@ -664,7 +665,7 @@ ERR not found
 ループを持たないファイルはデータの終端で自動的に止まる。全チャンネルをキーオフして
 ファイルを閉じ、状態は `STOPPED` に戻る。再生を始めたあとにファイルの中身が壊れて
 いると分かった場合は、`OK` を返したあとなので非同期通知になり、状態は `ERROR` になる。
-どちらも [§3.17](#317-非同期通知) を参照。
+どちらも [§3.18](#318-非同期通知) を参照。
 
 ### 3.15 `mdx`（MDX 再生）
 
@@ -762,7 +763,7 @@ OK
 
 **再生中は `w` / `r` / `c` と `storage host` を `ERR wrong state` で拒否する。**
 `p 1` / `p 0` / `s` / `i` / `t` / `d` は再生中も使える。
-全体は [§3.18](#318-状態による拒否の一覧)。
+全体は [§3.19](#319-状態による拒否の一覧)。
 
 **`mdx play` は再生中でも受け付ける**（[§3.14](#314-vgmvgm-再生) と同じ）。VGM と MDX を
 同時に鳴らすことはできないが、どちらが鳴っていても `play` が止めてから始めるので、
@@ -775,7 +776,7 @@ OK
 
 全チャンネルが演奏終了（`0xF1 0x00`）に達すると自動で止まる。ループを持つ曲は
 止まらないので `mdx stop` で止める。どの止まり方も 1 行の非同期通知が出る
-（[§3.17](#317-非同期通知)）。
+（[§3.18](#318-非同期通知)）。
 
 ### 3.16 `clock`（クロック切り替え）
 
@@ -819,7 +820,131 @@ ERR wrong state
 VGM 再生中は拒否しない。レジスタを叩くわけではなく、変わるのは音程と包絡線の速さだけで、
 テンポは 44100Hz の絶対サンプル数で刻んでいるので狂わない。
 
-### 3.17 非同期通知
+### 3.17 `autoplay`（自動再生）
+
+`/VGM/` と `/MDX/` のファイルを 1 本のプレイリストに束ねて順に鳴らす。曲が終わったこと・
+指定した周回数に達したことをファームウェア側で見張るので、ホストは `autoplay start` を
+1 回打つだけでよい。
+
+| コマンド | 説明 |
+| --- | --- |
+| `autoplay` / `autoplay status` | 状態を表示する |
+| `autoplay list` | プレイリストを鳴らす順に並べる。現在の曲に `*` が付く |
+| `autoplay start` | プレイリストを作り直して 1 曲目を鳴らす（開始時は間隔を空けない） |
+| `autoplay stop` | 自動再生を止める。鳴っている曲も止まる。**冪等**（停止中でも `OK`） |
+| `autoplay next` / `autoplay prev` | 次 / 前の曲へ**即座に**移る。フェードも間隔も挟まない |
+| `autoplay mode list` / `autoplay mode random` | 曲順。既定は `list` |
+| `autoplay loop <n>` | フェードを始めるまでの周回数。`0`-`99`、既定 `2`。`0` は無限 |
+| `autoplay fade <ms>` | フェードアウトの長さ。`0`-`60000`、既定 `2000`。`0` はフェードせず即停止 |
+| `autoplay gap <ms>` | 曲間の無音。`0`-`60000`、既定 `2000` |
+| `autoplay source vgm` / `mdx` / `both` | 対象ディレクトリ。既定は `both` |
+
+```
+> autoplay
+# autoplay: PLAYING  mode list  source both
+# track   : 3/105  mdx BOS01.MDX
+# timing  : loop 2  fade 2000 ms  gap 2000 ms
+OK
+```
+
+```
+> autoplay list
+# entry   : *   1 vgm DEMO.VGM
+# entry   :     2 vgm LOOPTEST.VGM
+# entry   :     3 mdx BOS01.MDX
+...
+# entries : 105
+OK
+```
+
+#### 曲順
+
+`list` は `/VGM/` の全曲（名前の昇順、大小無視）に続けて `/MDX/` の全曲を並べる。
+`vgm list` と `mdx list` の出力をそのまま繋いだ順で、`autoplay list` の並びと一致する。
+
+`random` は `autoplay start` のたびにシャッフルし、最後まで行くと並べ直す。並べ直した
+直後に同じ曲が 2 回続かないようにしてある。
+
+プレイリストは `autoplay start` のときだけ作る。`autoplay source` や `autoplay mode` を
+変えたあと、あるいは PC からファイルを足したあとは、`autoplay start` を打ち直す。
+上限は 512 件で、名前の合計が 12KiB を超えるか 512 件に達すると
+`# warn    : truncated at <件数> entries` を出して打ち切る。
+
+#### 次の曲へ移る条件
+
+- **曲が終わった。** ループを持たない VGM の終端、MDX の全チャンネルの演奏終了、
+  どちらも再生系が自分で止まるのをそのまま使う。再生中に壊れていると分かって
+  `ERROR` に落ちた場合も次へ送る。
+- **`autoplay loop <n>` の周回数に達した。** ループカウンタが `n` に達した時点
+  （`n` 周を弾き終えて `n+1` 周目に入った瞬間）からフェードアウトを始め、
+  `autoplay fade <ms>` の時間をかけて落としてから止める。`autoplay loop 0` に
+  すると周回では止めず、曲の終端でだけ次へ進む。
+
+どちらの場合も、次の曲を始める前に `autoplay gap <ms>` の無音を挟む。
+
+```
+# autoplay: fade out BOS01.MDX
+# mdx     : BOS02.MDX
+...
+```
+
+#### フェードアウトの効く範囲
+
+フェードは **YM3012 から取り込んだ PCM に掛けるデジタルゲイン**で作る。ADPCM を混ぜた
+あとの 1 箇所に掛かるので、**I2S 出力（[§5](#5-i2s-出力)）と PCM キャプチャ
+（[§4](#4-pcm-出力)）の両方に等しく効く**。
+
+**基板上の YM3012 のアナログ出力には効かない。** Pico は OPM から DAC へのシリアル線を
+傍受しているだけで、その経路には入っていない（[§1.1](#11-接続表)）。アナログ側で音が
+止まるのは、フェードが終わったあとのキーオフの時点になる。
+
+#### 他のコマンドとの関係
+
+**手で `vgm play` / `mdx play` / `vgm stop` / `mdx stop` を打つと自動再生は降りる。**
+選んだ曲だけが鳴り、プレイリストの続きへは進まない。
+
+```
+> vgm play TESTTONE.VGM
+# autoplay: stopped
+# vgm     : version 1.51  samples 66150  loop no
+OK
+```
+
+**曲を開けなかったときは 1 行出して次の曲へ送る。** プレイリストを一巡しても 1 曲も
+鳴らせなければ自動再生ごと止める。キャプチャ中（`p 1`）に φM の違う曲へ進もうとすると
+`clockmode` が拒否するので、この経路は普通に通る（[§3.16](#316-clockクロック切り替え)）。
+
+```
+# hint    : cannot switch phiM while capturing PCM; run p 0 first
+# autoplay: skip BOS01.MDX (wrong state)
+...
+# autoplay: stopped (no playable file)
+ERR wrong state
+```
+
+**`storage host` は自動再生中なら拒否する。** 曲間（`GAP`）は VGM も MDX も鳴っていないが、
+通したところで次の曲で必ず失敗するので、`autoplay stop` を先に打たせる
+（[§3.19](#319-状態による拒否の一覧)）。
+
+設定（`mode` / `source` / `loop` / `fade` / `gap`）は `autoplay stop` では消えず、
+電源を入れ直すと既定値に戻る。
+
+#### 無効化
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DAUTOPLAY_ENABLED=0
+```
+
+プレイリスト（約 14KiB）と状態機械がリンクされず、`autoplay` は `ERR unsupported` を
+返すようになる。
+
+```
+> autoplay start
+# hint    : autoplay is disabled at build time (AUTOPLAY_ENABLED=0)
+ERR unsupported
+```
+
+### 3.18 非同期通知
 
 コマンドの応答とは無関係に、ファームウェア側の都合で出る 1 行の通知。**すべて `#` で
 始まる情報行**なので、「1 コマンド 1 応答」（[§3.3](#33-応答)）は崩れない。ホスト側は
@@ -830,6 +955,10 @@ VGM 再生中は拒否しない。レジスタを叩くわけではなく、変�
 | `# vgm     : end of data` | ループを持たない VGM がデータの終端に達して止まった（[§3.14](#314-vgmvgm-再生)） |
 | `# mdx     : end of data` | MDX の全チャンネルが演奏終了（`0xF1 0x00`）に達して止まった（[§3.15](#315-mdxmdx-再生)） |
 | `# mdx     : end of fadeout` | MDX のフェードアウトが完了して止まった |
+| `# autoplay: fade out <名前>` | 自動再生がループ回数に達してフェードアウトを始めた（[§3.17](#317-autoplay自動再生)） |
+| `# autoplay: skip <名前> (<理由>)` | 自動再生がその曲を開けなかったので次へ送った |
+| `# autoplay: stopped` | 自動再生が降りた。手動の `vgm play` / `mdx play` / `*_stop` でも出る |
+| `# autoplay: stopped (no playable file)` | プレイリストを一巡して 1 曲も鳴らせなかった |
 | `# storage : ejected by host` | PC がリムーバブルディスクを取り出した。所有権が Pico 側へ戻る（[§7.2](#72-pc-から曲データをコピーする)） |
 | `# ERR dma overrun` | キャプチャのリングがあふれて送信を止めた。状態は `ERROR`（[§4.1](#41-取りこぼしたとき-dma-overrun)） |
 | `# ERR vgm bad file (<理由> at 0x<位置>)` | 再生中の VGM が壊れていた。状態は `ERROR`（[§3.14](#314-vgmvgm-再生)） |
@@ -846,7 +975,7 @@ VGM 再生中は拒否しない。レジスタを叩くわけではなく、変�
 機械的に区別できる。`ERROR` に落ちた状態は `s`（[§3.11](#311-s統計)）や
 `vgm` / `mdx` / `p` の状態表示からも読める。
 
-### 3.18 状態による拒否の一覧
+### 3.19 状態による拒否の一覧
 
 `ERR wrong state` になる組み合わせ。**拒否されたときは直前に必ず `# hint` 行が出る**ので、
 4 つの原因のどれで落ちたかは応答だけで分かる。
@@ -865,7 +994,10 @@ VGM 再生中は拒否しない。レジスタを叩くわけではなく、変�
 | `vgm list` / `mdx list` | 可 | 可 | 可 | 拒否 |
 | `vgm play` / `mdx play` | 可（止めて始める） | 可（止めて始める） | 同じ φM なら可 | 拒否 |
 | `vgm stop` / `mdx stop` | 可 | 可 | 可 | 可 |
-| 状態表示（`p` / `clock` / `storage` / `vgm` / `mdx` / `mdx pcm`） | 可 | 可 | 可 | 可 |
+| `autoplay start` | 可（止めて始める） | 可（止めて始める） | 同じ φM なら可 | 拒否 |
+| `autoplay next` / `autoplay prev` | 可 | 可 | 同じ φM なら可 | 拒否 |
+| `autoplay stop` | 可 | 可 | 可 | 可 |
+| 状態表示（`p` / `clock` / `storage` / `vgm` / `mdx` / `mdx pcm` / `autoplay`） | 可 | 可 | 可 | 可 |
 
 読み方の要点:
 
@@ -879,6 +1011,9 @@ VGM 再生中は拒否しない。レジスタを叩くわけではなく、変�
   （[§3.16](#316-clockクロック切り替え)）。`vgm play` / `mdx play` の自動追従にも
   同じように効くので、**キャプチャ中に別クロックの曲を再生しようとすると再生自体が
   拒否される**（同じクロックなら通る）。**このとき前の曲は既に止まっている。**
+- **`storage host` は自動再生中も拒否する。** 曲間（`GAP`）は VGM も MDX も鳴っていないので
+  上の 2 列では素通りしてしまうが、通しても次の曲で必ず失敗する
+  （[§3.17](#317-autoplay自動再生)）。
 - **`vgm play` / `mdx play` は再生中でも拒否しない。** 走っている方を止めてから
   新しいファイルを開く。開いたあとで失敗したときは前の曲へは戻らず、停止状態で
   `ERR` を返す（[§3.14](#314-vgmvgm-再生)）。
@@ -922,7 +1057,7 @@ OPM が YM3012 (DAC) へ送るシリアル出力を取り込み、PCM に変換�
 4. 次の `p 1`（または `p 0`）を受けるまで止まったまま
 
 `# ` 始まりの情報行として出すので、「1 コマンド 1 応答」（[§3.3](#33-応答)）は崩れない
-（[§3.17](#317-非同期通知)）。発生回数は `s` の `OVERRUN` に残る。
+（[§3.18](#318-非同期通知)）。発生回数は `s` の `OVERRUN` に残る。
 復帰は次の `p 1` でも、`p 0` で待機へ戻してからでもよい。
 
 [tools/opm-writer.py](docs/opm-writer.md) の `!capture` を使えば、読み出しは
@@ -1303,7 +1438,7 @@ OK
 | 対応バージョン | 1.00 以降（データ開始位置は v1.50 未満と 0 のとき 0x40 固定） |
 | 処理するコマンド | `0x54`（YM2151 書き込み） / `0x61` `0x62` `0x63` `0x70`-`0x7F`（wait） / `0x80`-`0x8F`（DAC。書き込みは飛ばし wait だけ効かせる） / `0x66`（終端） / `0x67`（データブロックを飛ばす） |
 | 読み飛ばすもの | 上記以外の既知コマンドを仕様上の長さぶん |
-| 中断するもの | 未知のオペコード（`0x00`-`0x2F` / `0x60` / `0x65` / `0x69`-`0x6F` / `0x96`-`0x9F`）、ファイルの途中終端。`# ERR vgm bad file (...)` を出して `ERROR` へ（[§3.17](#317-非同期通知)） |
+| 中断するもの | 未知のオペコード（`0x00`-`0x2F` / `0x60` / `0x65` / `0x69`-`0x6F` / `0x96`-`0x9F`）、ファイルの途中終端。`# ERR vgm bad file (...)` を出して `ERROR` へ（[§3.18](#318-非同期通知)） |
 | ループ | ヘッダのループオフセットが有効ならそこへ戻って無限に繰り返す。`vgm stop` するまで続く |
 | 圧縮 | `.vgz`（gzip）を一時ファイルを作らずストリームのまま展開して再生する（[§8.5](#85-vgzgzipの再生)） |
 | 非対応 | GD3 タグ（曲名・作者）の表示 |
@@ -1734,7 +1869,10 @@ OK
   ので後回しにしている（[§9.7](#97-adpcm-pcm8-の再生)）
 - バイナリストリーミングモード（`w` の 1 行あたりのオーバーヘッド削減）
 - VGM の GD3 タグ（曲名・作者）の表示
-- GPIO のボタン / ロータリーエンコーダ / 表示器による操作（現在は CDC #0 のコマンドのみ）
+- GPIO のボタン / ロータリーエンコーダ / 表示器による操作（現在は CDC #0 のコマンドのみ。
+  曲送りそのものは [§3.17](#317-autoplay自動再生) の `autoplay` にある）
+- 自動再生の設定（曲順・ループ回数・フェード）のフラッシュへの保存。現在は電源を
+  入れ直すと既定値に戻る
 - `/RD` を使ったステータス（BUSY）ポーリングによる待ち時間の最適化。配線と
   データバスの向き切り替え（`opm_bus_set_dir()`）は用意してあるが、読み出し自体は未実装
 - `/IRQ` の割り込み処理。現在はレベルを参照できるだけ（`s` の `IRQ`）
