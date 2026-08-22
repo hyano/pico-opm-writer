@@ -90,12 +90,12 @@ static uint32_t cur_loops(void) {
 /* ---- 停止 -------------------------------------------------------------- */
 
 /*
- * 鳴っている方を止める。**出力ゲインには触らない。**
+ * 鳴っている方を止めて、出力ゲインを 1.0 へ戻す。
  *
- * ゲインを戻すのは次の曲を始める直前だけにしてある。フェードが終わった時点で
- * 戻すと、リングにまだ残っている「キーオフ前の全音量の区間」がそのまま出て
- * 十数 ms のノイズになる（キーオフはチップに効くだけで、取り込み済みの
- * フレームには遡って効かない）。曲間はゲインを 0 のままにしておく。
+ * **解除はキーオフの後**でなければならない。ym3012_fade_clear() が戻すのは
+ * 「これから取り込むフレーム」以降なので、先に止めておけば戻る対象は消音済みの
+ * 区間だけになる。key_off_all() が RR=15 を書いてから落とすため、チップが黙る
+ * までは 1ms もかからない。
  *
  * mdx_state() で囲むのは、MDX_ENABLED=0 のスタブの mdx_stop() が hint を出して
  * "unsupported" を返すため（vgm_play() が同じ理由で同じことをしている）。
@@ -107,12 +107,11 @@ static void stop_playback(void) {
     if (mdx_state() != MDX_STATE_STOPPED) {
         mdx_stop();
     }
+    ym3012_fade_clear();
 }
 
 static void stop_internal(void) {
     stop_playback();
-    /* 自動再生から降りるので、この後の手動再生が絞られたままにならないよう戻す。 */
-    ym3012_fade_clear();
     s_state = AUTOPLAY_STOPPED;
 }
 
@@ -167,7 +166,6 @@ static const char *start_track(void) {
         uint32_t idx = cur_idx();
         const char *name = idx_name(idx);
 
-        ym3012_fade_clear();
         s_prev_idx = (uint16_t)idx;
 
         err = idx_is_vgm(idx) ? vgm_play(name) : mdx_play(name);
@@ -186,7 +184,7 @@ static const char *start_track(void) {
 }
 
 static void begin_gap(void) {
-    stop_playback(); /* ゲインは 0 のまま。戻すのは start_track() */
+    stop_playback();
     s_gap_end_us = time_us_64() + (uint64_t)s_gap_ms * 1000ull;
     s_state = AUTOPLAY_GAP;
 }
