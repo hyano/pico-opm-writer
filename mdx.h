@@ -90,10 +90,13 @@ bool mdx_service(void);
 /*
  * /MDX/<name> を開いて解析し、再生を始める。
  * 成功なら NULL、失敗ならエラー理由の文字列（vgm_play() と同じ流儀）。
+ *
+ * VGM でも MDX でも、何かが再生中なら止めてから開く。ファイルを読み込んだあとで
+ * 失敗したときは前の曲へは戻らず、停止状態のままエラーを返す。
  */
 const char *mdx_play(const char *name);
 
-/* 再生を止めて全チャンネルをキーオフする。停止中なら "wrong state"。 */
+/* 再生を止めて全チャンネルをキーオフする。冪等（停止中でも NULL）。 */
 const char *mdx_stop(void);
 
 /*

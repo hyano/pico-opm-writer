@@ -74,10 +74,13 @@ bool vgm_service(void);
  * /VGM/<name> を開いてヘッダを検証し、再生を始める。
  * 成功なら NULL、失敗ならエラー理由の文字列（capture_start() と同じ流儀）。
  * ファイル形式のエラーはここで同期的に判明する。
+ *
+ * VGM でも MDX でも、何かが再生中なら止めてから開く。ファイルを開いたあとで
+ * 失敗したときは前の曲へは戻らず、停止状態のままエラーを返す。
  */
 const char *vgm_play(const char *name);
 
-/* 再生を止めて全チャンネルをキーオフする。停止中なら "wrong state"。 */
+/* 再生を止めて全チャンネルをキーオフする。冪等（停止中でも NULL）。 */
 const char *vgm_stop(void);
 
 /*

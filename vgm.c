@@ -683,14 +683,6 @@ const char *vgm_play(const char *name) {
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
         return "no filesystem";
     }
-    if (s_state == VGM_STATE_PLAYING) {
-        printf("# hint    : VGM is already playing; run vgm stop first\n");
-        return "wrong state";
-    }
-    if (mdx_is_playing()) {
-        printf("# hint    : MDX is playing; run mdx stop first\n");
-        return "wrong state";
-    }
 
     /* 名前の検査。ディレクトリを跨がせない。 */
     size_t len = strlen(name);
@@ -703,6 +695,27 @@ const char *vgm_play(const char *name) {
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
         return "bad argument";
     }
+
+    /*
+     * 何かが鳴っていても受け付ける。走っている方を先に止めてからファイルを開く。
+     * VGM のストリームも MDX のファイルバッファも 1 面しか無いので、新しい曲と
+     * 前の曲を並べて持てない。だから読み込みに失敗しても前の曲へは戻らず、
+     * 停止状態で終わる。
+     *
+     * ERROR も止める対象に入れて状態を STOPPED へ正規化する（stop は冪等）。
+     * mdx_state() で囲むのは、MDX_ENABLED=0 のスタブの mdx_stop() が hint を
+     * 出して "unsupported" を返すため。スタブの mdx_state() は常に
+     * MDX_STATE_STOPPED なので、無効ビルドではここへ入らない。
+     */
+    if (s_state != VGM_STATE_STOPPED) {
+        printf("# vgm     : stopped %s\n", s_name);
+        vgm_stop();
+    }
+    if (mdx_state() != MDX_STATE_STOPPED) {
+        printf("# mdx     : stopped %s\n", mdx_current_name());
+        mdx_stop();
+    }
+    s_name[0] = '\0'; /* 失敗したとき前の曲の名前を状態表示に残さない */
 
     char path[8 + sizeof(s_name)];
     snprintf(path, sizeof(path), "%s/%s", VGM_DIR, name);

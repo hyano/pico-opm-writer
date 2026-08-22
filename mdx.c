@@ -1495,14 +1495,6 @@ const char *mdx_play(const char *name) {
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
         return "no filesystem";
     }
-    if (s_state == MDX_STATE_PLAYING) {
-        printf("# hint    : MDX is already playing; run mdx stop first\n");
-        return "wrong state";
-    }
-    if (vgm_is_playing()) {
-        printf("# hint    : VGM is playing; run vgm stop first\n");
-        return "wrong state";
-    }
 
     /* 名前の検査。ディレクトリを跨がせない。 */
     size_t len = strlen(name);
@@ -1515,6 +1507,32 @@ const char *mdx_play(const char *name) {
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
         return "bad argument";
     }
+
+    /*
+     * 何かが鳴っていても受け付ける。走っている方を先に止める。とくに MDX 自身は、
+     * これから s_file へ新しい曲を読む＝いま再生中の曲のデータを上書きするので、
+     * ここで止めないと壊れたデータを演奏することになる。読み込みに失敗しても
+     * 前の曲へは戻らず、停止状態で終わる。
+     *
+     * vgm.c と違って条件で囲む必要はない（VGM に無効化ビルドは無い）。
+     */
+    if (vgm_state() != VGM_STATE_STOPPED) {
+        printf("# vgm     : stopped %s\n", vgm_current_name());
+        vgm_stop();
+    }
+    if (s_state != MDX_STATE_STOPPED) {
+        printf("# mdx     : stopped %s\n", s_name);
+        mdx_stop();
+    }
+    /*
+     * 曲の識別情報を先に消す。parse_header() は s_title / s_pdx を書いてから
+     * 後段で "bad file" を返しうるので、消さないと失敗後の mdx status が
+     * 「前の曲の名前 + 新しい曲のタイトル」という嘘の組み合わせになる。
+     */
+    s_name[0] = '\0';
+    s_title[0] = '\0';
+    s_pdx[0] = '\0';
+    pcm8_reset_counters(); /* PDX を持たない曲へ切り替えたときも 0 に戻す */
 
     char path[8 + sizeof(s_name)];
     snprintf(path, sizeof(path), "%s/%s", MDX_DIR, name);
@@ -1545,6 +1563,9 @@ const char *mdx_play(const char *name) {
 
     const char *err = parse_header();
     if (err != NULL) {
+        /* 途中まで書かれた識別情報を消す（mdx status に曲名なしのタイトルを残さない） */
+        s_title[0] = '\0';
+        s_pdx[0] = '\0';
         return err;
     }
 
@@ -1678,6 +1699,14 @@ bool mdx_service(void) {
         ch_pre(c);
         ch_len(c, idx);
         if (s_state != MDX_STATE_PLAYING) {
+            /*
+             * mdx_fail() が ERROR に落とした。vgm_service() の ERROR 後始末と
+             * 対称に、音を止めて PDX を返す（そうしないとキーオンと FIL が
+             * 残ったままになる）。
+             */
+            key_off_all();
+            pcm8_close_pdx();
+            s_pcm8_mode = false;
             return true;
         }
         ch_post(c);
