@@ -159,15 +159,15 @@ const char *storage_set_host(void) {
      * 消去中はフラッシュが止まるので同じく先に止めさせる。
      */
     if (vgm_is_playing()) {
-        printf("# hint    : VGM 再生中は切り替えられない。先に vgm stop を実行すること\n");
+        printf("# hint    : cannot switch while VGM is playing; run vgm stop first\n");
         return "wrong state";
     }
     if (mdx_is_playing()) {
-        printf("# hint    : MDX 再生中は切り替えられない。先に mdx stop を実行すること\n");
+        printf("# hint    : cannot switch while MDX is playing; run mdx stop first\n");
         return "wrong state";
     }
     if (capture_state() != CAPTURE_STATE_IDLE) {
-        printf("# hint    : PCM キャプチャ中は切り替えられない。先に p 0 を実行すること\n");
+        printf("# hint    : cannot switch while capturing PCM; run p 0 first\n");
         return "wrong state";
     }
 
@@ -232,7 +232,7 @@ const char *storage_set_player(void) {
     i2s_resync();
 
     if (s_host_dirty) {
-        printf("# warn    : ホストが eject していません。ファイルが不完全な可能性があります\n");
+        printf("# warn    : host did not eject; files may be incomplete\n");
     }
     s_host_dirty = false;
 

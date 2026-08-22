@@ -34,6 +34,9 @@
 /* MDX ファイルを置くディレクトリ */
 #define MDX_DIR "/MDX"
 
+/* mdx list が並べられるファイル数の上限（vgm.h の VGM_LIST_MAX と揃える） */
+#define MDX_LIST_MAX 256u
+
 /*
  * ファイル全体を RAM に載せる上限。
  *

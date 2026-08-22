@@ -149,7 +149,7 @@ const char *clockmode_set(clock_preset_t p) {
      * ストリームの途中で変わってしまい、出来上がる WAV の時間軸が黙って狂う。
      */
     if (capture_state() != CAPTURE_STATE_IDLE) {
-        printf("# hint    : PCM キャプチャ中は切り替えられない。先に p 0 を実行すること\n");
+        printf("# hint    : cannot switch phiM while capturing PCM; run p 0 first\n");
         return "wrong state";
     }
 

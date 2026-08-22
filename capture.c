@@ -57,6 +57,7 @@ const char *capture_state_name(void) {
 
 const char *capture_start(void) {
     if (s_state == CAPTURE_STATE_CAPTURING || s_state == CAPTURE_STATE_DRAINING) {
+        printf("# hint    : already capturing; run p 0 first\n");
         return "wrong state";
     }
 
@@ -78,9 +79,21 @@ const char *capture_start(void) {
     return NULL;
 }
 
+/*
+ * p 0。「確実に止める」コマンドなので、止まっている状態から呼んでも成功にする
+ * （storage host / clock と同じ冪等の扱い）。DMA overrun で ERROR に落ちた場合も
+ * ここで IDLE へ戻せるようにしてあり、p 1 を経由せずに復帰できる。
+ */
 const char *capture_request_stop(void) {
+    if (s_state == CAPTURE_STATE_IDLE) {
+        return NULL;
+    }
+    if (s_state == CAPTURE_STATE_ERROR) {
+        capture_abort(); /* LED のエラー表示もここで消える */
+        return NULL;
+    }
     if (s_state != CAPTURE_STATE_CAPTURING) {
-        return "wrong state";
+        return NULL; /* DRAINING。既に停止処理に入っている */
     }
 
     /* この時点までに DMA が取り込んだ分を最後の 1 フレームまで送り切る */

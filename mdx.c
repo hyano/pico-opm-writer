@@ -1300,11 +1300,16 @@ static bool is_listable(const FILINFO *fi) {
     if ((fi->fattrib & (AM_DIR | AM_SYS | AM_HID)) != 0u) {
         return false;
     }
+    /* macOS が作る AppleDouble */
+    if (fi->fname[0] == '.') {
+        return false;
+    }
     return has_mdx_ext(fi->fname);
 }
 
 const char *mdx_list(void (*tick)(void)) {
     if (!storage_fatfs_may_access()) {
+        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
@@ -1369,6 +1374,11 @@ const char *mdx_list(void (*tick)(void)) {
         snprintf(prev, sizeof(prev), "%s", best);
         first = false;
         emitted++;
+
+        if (emitted >= MDX_LIST_MAX) {
+            printf("# warn    : truncated at %u entries\n", (unsigned)MDX_LIST_MAX);
+            break;
+        }
     }
 
     printf("# files   : %u\n", (unsigned)emitted);
@@ -1483,30 +1493,36 @@ static void open_pdx(void) {
 
     char path[16 + MDX_PDX_MAX];
     if (!pdx_path(path, sizeof(path))) {
-        printf("# hint    : PDX 名が不正。ADPCM パートは鳴らない\n");
+        printf("# hint    : bad PDX name; the ADPCM part will not sound\n");
         return;
     }
 
     const char *err = pcm8_open_pdx(path);
     if (err != NULL) {
-        printf("# hint    : %s を開けない (%s)。ADPCM パートは鳴らない\n", path, err);
+        printf("# hint    : cannot open %s (%s); the ADPCM part will not sound\n", path, err);
         return;
     }
-    printf("# adpcm   : %s\n", path);
+    printf("# pdxpath : %s\n", path);
     if (!pcm8_enabled()) {
         /* mdx pcm off は起動まで残るので、鳴らない理由をここで必ず出す */
-        printf("# hint    : ADPCM のミキシングは off。mdx pcm on で戻す\n");
+        printf("# hint    : ADPCM mixing is off; run mdx pcm on to restore it\n");
     }
 }
 
 const char *mdx_play(const char *name) {
     if (!storage_fatfs_may_access()) {
+        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
         return "no filesystem";
     }
-    if (s_state == MDX_STATE_PLAYING || vgm_is_playing()) {
+    if (s_state == MDX_STATE_PLAYING) {
+        printf("# hint    : MDX is already playing; run mdx stop first\n");
+        return "wrong state";
+    }
+    if (vgm_is_playing()) {
+        printf("# hint    : VGM is playing; run vgm stop first\n");
         return "wrong state";
     }
 
@@ -1537,7 +1553,7 @@ const char *mdx_play(const char *name) {
     FSIZE_t fsize = f_size(&fp);
     if (fsize == 0u || fsize > MDX_MAX_BYTES) {
         f_close(&fp);
-        printf("# hint    : MDX は %u バイトまで\n", (unsigned)MDX_MAX_BYTES);
+        printf("# hint    : MDX must be %u bytes or less\n", (unsigned)MDX_MAX_BYTES);
         return "bad file";
     }
 
@@ -1564,7 +1580,7 @@ const char *mdx_play(const char *name) {
     }
     uint32_t actual = opm_clock_hz_actual();
     if (actual != 4000000u) {
-        printf("# clock   : mdx 4000000 Hz / phiM %u Hz (音程もテンポもずれる)\n",
+        printf("# clock   : mdx 4000000 Hz / phiM %u Hz (pitch and tempo both off)\n",
                (unsigned)actual);
     }
 
@@ -1600,9 +1616,13 @@ const char *mdx_play(const char *name) {
     return NULL;
 }
 
+/*
+ * vgm_stop() と同じく「確実に止める」コマンドなので、止まっている状態から
+ * 呼んでも成功にする。
+ */
 const char *mdx_stop(void) {
     if (s_state != MDX_STATE_PLAYING && s_state != MDX_STATE_ERROR) {
-        return "wrong state";
+        return NULL;
     }
 
     key_off_all();
@@ -1657,7 +1677,7 @@ bool mdx_service(void) {
             key_off_all();
             pcm8_close_pdx();
             s_state = MDX_STATE_STOPPED;
-            printf("# mdx     : fadeout end\n");
+            printf("# mdx     : end of fadeout\n");
             return true;
         }
 
@@ -1699,7 +1719,7 @@ bool mdx_service(void) {
         key_off_all();
         pcm8_close_pdx();
         s_state = MDX_STATE_STOPPED;
-        printf("# mdx     : end\n");
+        printf("# mdx     : end of data\n");
     }
 
     return true;
@@ -1827,11 +1847,17 @@ bool mdx_selftest(const char **detail) {
 
 #else /* !MDX_ENABLED */
 
+/* 無効ビルドであることを応答から判別できるように、理由を出して unsupported を返す。 */
+static const char *mdx_disabled(void) {
+    printf("# hint    : MDX playback is disabled at build time (MDX_ENABLED=0)\n");
+    return "unsupported";
+}
+
 void mdx_init(void) {}
 bool mdx_service(void) { return false; }
-const char *mdx_play(const char *name) { (void)name; return "bad argument"; }
-const char *mdx_stop(void) { return "wrong state"; }
-const char *mdx_list(void (*tick)(void)) { (void)tick; return "wrong state"; }
+const char *mdx_play(const char *name) { (void)name; return mdx_disabled(); }
+const char *mdx_stop(void) { return mdx_disabled(); }
+const char *mdx_list(void (*tick)(void)) { (void)tick; return mdx_disabled(); }
 mdx_state_t mdx_state(void) { return MDX_STATE_STOPPED; }
 const char *mdx_state_name(void) { return "DISABLED"; }
 bool mdx_is_playing(void) { return false; }

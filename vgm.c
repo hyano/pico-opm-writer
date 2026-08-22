@@ -234,7 +234,7 @@ static bool vgm_seek(uint32_t pos) {
             s_buf_pos = 0;
             s_buf_base = 0;
             s_gz_reloads++;
-            printf("# warn    : .vgz のループ先頭を保存できなかった。先頭から展開し直す\n");
+            printf("# warn    : could not save the .vgz loop point; will re-inflate from the start\n");
         }
         gz_skip_ahead(pos - vgm_tell());
         return true;
@@ -643,7 +643,7 @@ static const char *parse_header(void) {
            s_gz ? "  gzip" : "");
 
     if (dual_chip) {
-        printf("# warn    : dual chip ファイル。2 個目 (0xA4) は無視する\n");
+        printf("# warn    : dual chip file; the second chip (0xA4) is ignored\n");
     }
 
     return NULL;
@@ -667,7 +667,7 @@ static const char *apply_file_clock(void) {
     if (s_file_clock_hz != 0u && s_file_clock_hz != actual) {
         printf("# clock   : file %u Hz / phiM %u Hz (%s)\n",
                (unsigned)s_file_clock_hz, (unsigned)actual,
-               (s_file_clock_hz < actual) ? "音程が高くなる" : "音程が低くなる");
+               (s_file_clock_hz < actual) ? "pitch goes up" : "pitch goes down");
     }
 
     return NULL;
@@ -677,12 +677,18 @@ static const char *apply_file_clock(void) {
 
 const char *vgm_play(const char *name) {
     if (!storage_fatfs_may_access()) {
+        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
         return "no filesystem";
     }
-    if (s_state == VGM_STATE_PLAYING || mdx_is_playing()) {
+    if (s_state == VGM_STATE_PLAYING) {
+        printf("# hint    : VGM is already playing; run vgm stop first\n");
+        return "wrong state";
+    }
+    if (mdx_is_playing()) {
+        printf("# hint    : MDX is playing; run mdx stop first\n");
         return "wrong state";
     }
 
@@ -730,7 +736,7 @@ const char *vgm_play(const char *name) {
         }
         s_gz = true;
 #else
-        printf("# hint    : .vgz (gzip) は VGM_VGZ_ENABLED=0 で無効。gunzip してから転送すること\n");
+        printf("# hint    : .vgz (gzip) is disabled by VGM_VGZ_ENABLED=0; gunzip before transferring\n");
         close_file();
         return "bad file";
 #endif
@@ -775,9 +781,13 @@ const char *vgm_play(const char *name) {
     return NULL;
 }
 
+/*
+ * 「確実に止める」コマンドなので、止まっている状態から呼んでも成功にする
+ * （storage host / clock / p 0 と同じ冪等の扱い）。
+ */
 const char *vgm_stop(void) {
     if (s_state != VGM_STATE_PLAYING && s_state != VGM_STATE_ERROR) {
-        return "wrong state";
+        return NULL;
     }
 
     key_off_all();
@@ -835,6 +845,7 @@ static bool is_listable(const FILINFO *fi) {
 
 const char *vgm_list(void (*tick)(void)) {
     if (!storage_fatfs_may_access()) {
+        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
     if (storage_fs_state() != STORAGE_FS_MOUNTED) {
@@ -902,7 +913,7 @@ const char *vgm_list(void (*tick)(void)) {
         emitted++;
 
         if (emitted >= VGM_LIST_MAX) {
-            printf("# warn    : %u 件で打ち切った\n", (unsigned)VGM_LIST_MAX);
+            printf("# warn    : truncated at %u entries\n", (unsigned)VGM_LIST_MAX);
             break;
         }
     }

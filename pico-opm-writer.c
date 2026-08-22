@@ -93,11 +93,12 @@ static void reply_err(const char *reason) {
 
 static void print_info(void) {
     printf("# pico-opm-writer %s\n", OPM_WRITER_VERSION);
-    printf("# sys_clk : %u Hz\n", (unsigned)clock_get_hz(clk_sys));
+    /* phiM を先に出す。`clock` の出力と並びを揃えるため。 */
     printf("# phiM    : %u Hz (clkdiv %u + %u/256)\n",
            (unsigned)opm_clock_hz_actual(),
            (unsigned)opm_clock_div_int(),
            (unsigned)opm_clock_div_frac());
+    printf("# sys_clk : %u Hz\n", (unsigned)clock_get_hz(clk_sys));
     printf("# preset  : %s  (vgm %s)\n",
            clockmode_preset_name(clockmode_preset()),
            clockmode_auto() ? "auto" : "fixed");
@@ -125,7 +126,7 @@ static void print_info(void) {
 #else
     printf("# i2s     : disabled\n");
 #endif
-    printf("# selftest: pio %s\n", ym3012_selftest_detail());
+    printf("# piotest : %s\n", ym3012_selftest_detail());
     printf("# storage : flash 0x%06x + %u KiB  cluster %u B  sector %u B\n",
            (unsigned)storage_region_offset(),
            (unsigned)(storage_region_size() / 1024u),
@@ -146,7 +147,7 @@ static void print_stats(void) {
     uint32_t ring_max = stats_ring_frames_max() * 4u;
     uint32_t tx_cap = usb_pcm_capacity();
 
-    printf("# state   : %s\n", capture_state_name());
+    printf("# STATE   : %s\n", capture_state_name());
     printf("# CPU     : %u%% (max %u%%)   USB %u%%\n",
            (unsigned)stats_cpu_percent(), (unsigned)stats_cpu_percent_max(),
            (unsigned)stats_usb_percent());
@@ -205,25 +206,27 @@ static void print_help(void) {
     puts("# r                                   : hardware reset (/IC)");
     puts("# c                                   : clear all registers (software)");
     puts("# d <ms>                              : delay, decimal 0-60000");
-    puts("# p 1 | p 0                           : start / stop PCM output on CDC #1");
+    puts("# p | p 1 | p 0                       : show / start / stop PCM output on CDC #1");
     puts("# s | s 0                             : show / reset statistics");
-    puts("# t                                   : run self tests (pcm / pio / mdx / adpcm)");
+    puts("# t                                   : run self tests (pcm / piotest / mdx / adpcm)");
     puts("# i                                   : show info");
-    puts("# clock                               : show phiM / sys_clk / i2s rate");
+    puts("# clock | clock status                : show phiM / sys_clk / i2s rate");
     puts("# clock 4 | clock 3.58                : switch phiM to 4.000000 / 3.579545 MHz");
     puts("# clock auto | clock fixed            : follow / ignore the clock a file asks for");
-    puts("# storage status                      : show storage state");
+    puts("# storage | storage status            : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
     puts("# storage format [force] yes          : make a new filesystem (FAT12)");
     puts("# storage trace                       : show the SCSI commands the PC sent");
+    puts("# vgm | vgm status                    : show VGM playback state");
     puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
     puts("# vgm play <filename>                 : play /VGM/<filename>");
     puts("# vgm stop                            : stop playback");
+    puts("# mdx | mdx status                    : show MDX playback state");
     puts("# mdx list                            : list /MDX/*.mdx");
     puts("# mdx play <filename>                 : play /MDX/<filename>");
     puts("# mdx stop                            : stop playback");
     puts("# mdx pcm | mdx pcm on | mdx pcm off  : show / toggle ADPCM (PCM8) mixing");
-    puts("# h | ?                               : show this help");
+    puts("# h | ? | help                        : show this help");
     reply_ok();
 }
 
@@ -368,12 +371,12 @@ static bool expect_no_args(char **cursor) {
  */
 static bool reject_while_playing(void) {
     if (vgm_is_playing()) {
-        printf("# hint    : VGM 再生中。先に vgm stop を実行すること\n");
+        printf("# hint    : VGM is playing; run vgm stop first\n");
         reply_err("wrong state");
         return true;
     }
     if (mdx_is_playing()) {
-        printf("# hint    : MDX 再生中。先に mdx stop を実行すること\n");
+        printf("# hint    : MDX is playing; run mdx stop first\n");
         reply_err("wrong state");
         return true;
     }
@@ -458,10 +461,18 @@ static void cmd_delay(char **cursor) {
  *
  * PIO と DMA は常時動いているので、ここで制御しているのは CDC #1 への送信だけ。
  */
+/* `p`（引数なし）の出力。キャプチャの可否をこれだけで判断できるようにする。 */
+static void print_capture_status(void) {
+    printf("# capture : %s\n", capture_state_name());
+    printf("# cdc1    : %s\n", usb_pcm_connected() ? "connected" : "not connected");
+    printf("# rate    : %u Hz\n", (unsigned)(opm_clock_hz_actual() / 64u));
+    reply_ok();
+}
+
 static void cmd_pcm(char **cursor) {
     char *tok = next_token(cursor);
     if (tok == NULL) {
-        reply_err("wrong arity");
+        print_capture_status();
         return;
     }
     if (!expect_no_args(cursor)) {
@@ -482,7 +493,7 @@ static void cmd_pcm(char **cursor) {
          * 依存を持ち込まない。
          */
         if (storage_mode() == STORAGE_MODE_HOST) {
-            printf("# hint    : storage host 中は PCM キャプチャできない。storage player に戻すこと\n");
+            printf("# hint    : cannot capture PCM in storage host; run storage player first\n");
             reply_err("wrong state");
             return;
         }
@@ -490,6 +501,7 @@ static void cmd_pcm(char **cursor) {
         if (err != NULL) {
             reply_err(err);
         } else {
+            printf("# capture : %s\n", capture_state_name());
             reply_ok();
         }
         return;
@@ -514,6 +526,7 @@ static void cmd_pcm(char **cursor) {
             return;
         }
     }
+    printf("# capture : %s\n", capture_state_name());
     reply_ok();
 }
 
@@ -608,6 +621,11 @@ static void cmd_clock(char **cursor) {
         return;
     }
 
+    if (tok_is(sub, "status")) {
+        print_clock_status();
+        return;
+    }
+
     if (tok_is(sub, "auto") || tok_is(sub, "fixed")) {
         clockmode_set_auto(tok_is(sub, "auto"));
         reply_ok();
@@ -620,7 +638,8 @@ static void cmd_clock(char **cursor) {
     } else if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_NTSC))) {
         target = CLOCK_PRESET_NTSC;
     } else {
-        reply_err("bad argument");
+        /* プリセット名は「未知のサブコマンド」であって解釈できない数値ではない */
+        reply_err("unknown command");
         return;
     }
 
@@ -641,7 +660,7 @@ static void cmd_clock(char **cursor) {
 static void cmd_storage(char **cursor) {
     char *sub = next_token(cursor);
     if (sub == NULL) {
-        reply_err("wrong arity");
+        print_storage_status();
         return;
     }
 
@@ -669,6 +688,7 @@ static void cmd_storage(char **cursor) {
         if (err != NULL) {
             reply_err(err);
         } else {
+            printf("# storage : %s\n", storage_mode_name());
             reply_ok();
         }
         return;
@@ -682,6 +702,7 @@ static void cmd_storage(char **cursor) {
         if (err != NULL) {
             reply_err(err);
         } else {
+            printf("# storage : %s\n", storage_mode_name());
             reply_ok();
         }
         return;
@@ -702,18 +723,18 @@ static void cmd_storage(char **cursor) {
             return;
         }
         if (storage_mode() != STORAGE_MODE_PLAYER) {
-            printf("# hint    : storage player に戻してからフォーマットすること\n");
+            printf("# hint    : return to storage player before formatting\n");
             reply_err("wrong state");
             return;
         }
         if (!force && storage_fs_state() == STORAGE_FS_MOUNTED) {
-            printf("# hint    : すでにファイルシステムがある。消すなら storage format force yes\n");
+            printf("# hint    : a filesystem already exists; use storage format force yes to erase it\n");
             reply_err("wrong state");
             return;
         }
 
         /* ガードを全部抜けてから進捗を出す */
-        printf("# format  : 数十秒かかる。この間 I2S はアンダーランする\n");
+        printf("# format  : takes tens of seconds; I2S will underrun meanwhile\n");
         const char *err = storage_format();
         if (err != NULL) {
             reply_err(err);
@@ -733,10 +754,30 @@ static void cmd_storage(char **cursor) {
  *
  * ファイル名は行の残り全部を 1 引数として受けるので、空白を含む名前も扱える。
  */
+/* `vgm`（引数なし）と `vgm status` の出力。統計本体は `s` に置いたまま。 */
+static void print_vgm_status(void) {
+    const char *name = vgm_current_name();
+    printf("# vgm     : %s%s%s%s\n", vgm_state_name(), name[0] ? " " : "", name,
+           vgm_is_compressed() ? "  (gzip)" : "");
+    printf("# pos     : %llu/%u samples  loop %u\n",
+           (unsigned long long)vgm_position_samples(), (unsigned)vgm_total_samples(),
+           (unsigned)vgm_loop_count());
+    printf("# lag     : reslip %u  gz reload %u\n",
+           (unsigned)vgm_reslip_count(), (unsigned)vgm_gz_reload_count());
+    reply_ok();
+}
+
 static void cmd_vgm(char **cursor) {
     char *sub = next_token(cursor);
     if (sub == NULL) {
-        reply_err("wrong arity");
+        print_vgm_status();
+        return;
+    }
+
+    if (tok_is(sub, "status")) {
+        if (expect_no_args(cursor)) {
+            print_vgm_status();
+        }
         return;
     }
 
@@ -790,10 +831,32 @@ static void cmd_vgm(char **cursor) {
  *
  * vgm と同じく、ファイル名は行の残り全部を 1 引数として受ける。
  */
+/* `mdx`（引数なし）と `mdx status` の出力。ADPCM の詳細は `mdx pcm` の方に置く。 */
+static void print_mdx_status(void) {
+    const char *name = mdx_current_name();
+    printf("# mdx     : %s%s%s\n", mdx_state_name(), name[0] ? " " : "", name);
+    if (mdx_title()[0] != '\0') {
+        printf("# title   : %s\n", mdx_title());
+    }
+    printf("# pos     : %llu clocks  loopjump %u  ch %u\n",
+           (unsigned long long)mdx_tick_count(), (unsigned)mdx_loop_count(),
+           (unsigned)mdx_channels());
+    printf("# tick    : @t %u  %u us  reslip %u\n",
+           (unsigned)mdx_tempo(), (unsigned)mdx_tick_us(), (unsigned)mdx_reslip_count());
+    reply_ok();
+}
+
 static void cmd_mdx(char **cursor) {
     char *sub = next_token(cursor);
     if (sub == NULL) {
-        reply_err("wrong arity");
+        print_mdx_status();
+        return;
+    }
+
+    if (tok_is(sub, "status")) {
+        if (expect_no_args(cursor)) {
+            print_mdx_status();
+        }
         return;
     }
 
@@ -841,10 +904,11 @@ static void cmd_mdx(char **cursor) {
     if (tok_is(sub, "pcm")) {
         char *arg = next_token(cursor);
         if (arg != NULL) {
+            bool on;
             if (tok_is(arg, "on")) {
-                pcm8_set_enabled(true);
+                on = true;
             } else if (tok_is(arg, "off")) {
-                pcm8_set_enabled(false);
+                on = false;
             } else {
                 reply_err("bad argument");
                 return;
@@ -852,13 +916,23 @@ static void cmd_mdx(char **cursor) {
             if (!expect_no_args(cursor)) {
                 return;
             }
+            /*
+             * デコーダごとリンクされていない構成では on にしても鳴らないので、
+             * 黙って OK を返さずに理由を出す（状態表示の方は通す）。
+             */
+            if (!PCM8_ENABLED) {
+                printf("# hint    : ADPCM is disabled at build time (PCM8_ENABLED=0)\n");
+                reply_err("unsupported");
+                return;
+            }
+            pcm8_set_enabled(on);
         }
 
         static const char *const PAN_NAME[4] = {"off", "L", "R", "L+R"};
         const char *path = pcm8_pdx_path();
-        printf("# pcm     : %s\n", pcm8_enabled() ? "on" : "off");
-        printf("# pdx     : %s\n", path[0] != '\0' ? path : "(none)");
-        printf("# ch      : %u active  mask %02x  pan %s\n",
+        printf("# adpcm   : %s\n", pcm8_enabled() ? "on" : "off");
+        printf("# pdxpath : %s\n", path[0] != '\0' ? path : "(none)");
+        printf("# active  : %u ch  mask %02x  pan %s\n",
                (unsigned)pcm8_active_count(), (unsigned)pcm8_active_mask(),
                PAN_NAME[pcm8_pan() & 3u]);
         printf("# keyon   : %u   miss %u\n", (unsigned)pcm8_keyon_count(),
@@ -884,7 +958,7 @@ static void cmd_selftest(void) {
     bool pcm8_ok = pcm8_selftest(&pcm8_detail);
 
     printf("# pcm     : %s\n", detail);
-    printf("# pio     : %s\n", ym3012_selftest_detail());
+    printf("# piotest : %s\n", ym3012_selftest_detail());
     printf("# mdx     : %s\n", mdx_detail);
     printf("# adpcm   : %s\n", pcm8_detail);
 
@@ -917,6 +991,10 @@ static void process_line(char *line) {
             cmd_vgm(&cursor);
         } else if (tok_is(cmd, "mdx")) {
             cmd_mdx(&cursor);
+        } else if (tok_is(cmd, "help")) {
+            if (expect_no_args(&cursor)) {
+                print_help();
+            }
         } else {
             reply_err("unknown command");
         }

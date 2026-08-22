@@ -157,7 +157,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 
 ### 3.3 応答
 
-各コマンドは必ず 1 行の応答で終わる。
+各コマンドは必ず 1 行の応答で終わる。**例外は空行とコメント行だけ**で、これらは
+何も返さない（[§3.2](#32-行フォーマット)）。
 
 | 応答 | 意味 |
 | --- | --- |
@@ -167,16 +168,28 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 情報を返すコマンドは、`#` で始まる情報行を 0 行以上出力したあと最後に `OK` を返す。
 ホスト側は「`#` 始まりは情報、それ以外の 1 行が終端」と扱えばよい。
 
+情報行は 4 種類ある。いずれも `# ` で始まるので、区別せず読み飛ばしても構わない。
+
+| 情報行 | 意味 |
+| --- | --- |
+| `# <tag>   : ...` | 通常の情報。`<tag>` は主題（`vgm` / `adpcm` / `capture` など）を表す |
+| `# hint    : ...` | 直前の `ERR` の理由と対処。**`ERR wrong state` には必ず付く** |
+| `# warn    : ...` | 処理は続いたが注意が要ること |
+| `# ERR ...` | コマンドの応答ではない非同期の通知（[§3.17](#317-非同期通知)） |
+
+**ファームウェアの応答はすべて英語。** 例外は `mdx play` / `mdx status` の `# title` 行
+だけで、これは MDX ファイル中の Shift_JIS をそのまま流している（[§3.15](#315-mdxmdx-再生)）。
+
 エラー理由の一覧:
 
 | 応答 | 発生条件 |
 | --- | --- |
-| `ERR unknown command` | 未知のコマンド。1 文字のコマンドか `clock` / `storage` / `vgm` / `mdx` のいずれでもない場合と、それらのサブコマンドが未知の場合 |
-| `ERR bad argument` | 引数が 16 進数 / 10 進数として解釈できない、またはファイル名が不正 |
+| `ERR unknown command` | 未知のコマンド。1 文字のコマンドか `clock` / `storage` / `vgm` / `mdx` / `help` のいずれでもない場合と、それらのサブコマンドが未知の場合（`clock 5` のような未知のプリセット名も含む） |
+| `ERR bad argument` | 引数が 16 進数 / 10 進数として解釈できない、ファイル名が不正、または語の引数が想定外（`mdx pcm maybe` / `storage format no`） |
 | `ERR wrong arity` | 引数の個数が合わない |
 | `ERR out of range` | 引数が許容範囲外 |
 | `ERR too long` | 行が長すぎる |
-| `ERR wrong state` | いまの状態では実行できない（[§3.13](#313-storageストレージ) / [§3.14](#314-vgmvgm-再生) / [§3.15](#315-mdxmdx-再生) / [§3.16](#316-clockクロック切り替え)）。直前に理由を示す `# hint` 行が出る |
+| `ERR wrong state` | いまの状態では実行できない。**直前に必ず理由を示す `# hint` 行が出る。** どのコマンドがどの状態で拒否されるかは [§3.18](#318-状態による拒否の一覧) にまとめてある |
 | `ERR no filesystem` | ストレージが未フォーマット、または領域がファームウェアと重なっている |
 | `ERR not found` | 指定したファイルが無い、または `/VGM` / `/MDX` が無い |
 | `ERR bad file` | VGM / MDX として読めない（マジック不正 / ヘッダが壊れている / gzip ストリームが壊れている / MDX が 64KiB を超える） |
@@ -184,7 +197,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `ERR not connected` | CDC #1 が開かれていない状態で `p 1`（[§3.10](#310-ppcm-出力)） |
 | `ERR drain timeout` | `p 0` のドレインが 2 秒で終わらなかった（[§3.10](#310-ppcm-出力)） |
 | `ERR self test failed` | `t` の自己テストのどれかが失敗した（[§3.12](#312-t自己テスト)） |
-| `ERR unsupported` | `clock` の切り替え先の sys_clk をこのチップで生成できない（[§3.16](#316-clockクロック切り替え)） |
+| `ERR unsupported` | この構成に機能が無い。`clock` の切り替え先の sys_clk をこのチップで生成できない（[§3.16](#316-clockクロック切り替え)）か、ビルド時に無効化されている（`MDX_ENABLED=0` / `PCM8_ENABLED=0`。[§9.8](#98-無効化)） |
 
 ### 3.4 コマンド一覧
 
@@ -194,22 +207,37 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `r` | `r` | /IC によるハードウェアリセット。I2S のアンダーランを 1 回伴う（[§5.3](#53-アンダーラン)） |
 | `c` | `c` | ソフトウェアによる全レジスタクリア（[§3.5](#35-cクリアが書き込む内容)） |
 | `d` | `d <ms>` | 指定ミリ秒待機。10 進、`0`-`60000`。待っている間も PCM の送出は続く |
-| `p` | `p 1` / `p 0` | PCM 出力の開始 / 停止（[§3.10](#310-ppcm-出力)） |
+| `p` | `p` / `p 1` / `p 0` | PCM 出力の状態表示 / 開始 / 停止（[§3.10](#310-ppcm-出力)） |
 | `s` | `s` / `s 0` | 統計の表示 / リセット（[§3.11](#311-s統計)） |
 | `t` | `t` | 自己テスト（[§3.12](#312-t自己テスト)） |
 | `i` | `i` | 情報表示（[§3.6](#36-i情報表示の出力例)） |
-| `h` | `h` / `?` | コマンド一覧を表示 |
-| `clock` | `clock` / `clock 4` / `clock 3.58` / `clock auto` / `clock fixed` | φM の表示と切り替え（[§3.16](#316-clockクロック切り替え)） |
-| `storage` | `storage status` / `host` / `player` / `format [force] yes` / `trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
-| `vgm` | `vgm list` / `vgm play <filename>` / `vgm stop` | VGM の一覧と再生（[§3.14](#314-vgmvgm-再生)） |
-| `mdx` | `mdx list` / `mdx play <filename>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の一覧と再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
+| `h` | `h` / `?` / `help` | コマンド一覧を表示 |
+| `clock` | `clock` / `clock status` / `clock 4` / `clock 3.58` / `clock auto` / `clock fixed` | φM の表示と切り替え（[§3.16](#316-clockクロック切り替え)） |
+| `storage` | `storage` / `storage status` / `storage host` / `storage player` / `storage format [force] yes` / `storage trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
+| `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <filename>` / `vgm stop` | VGM の状態表示・一覧・再生（[§3.14](#314-vgmvgm-再生)） |
+| `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <filename>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
 
-16 進引数の桁数は自由で、値が `0xff` 以下なら受理する（`w f 1` も `w 0020 00c7` も通る）。
-`0xff` を超えると `ERR out of range`。
+コマンド体系の規則:
 
-1 文字のコマンドは大小どちらでもよい。`storage` / `vgm` / `mdx` とそのサブコマンドも同様。
-`vgm play` と `mdx play` のファイル名だけは行の残り全部を 1 引数として受けるので、
-空白を含む名前もそのまま書ける（`vgm play BAD NAME.VGM`）。
+- **引数を省くと状態表示になる。** `p` / `clock` / `storage` / `vgm` / `mdx` / `mdx pcm` は
+  引数なしで現在の状態を返す。`clock status` / `storage status` / `vgm status` /
+  `mdx status` は引数なしの形と同じ（打ちやすい方を使えばよい）。
+- **状態を変えるコマンドは、変えたあとの状態を返す。** `p 1` / `p 0` / `storage host` /
+  `storage player` / `clock 4` / `mdx pcm on` は変更後の状態を出してから `OK` を返す。
+- **「止める」「切り替える」は冪等。** `vgm stop` / `mdx stop` / `p 0` / `storage host` /
+  `storage player` / `clock 4` は、既にその状態でも `OK` を返す。スクリプトから
+  「いま何が動いているか分からないがとにかく止めたい」を書けるようにするため。
+- **引数の基数は `w` だけ 16 進、他は 10 進。** `w` の 16 進は桁数自由で、値が `0xff`
+  以下なら受理する（`w f 1` も `w 0020 00c7` も通る）。`0xff` を超えると
+  `ERR out of range`。`d <ms>`（`0`-`60000`）と `p 1` / `p 0` / `s 0` は 10 進。
+- **引数の語彙は、1 文字コマンドは数値、複数文字コマンドは語。** 1 文字コマンドは
+  打鍵の短さを優先して `p 1` / `p 0` / `s 0` / `d 500` とし、複数文字コマンドは
+  `on` / `off` / `auto` / `fixed` / `host` / `player` のように語で書く。
+  `p on` のような書き方は受け付けない。
+- **大小は区別しない。** 1 文字のコマンドも `clock` / `storage` / `vgm` / `mdx` / `help`
+  とそのサブコマンドも同様。
+- **`vgm play` と `mdx play` のファイル名だけは行の残り全部を 1 引数として受ける**ので、
+  空白を含む名前もそのまま書ける（`vgm play BAD NAME.VGM`）。
 
 1 レジスタ書き込みには約 32µs かかる（最大 3 万回/秒）。内訳は
 [docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)。
@@ -234,8 +262,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 
 ```
 # pico-opm-writer 0.2.0
-# sys_clk : 144000000 Hz
 # phiM    : 4000000 Hz (clkdiv 18 + 0/256)
+# sys_clk : 144000000 Hz
 # preset  : 4  (vgm auto)
 # pins    : D0-D7=GP2-GP9 A0=GP10 /CS=GP11 /WR=GP12 /RD=GP13 /IC=GP14
 # pins    : phiM=GP15 /IRQ=GP16
@@ -244,13 +272,17 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 # capture : ring 16384 bytes (4096 frames) rate 62500 Hz
 # i2s     : BCK=GP26 LRCK=GP27 DIN=GP28 (clkdiv 36 + 0/256)
 # i2s     : 32fs bck 2000000 Hz rate 62500 Hz latency 1024 frames (16384 us)
-# selftest: pio SKIP (disabled)
+# piotest : SKIP (disabled)
 # storage : flash 0x200000 + 2048 KiB  cluster 4096 B  sector 512 B
 # vgm     : dir /VGM  rate 44100 Hz  budget 500 us
 # mdx     : dir /MDX  max 64 KiB  budget 500 us
 # adpcm   : enabled  8 ch  pdx stream 1024 bytes/ch
 OK
 ```
+
+先頭の 3 行は `clock`（[§3.16](#316-clockクロック切り替え)）と同じ内容・同じ並び。
+`I2S_ENABLED=0` でビルドした場合は `# i2s` の 2 行が `# i2s     : disabled` の 1 行に
+なる（[§5.4](#54-無効化)）。
 
 ### 3.7 起動バナー
 
@@ -260,7 +292,7 @@ USB CDC の接続を検出した時点で `i` と同じ内容を出力する（�
 
 ```
 > i
-# pico-opm-writer 0.1.0
+# pico-opm-writer 0.2.0
 ...
 OK
 > r
@@ -297,19 +329,41 @@ CDC #1 への PCM 送信を制御する。**取り込み側の PIO と DMA は�
 
 | 書式 | 動作 |
 | --- | --- |
+| `p` | 現在の状態を表示する（下記） |
 | `p 1` | このコマンドを処理した時点以降に DMA が書いたデータから送信を始める。それより前のデータは送らない |
 | `p 0` | このコマンドを処理した時点までに DMA が取り込んだデータを**最後の 1 フレームまで送り切ってから**停止する |
+
+`p 1` / `p 0` は変更後の状態を 1 行出してから `OK` を返す。
+
+```
+> p
+# capture : IDLE
+# cdc1    : connected
+# rate    : 62500 Hz
+OK
+
+> p 1
+# capture : CAPTURING
+OK
+```
+
+`# capture` は `s` の `STATE` と同じ（`IDLE` / `CAPTURING` / `DRAINING` / `ERROR`。
+[§3.11](#311-s統計)）。`# cdc1` は PCM 側のポートをホストが開いているか、
+`# rate` はサンプリングレート φM/64。
 
 `p 0` はドレインが終わってから `OK` を返す。待っている間も PCM の送出と USB の処理は
 回り続けるので、DMA が止まることはない。2 秒で終わらなければ打ち切って
 `ERR drain timeout` を返す（ホストが CDC #1 を読んでいない場合）。
 
+**`p 0` は冪等。** 待機中に打っても `OK` を返す。DMA overrun で `ERROR` に落ちている
+場合もここで待機へ戻せる（[§4.1](#41-取りこぼしたとき-dma-overrun)）。
+
 エラーになる条件:
 
 | 状況 | 応答 |
 | --- | --- |
-| 待機中に `p 0` | `ERR wrong state` |
-| キャプチャ中に `p 1` | `ERR wrong state` |
+| キャプチャ中に `p 1` | `ERR wrong state`（`# hint : already capturing; run p 0 first`） |
+| `storage host` 中に `p 1` | `ERR wrong state`（`# hint : cannot capture PCM in storage host; run storage player first`。[§3.13](#313-storageストレージ)） |
 | CDC #1 が開かれていない状態で `p 1` | `ERR not connected` |
 
 いずれもコマンドの状態エラーであって、ファームウェアのエラー状態にはしない
@@ -321,10 +375,13 @@ CDC #1 への PCM 送信を制御する。**取り込み側の PIO と DMA は�
 
 ### 3.11 `s`（統計）
 
-`s` で実行時の統計を表示し、`s 0` でリセットする。単位はすべてバイト。
+`s` で実行時の統計を表示し、`s 0` でリセットする。`RING` と `USB_TX` の単位はバイト
+（他の項目の単位は下の表のとおり）。**`s` のラベルだけは大文字**で、他のコマンドの
+情報行は小文字にしてある。同じ値が両方に出ることがあるのはこのため
+（`s` の `FLASH` と `storage status` の `# flash` は同じもの）。
 
 ```
-# state   : CAPTURING
+# STATE   : CAPTURING
 # CPU     : 65% (max 65%)   USB 13%
 # RING    : 4/16384 bytes  MAX 108/16384  FREE 16380
 # USB_TX  : 0/4096 bytes  MAX 100/4096
@@ -349,7 +406,7 @@ OK
 
 | 項目 | 内容 |
 | --- | --- |
-| `state` | `IDLE` / `CAPTURING` / `DRAINING` / `ERROR` |
+| `STATE` | キャプチャの状態。`IDLE` / `CAPTURING` / `DRAINING` / `ERROR`（[§3.10](#310-ppcm-出力)） |
 | `CPU` | 直近 1 秒のうち **サービス関数の中に居た時間**の割合と、リセット以降の最大値。`USB` は `tud_task()` の占有率で、毎周回走る固定費なので分けてある |
 | `RING` | DMA リングの未処理量と high-water、空き |
 | `USB_TX` | CDC #1 の送信バッファ滞留量と high-water。USB エンドポイントの状態ではなく、ファーム内の TX FIFO の滞留量 |
@@ -364,12 +421,12 @@ OK
 | `VGM` | VGM の再生状態（`STOPPED` / `PLAYING` / `ERROR`）と再生中のファイル名。gzip 圧縮されたファイルなら末尾に `(gzip)` が付く（[§8.5](#85-vgzgzipの再生)） |
 | `VGM POS` | 発行済みのサンプル位置 / ヘッダの総サンプル数と、ループした回数 |
 | `VGM LAG` | VGM の時計を張り直した回数（[§3.14](#314-vgmvgm-再生)）。`gz reload` は `.vgz` のループで先頭から展開し直した回数で、**0 でなければループのたびに音が数百 ms 途切れている**（[§8.5](#85-vgzgzipの再生)） |
-| `MDX` | MDX 再生の状態とファイル名（[§3.15](#315-mdxmdx-再生)） |
+| `MDX` | MDX 再生の状態とファイル名（[§3.15](#315-mdxmdx-再生)）。`MDX_ENABLED=0` でビルドした場合は `DISABLED`（[§9.8](#98-無効化)） |
 | `MDX POS` | 発行済みの clock 数、ループジャンプの回数、チャンネル数。`loopjump` は全チャンネルの合計なので「曲が何周したか」ではない |
 | `MDX TICK` | 現在の Timer-B 値と 1 clock の長さ、時計を張り直した回数（[§9.2](#92-タイミング)） |
 | `MDX PCM` | ADPCM ミキシングの有効・無効、発音中のチャンネル数とビットマスク、発音を開始した回数（`keyon`）と鳴らせなかった回数（`miss`）、PDX を読んだ回数、FM に足した結果あふれたサンプル数（[§9.7](#97-adpcm-pcm8-の再生)） |
 | `SEQ LAG` | シーケンサが予定時刻から遅れた最大時間。**VGM と MDX で共用**（同時には再生できないので 1 個で足りる） |
-| `PIOTEST` | 起動時の PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。既定では `SKIP (disabled)`（[§5.4](#54-無効化)） |
+| `PIOTEST` | 起動時の PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。既定では `SKIP (disabled)`（[§5.4](#54-無効化)）。`i` と `t` では同じものが `# piotest` として出る |
 | `IRQ` | OPM の /IRQ の現在のレベル |
 
 `E0` / `RXSTALL` / `RATE` は、ロジックアナライザを繋がずにキャプチャ経路の健全性を
@@ -390,7 +447,7 @@ OK
 ```
 > t
 # pcm     : PASS
-# pio     : SKIP (disabled)
+# piotest : SKIP (disabled)
 # mdx     : PASS (7 pitch, 5 tempo)
 # adpcm   : PASS (19 cases)
 OK
@@ -399,11 +456,15 @@ OK
 | 項目 | 内容 |
 | --- | --- |
 | `pcm` | PCM 変換の既知ベクタ検証。ゼロ / ±1 / 仮数境界 / 指数全域 / 禁止コード / 無効 3bit のマスク / 値域の両端。加えて全 `E`・全仮数でステップが `1 << (E-1)` になることを総当たりで確認する |
-| `pio` | 起動時に実施した PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。**I2S が有効な既定構成では GP26-GP28 が競合するので実施せず `SKIP (disabled)` になる**（[§5.4](#54-無効化)） |
+| `piotest` | 起動時に実施した PIO ループバック自己診断の結果（[docs §4.6](docs/pico-opm-writer.md#46-起動時の自己診断)）。**I2S が有効な既定構成では GP26-GP28 が競合するので実施せず `SKIP (disabled)` になる**（[§5.4](#54-無効化)） |
 | `mdx` | MDX の音程 → KC/KF 変換と、Timer-B 値 → 1 clock の長さの既知ベクタ検証。KC の下位 4bit が 3/7/11/15 を飛ばす境界とオクターブ跨ぎを含む（[§9.4](#94-音程と音量の作り方)） |
 | `adpcm` | MSM6258 の ADPCM デコーダの既知ベクタ検証。ステップ幅の表・符号ビット・12bit の飽和・段番号の上下端での頭打ちを含む。加えてレート比が全モードで整数であることと、音量 8 が原音（ゲイン 1.0）であることを確かめる（[§9.7](#97-adpcm-pcm8-の再生)） |
 
 どれかが失敗したら `ERR self test failed` を返す。
+
+機能をビルド時に落としてある場合、その項目は `SKIP (disabled)` になる（失敗ではない）。
+`MDX_ENABLED=0` なら `mdx` と `adpcm` が、`PCM8_ENABLED=0` なら `adpcm` が
+`SKIP (disabled)` になる（[§9.8](#98-無効化)）。
 
 ### 3.13 `storage`（ストレージ）
 
@@ -412,13 +473,22 @@ OK
 
 | コマンド | 説明 |
 | --- | --- |
-| `storage status` | 現在の状態を表示する |
+| `storage` / `storage status` | 現在の状態を表示する |
 | `storage host` | フラッシュを PC へ渡す。PC にリムーバブルディスクとして現れる |
 | `storage player` | フラッシュを Pico 側へ戻す。FatFs をマウントし直す |
 | `storage format yes` | 領域を作り直す。既にファイルシステムがある場合は `storage format force yes` |
 | `storage trace` | 直前に PC が投げた SCSI コマンドの記録を表示する（[§7.4](#74-マウントされないときの調べ方)） |
 
-`storage status` の出力例:
+**`storage host` / `storage player` は冪等**で、既にそのモードなら何もせず `OK` を返す。
+どちらも切り替え後のモードを 1 行出してから `OK` を返す。
+
+```
+> storage host
+# storage : HOST
+OK
+```
+
+`storage` / `storage status` の出力例:
 
 ```
 # storage : PLAYER
@@ -447,7 +517,13 @@ OK
 
 **`storage host` は、VGM 再生中・MDX 再生中・PCM キャプチャ中だと `ERR wrong state` で
 拒否する。** どれで落ちたかは直前の `# hint` 行に出る。先に `vgm stop` / `mdx stop` /
-`p 0` を実行すること。
+`p 0` を実行すること（[§3.18](#318-状態による拒否の一覧)）。
+
+```
+> storage host
+# hint    : cannot switch while VGM is playing; run vgm stop first
+ERR wrong state
+```
 
 `HOST` 中は次のものが使えない。フラッシュの消去でメインループが数十 ms 止まり、
 キャプチャの DMA リング（65.5ms 分）と I2S の先行量（16.4ms 分）を守れないため。
@@ -467,9 +543,21 @@ OK
 
 | コマンド | 説明 |
 | --- | --- |
+| `vgm` / `vgm status` | 再生状態を表示する |
 | `vgm list` | `/VGM/` の `.vgm` と `.vgz` を名前順（大小無視）に並べる |
 | `vgm play <filename>` | `/VGM/<filename>` を再生する。`/VGM/` は付けない |
-| `vgm stop` | 再生を止めて全チャンネルをキーオフする |
+| `vgm stop` | 再生を止めて全チャンネルをキーオフする。**冪等**（停止中でも `OK`） |
+
+```
+> vgm
+# vgm     : PLAYING AFTERBURNER.VGM
+# pos     : 507150/2205000 samples  loop 7
+# lag     : reslip 0  gz reload 0
+OK
+```
+
+`.vgz` を再生中なら 1 行目の末尾に `(gzip)` が付く。同じ内容は `s` の `VGM` /
+`VGM POS` / `VGM LAG` の 3 行にもある（[§3.11](#311-s統計)）。
 
 ```
 > vgm list
@@ -480,7 +568,7 @@ OK
 
 > vgm play AFTERBURNER.VGM
 # vgm     : version 1.51  samples 2205000  loop yes
-# clock   : file 3579545 Hz / phiM 4000000 Hz (音程が高くなる)
+# clock   : file 3579545 Hz / phiM 4000000 Hz (pitch goes up)
 OK
 ```
 
@@ -488,11 +576,18 @@ OK
 `.vgz` のサイズは圧縮された状態のバイト数。
 
 `vgm list` は 256 件で打ち切る。打ち切ったときは `# files` 行の前に警告が出る
-（`mdx list` に件数の上限は無い）。
+（`mdx list` も同じ上限）。
 
 ```
-# warn    : 256 件で打ち切った
+# warn    : truncated at 256 entries
 # files   : 256
+```
+
+デュアルチップの VGM は 2 個目のチップを無視するので、`vgm play` が警告を出す
+（[§8.1](#81-対応範囲)）。
+
+```
+# warn    : dual chip file; the second chip (0xA4) is ignored
 ```
 
 `.vgz` を再生すると `# vgm` 行の末尾に `gzip` が付く。
@@ -503,24 +598,16 @@ OK
 OK
 ```
 
-**再生中は `w` / `r` / `c` と `storage host` を `ERR wrong state` で拒否する。**
-VGM とユーザーのレジスタ書き込みが混ざると何が鳴っているのか分からなくなるため。
-`p 1` / `p 0` / `s` / `i` / `t` / `d` は再生中も使える（VGM を鳴らしながら
-CDC #1 へ録音できる）。
+**再生中は `w` / `r` / `c` と `storage host`、それに `vgm play` / `mdx play` を
+`ERR wrong state` で拒否する。** VGM とユーザーのレジスタ書き込みが混ざると
+何が鳴っているのか分からなくなるため。`p 1` / `p 0` / `s` / `i` / `t` / `d` は
+再生中も使える（VGM を鳴らしながら CDC #1 へ録音できる）。
+全体は [§3.18](#318-状態による拒否の一覧)。
 
 ループを持たないファイルはデータの終端で自動的に止まる。全チャンネルをキーオフして
-ファイルを閉じ、状態は `STOPPED` に戻る。
-
-```
-# vgm     : end of data
-```
-
-再生を始めたあとにファイルの中身が壊れていると分かった場合は、`OK` を返したあとなので
-非同期通知になる。状態は `ERROR` になり `s` から見える。
-
-```
-# ERR vgm bad file (opcode 0x2f at 0x0001a34c)
-```
+ファイルを閉じ、状態は `STOPPED` に戻る。再生を始めたあとにファイルの中身が壊れて
+いると分かった場合は、`OK` を返したあとなので非同期通知になり、状態は `ERROR` になる。
+どちらも [§3.17](#317-非同期通知) を参照。
 
 ### 3.15 `mdx`（MDX 再生）
 
@@ -531,11 +618,24 @@ CDC #1 へ録音できる）。
 
 | コマンド | 説明 |
 | --- | --- |
-| `mdx list` | `/MDX/` の `.mdx` を名前順（大小無視）に並べる |
+| `mdx` / `mdx status` | 再生状態を表示する |
+| `mdx list` | `/MDX/` の `.mdx` を名前順（大小無視）に並べる。256 件で打ち切る |
 | `mdx play <filename>` | `/MDX/<filename>` を再生する。`/MDX/` は付けない |
-| `mdx stop` | 再生を止めて全チャンネルをキーオフする |
+| `mdx stop` | 再生を止めて全チャンネルをキーオフする。**冪等**（停止中でも `OK`） |
 | `mdx pcm` | ADPCM ミキシングの状態を表示する |
 | `mdx pcm on` / `mdx pcm off` | ADPCM を足す / 足さない（FM だけの音と聴き比べる用） |
+
+```
+> mdx
+# mdx     : PLAYING GRADIUS.MDX
+# title   : グラディウス / KONAMI
+# pos     : 12345 clocks  loopjump 0  ch 9
+# tick    : @t 200  14336 us  reslip 0
+OK
+```
+
+同じ内容は `s` の `MDX` / `MDX POS` / `MDX TICK` の 3 行にもある
+（[§3.11](#311-s統計)）。ADPCM の詳細は `mdx pcm` の方に出る。
 
 ```
 > mdx list
@@ -563,24 +663,26 @@ PDX（ADPCM の波形集）を要求する曲では、その名前と、実際�
 # title   : THEXDER
 # ch      : 9  voices 20
 # pdx     : THEXDER
-# adpcm   : /MDX/THEXDER.PDX
+# pdxpath : /MDX/THEXDER.PDX
 OK
 ```
+
+`# pdx` は MDX のヘッダが要求している名前、`# pdxpath` は実際に開いたファイル。
 
 PDX が見つからないときはエラーにはならず、FM パートだけがそのまま鳴る。
 
 ```
 # pdx     : THEXDER
-# hint    : /MDX/THEXDER.PDX を開けない (not found)。ADPCM パートは鳴らない
+# hint    : cannot open /MDX/THEXDER.PDX (not found); the ADPCM part will not sound
 ```
 
 `mdx pcm` で ADPCM の状態が見える。
 
 ```
 > mdx pcm
-# pcm     : on
-# pdx     : /MDX/THEXDER.PDX
-# ch      : 2 active  mask 03  pan L+R
+# adpcm   : on
+# pdxpath : /MDX/THEXDER.PDX
+# active  : 2 ch  mask 03  pan L+R
 # keyon   : 128   miss 0
 # reads   : 647   clip 0
 OK
@@ -597,28 +699,22 @@ OK
 ```
 > mdx play THEXDER.MDX
 ...
-# adpcm   : /MDX/THEXDER.PDX
-# hint    : ADPCM のミキシングは off。mdx pcm on で戻す
+# pdxpath : /MDX/THEXDER.PDX
+# hint    : ADPCM mixing is off; run mdx pcm on to restore it
 ```
 
-**再生中は `w` / `r` / `c` と `storage host` を `ERR wrong state` で拒否する。**
-VGM と MDX を同時に再生することもできない（どちらか一方だけ）。
-`p 1` / `p 0` / `s` / `i` / `t` / `d` は再生中も使える。
+**再生中は `w` / `r` / `c` と `storage host`、それに `mdx play` / `vgm play` を
+`ERR wrong state` で拒否する。** VGM と MDX を同時に再生することもできない
+（どちらか一方だけ）。`p 1` / `p 0` / `s` / `i` / `t` / `d` は再生中も使える。
+全体は [§3.18](#318-状態による拒否の一覧)。
 
-`.mdx` として読めない中身は `ERR bad file`。64KiB を超えるファイルも受け付けない。
-再生を始めたあとに壊れていると分かった場合は `OK` を返したあとなので非同期通知になる。
-
-```
-# ERR mdx bad file (truncated at 0x00000c34)
-```
+`.mdx` として読めない中身は `ERR bad file`。64KiB を超えるファイルも受け付けない
+（`# hint : MDX must be 65536 bytes or less`）。再生を始めたあとに壊れていると
+分かった場合は `OK` を返したあとなので非同期通知になる。
 
 全チャンネルが演奏終了（`0xF1 0x00`）に達すると自動で止まる。ループを持つ曲は
-止まらないので `mdx stop` で止める。どちらの止まり方も 1 行の非同期通知が出る。
-
-```
-# mdx     : end             ← 全チャンネルが演奏終了に達した
-# mdx     : fadeout end     ← フェードアウトが完了して止まった
-```
+止まらないので `mdx stop` で止める。どの止まり方も 1 行の非同期通知が出る
+（[§3.17](#317-非同期通知)）。
 
 ### 3.16 `clock`（クロック切り替え）
 
@@ -626,7 +722,7 @@ VGM と MDX を同時に再生することもできない（どちらか一方�
 
 | 書式 | 動作 |
 | --- | --- |
-| `clock` | 現在の φM / sys_clk / プリセット / I2S のレートを表示する |
+| `clock` / `clock status` | 現在の φM / sys_clk / プリセット / I2S のレートを表示する |
 | `clock 4` | φM 4.000000MHz（sys_clk 144MHz）へ切り替える |
 | `clock 3.58` | φM 3.579545MHz（sys_clk 157.5MHz）へ切り替える |
 | `clock auto` | `vgm play` でファイルのクロックへ追従する（**既定**） |
@@ -644,7 +740,8 @@ VGM と MDX を同時に再生することもできない（どちらか一方�
 OK
 ```
 
-既に同じプリセットのときは何もせずに応答だけを返す。
+既に同じプリセットのときは何もせずに応答だけを返す（冪等）。プリセット名以外を
+渡すと `ERR unknown command`（`clock 5` / `clock 3.6` など）。
 
 **PCM キャプチャ中（`p 1`）は `ERR wrong state` で拒否する。** サンプリングレートが
 ストリームの途中で変わると、ホスト側で出来上がる WAV の時間軸が黙って狂うため。
@@ -653,12 +750,78 @@ OK
 
 ```
 > clock 3.58
-# hint    : PCM キャプチャ中は切り替えられない。先に p 0 を実行すること
+# hint    : cannot switch phiM while capturing PCM; run p 0 first
 ERR wrong state
 ```
 
 VGM 再生中は拒否しない。レジスタを叩くわけではなく、変わるのは音程と包絡線の速さだけで、
 テンポは 44100Hz の絶対サンプル数で刻んでいるので狂わない。
+
+### 3.17 非同期通知
+
+コマンドの応答とは無関係に、ファームウェア側の都合で出る 1 行の通知。**すべて `#` で
+始まる情報行**なので、「1 コマンド 1 応答」（[§3.3](#33-応答)）は崩れない。ホスト側は
+情報行として読み飛ばすか、必要なら内容を見ればよい。
+
+| 通知 | 意味 |
+| --- | --- |
+| `# vgm     : end of data` | ループを持たない VGM がデータの終端に達して止まった（[§3.14](#314-vgmvgm-再生)） |
+| `# mdx     : end of data` | MDX の全チャンネルが演奏終了（`0xF1 0x00`）に達して止まった（[§3.15](#315-mdxmdx-再生)） |
+| `# mdx     : end of fadeout` | MDX のフェードアウトが完了して止まった |
+| `# storage : ejected by host` | PC がリムーバブルディスクを取り出した。所有権が Pico 側へ戻る（[§7.2](#72-pc-から曲データをコピーする)） |
+| `# ERR dma overrun` | キャプチャのリングがあふれて送信を止めた。状態は `ERROR`（[§4.1](#41-取りこぼしたとき-dma-overrun)） |
+| `# ERR vgm bad file (<理由> at 0x<位置>)` | 再生中の VGM が壊れていた。状態は `ERROR`（[§3.14](#314-vgmvgm-再生)） |
+| `# ERR mdx bad file (<理由> at 0x<位置>)` | 再生中の MDX が壊れていた。状態は `ERROR`（[§3.15](#315-mdxmdx-再生)） |
+| `# ERR storage io error` | フラッシュへの書き出しに失敗した（[§7.3](#73-書き込みの仕組みと制約)） |
+| `# ERR storage region overlaps firmware (...)` | 起動時。FatFs 領域がファームウェアと重なっているのでマウントも書き込みもしない（[§7.1](#71-領域の変え方)） |
+
+```
+# ERR vgm bad file (opcode 0x2f at 0x0001a34c)
+# ERR mdx bad file (truncated at 0x00000c34)
+```
+
+**`# ERR ...` は裸の `ERR ...`（コマンドの応答）とは別物。** 頭の `# ` の有無で
+機械的に区別できる。`ERROR` に落ちた状態は `s`（[§3.11](#311-s統計)）や
+`vgm` / `mdx` / `p` の状態表示からも読める。
+
+### 3.18 状態による拒否の一覧
+
+`ERR wrong state` になる組み合わせ。**拒否されたときは直前に必ず `# hint` 行が出る**ので、
+4 つの原因のどれで落ちたかは応答だけで分かる。
+
+| コマンド | VGM 再生中 | MDX 再生中 | キャプチャ中 (`p 1`) | `storage host` 中 |
+| --- | --- | --- | --- | --- |
+| `w` / `r` / `c` | 拒否 | 拒否 | 可 | 可 |
+| `d` / `i` / `t` / `s` / `h` | 可 | 可 | 可 | 可 |
+| `p 1` | 可 | 可 | 拒否 | 拒否 |
+| `p 0` | 可 | 可 | 可 | 可 |
+| `clock 4` / `clock 3.58` | 可 | 可 | **拒否** | 可 |
+| `clock auto` / `clock fixed` | 可 | 可 | 可 | 可 |
+| `storage host` | 拒否 | 拒否 | 拒否 | 可（冪等） |
+| `storage player` | 可 | 可 | 可 | 可 |
+| `storage format` | 可 | 可 | 可 | 拒否 |
+| `vgm list` / `mdx list` | 可 | 可 | 可 | 拒否 |
+| `vgm play` / `mdx play` | 拒否 | 拒否 | 同じ φM なら可 | 拒否 |
+| `vgm stop` / `mdx stop` | 可 | 可 | 可 | 可 |
+| 状態表示（`p` / `clock` / `storage` / `vgm` / `mdx` / `mdx pcm`） | 可 | 可 | 可 | 可 |
+
+読み方の要点:
+
+- **`w` / `r` / `c` を再生中に拒否する**のは、シーケンサとユーザーの書き込みが混ざると
+  何が鳴っているのか分からなくなるため（[§3.14](#314-vgmvgm-再生)）。
+- **`storage host` を 3 つの状態すべてで拒否する**のは、フラッシュの消去でメインループが
+  数十 ms 止まり、キャプチャの DMA リング（65.5ms 分）と I2S の先行量（16.4ms 分）を
+  守れないため（[§3.13](#313-storageストレージ)）。
+- **キャプチャ中の `clock` 切り替えを拒否する**のは、サンプリングレートがストリームの
+  途中で変わるとホスト側で出来上がる WAV の時間軸が黙って狂うため
+  （[§3.16](#316-clockクロック切り替え)）。`vgm play` / `mdx play` の自動追従にも
+  同じように効くので、**キャプチャ中に別クロックの曲を再生しようとすると再生自体が
+  拒否される**（同じクロックなら通る）。
+- **`stop` 系と `storage` のモード切り替えは拒否されない。** いずれも冪等で、
+  既にその状態でも `OK` を返す（[§3.4](#34-コマンド一覧)）。
+
+ビルド時に落とした機能は `ERR wrong state` ではなく `ERR unsupported` を返す
+（[§9.8](#98-無効化)）。
 
 ## 4. PCM 出力
 
@@ -688,13 +851,14 @@ OPM が YM3012 (DAC) へ送るシリアル出力を取り込み、PCM に変換�
 
 読み落としてリングが一杯になると、壊れたデータを送り続けないよう次のように振る舞う。
 
-1. 送信を停止する（`s` の `state` が `ERROR` になる）
+1. 送信を停止する（`s` の `STATE` が `ERROR` になる）
 2. コマンド側の CDC #0 へ `# ERR dma overrun` を出す
 3. LED をエラー表示にする（[§3.9](#39-led)）
-4. 次の `p 1` を受けるまで止まったまま
+4. 次の `p 1`（または `p 0`）を受けるまで止まったまま
 
-`# ` 始まりの情報行として出すので、「1 コマンド 1 応答」（[§3.3](#33-応答)）は崩れない。
-発生回数は `s` の `OVERRUN` に残る。次の `p 1` でそのまま復帰できる。
+`# ` 始まりの情報行として出すので、「1 コマンド 1 応答」（[§3.3](#33-応答)）は崩れない
+（[§3.17](#317-非同期通知)）。発生回数は `s` の `OVERRUN` に残る。
+復帰は次の `p 1` でも、`p 0` で待機へ戻してからでもよい。
 
 [tools/opm-writer.py](docs/opm-writer.md) の `!capture` を使えば、読み出しは
 スクリプト側が面倒を見る。
@@ -919,6 +1083,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 \
 
 ```
 > storage host
+# storage : HOST
 OK
 ```
 
@@ -939,7 +1104,8 @@ eject せずに `storage player` と打っても戻せるが、PC 側に書き�
 
 ```
 > storage player
-# warn    : ホストが eject していません。ファイルが不完全な可能性があります
+# warn    : host did not eject; files may be incomplete
+# storage : PLAYER
 OK
 ```
 
@@ -964,7 +1130,7 @@ USB を挿し直したくない場合、`storage host` と `storage player` の�
 
 ```
 > storage format yes
-# format  : 数十秒かかる。この間 I2S はアンダーランする
+# format  : takes tens of seconds; I2S will underrun meanwhile
 OK
 ```
 
@@ -1064,14 +1230,15 @@ OK
 ### 8.1 対応範囲
 
 **演奏対象は YM2151（VGM コマンド `0x54`）だけ。** 他の音源のコマンドは仕様上の
-長さぶん読み飛ばす。デュアルチップのファイルは 2 個目（`0xA4`）を無視する。
+長さぶん読み飛ばす。デュアルチップのファイルは 2 個目（`0xA4`）を無視し、
+`vgm play` が `# warn : dual chip file; the second chip (0xA4) is ignored` を出す。
 
 | 項目 | 内容 |
 | --- | --- |
 | 対応バージョン | 1.00 以降（データ開始位置は v1.50 未満と 0 のとき 0x40 固定） |
 | 処理するコマンド | `0x54`（YM2151 書き込み） / `0x61` `0x62` `0x63` `0x70`-`0x7F`（wait） / `0x80`-`0x8F`（DAC。書き込みは飛ばし wait だけ効かせる） / `0x66`（終端） / `0x67`（データブロックを飛ばす） |
 | 読み飛ばすもの | 上記以外の既知コマンドを仕様上の長さぶん |
-| 中断するもの | 未知のオペコード（`0x00`-`0x2F` / `0x60` / `0x65` / `0x69`-`0x6F` / `0x96`-`0x9F`）、ファイルの途中終端 |
+| 中断するもの | 未知のオペコード（`0x00`-`0x2F` / `0x60` / `0x65` / `0x69`-`0x6F` / `0x96`-`0x9F`）、ファイルの途中終端。`# ERR vgm bad file (...)` を出して `ERROR` へ（[§3.17](#317-非同期通知)） |
 | ループ | ヘッダのループオフセットが有効ならそこへ戻って無限に繰り返す。`vgm stop` するまで続く |
 | 圧縮 | `.vgz`（gzip）を一時ファイルを作らずストリームのまま展開して再生する（[§8.5](#85-vgzgzipの再生)） |
 | 非対応 | GD3 タグ（曲名・作者）の表示 |
@@ -1114,7 +1281,7 @@ VGM の wait は 44100Hz の絶対サンプル数で表される。予定時刻�
 ```
 > vgm play SOMETHING.VGM
 # vgm     : version 1.51  samples 705600  loop yes
-# clock   : file 3546895 Hz / phiM 3579545 Hz (音程が低くなる)
+# clock   : file 3546895 Hz / phiM 3579545 Hz (pitch goes down)
 OK
 ```
 
@@ -1174,7 +1341,12 @@ VGM は 3〜10 倍に縮む）。`vgm list` は `.vgm` と `.vgz` を区別せ�
 
 保存できないまま通過してしまった場合の保険として、先頭から展開し直す経路がある。
 こちらを通ると継ぎ目で音が数百 ms 途切れ、`s` の `gz reload` が増える
-（[§3.11](#311-s統計)）。**通常の再生では 0 のまま。**
+（[§3.11](#311-s統計)）。**通常の再生では 0 のまま。** この経路に入るときは
+警告が出る。
+
+```
+# warn    : could not save the .vgz loop point; will re-inflate from the start
+```
 
 `0x67` のデータブロックのような前方への読み飛ばしは、gzip では飛ばせないので展開して
 捨てるしかない。1KiB ずつに分けて 500µs の予算に乗せるため、読み飛ばしのあいだも
@@ -1204,7 +1376,15 @@ VGM は 3〜10 倍に縮む）。`vgm list` は `.vgm` と `.vgz` を区別せ�
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DVGM_VGZ_ENABLED=0
 ```
 
-無効にすると `.vgz` は `ERR bad file` になる（`# hint` 行で理由を出す）。実測サイズは
+無効にすると `.vgz` は `ERR bad file` になる。
+
+```
+> vgm play OUTRUN.VGZ
+# hint    : .vgz (gzip) is disabled by VGM_VGZ_ENABLED=0; gunzip before transferring
+ERR bad file
+```
+
+実測サイズは
 text 90,800 → 80,684 バイト / bss 180,448 → 94,012 バイト。
 
 ## 9. MDX 再生
@@ -1265,7 +1445,15 @@ tick は進めないので、演奏が先へ流れることはない。
 ### 9.3 φM と テンポ
 
 `mdx play` は φM を X68000 の **4MHz** へ寄せる（`clock auto` のとき。
-[§2](#2-クロック設定-φm)）。`clock fixed` にしていれば従わない。
+[§2](#2-クロック設定-φm)）。`clock fixed` にしていれば従わず、食い違いを警告する。
+
+```
+> mdx play GRADIUS.MDX
+# mdx     : GRADIUS.MDX
+...
+# clock   : mdx 4000000 Hz / phiM 3579545 Hz (pitch and tempo both off)
+OK
+```
 
 VGM と違い、**MDX は φM がずれるとテンポまでずれる。** VGM の wait は 44100Hz 固定の
 絶対サンプル数なので φM とは無関係だが（[§8.3](#83-φm-と-vgm-のクロック)）、MDX の
@@ -1328,7 +1516,7 @@ MDX ファイルのヘッダには PDX（ADPCM の波形集）の名前が入っ
 # title   : Ｂlast Ｐower ！ ～ from BOSCONIAN-X68
 # ch      : 9  voices 8
 # pdx     : bos
-# adpcm   : /MDX/bos.PDX
+# pdxpath : /MDX/bos.PDX
 OK
 ```
 
@@ -1399,11 +1587,33 @@ PDX を要求する曲は FM パートだけが鳴る。
 # adpcm   : disabled  8 ch  pdx stream 1024 bytes/ch
 ...
 # pdx     : THEXDER
-# hint    : /MDX/THEXDER.PDX を開けない (disabled)。ADPCM パートは鳴らない
+# hint    : cannot open /MDX/THEXDER.PDX (disabled); the ADPCM part will not sound
 ```
 
 `mdx pcm off`（[§3.15](#315-mdxmdx-再生)）との違いは、**コードごと消えること**。
 実行時に `mdx pcm on` へ戻すことはできない。聴き比べたいだけなら `mdx pcm off` を使う。
+
+**無効化した機能は `ERR unsupported` を返す**（`ERR wrong state` ではない。
+理由は `# hint` 行に出る）。状態表示だけは通るので、無効化されていることを
+`mdx` / `mdx pcm` / `i` / `t` から確認できる。
+
+```
+（PCM8_ENABLED=0）
+> mdx pcm on
+# hint    : ADPCM is disabled at build time (PCM8_ENABLED=0)
+ERR unsupported
+
+（MDX_ENABLED=0）
+> mdx list
+# hint    : MDX playback is disabled at build time (MDX_ENABLED=0)
+ERR unsupported
+
+> mdx
+# mdx     : DISABLED
+# pos     : 0 clocks  loopjump 0  ch 0
+# tick    : @t 0  0 us  reslip 0
+OK
+```
 
 ## 10. ホスト側ツール
 
