@@ -83,6 +83,7 @@ add_executable(pico-opm-writer
         flash_disk.c
         diskio_flash.c
         storage.c
+        filelist.c
         vgm.c
         vgz.c
         mdx.c

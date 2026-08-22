@@ -7,7 +7,9 @@
 
 #include <stdio.h>
 
+#include "i2s.h"
 #include "led.h"
+#include "pcm8.h"
 #include "stats.h"
 #include "usb_pcm.h"
 #include "ym3012.h"
@@ -101,6 +103,12 @@ const char *capture_request_stop(void) {
     s_drain_target = ym3012_write_total();
     s_state = CAPTURE_STATE_DRAINING;
     return NULL;
+}
+
+void capture_resync_after_blackout(void) {
+    ym3012_ring_resync();
+    i2s_resync();
+    pcm8_resync();
 }
 
 void capture_abort(void) {

@@ -11,9 +11,8 @@
 #include "hardware/sync.h"
 #include "pico/flash.h"
 
-#include "i2s.h"
+#include "capture.h"
 #include "stats.h"
-#include "ym3012.h"
 
 /* 領域はフラッシュ全体に収まり、消去単位で割り切れること */
 _Static_assert(FLASH_FATFS_OFFSET + FLASH_FATFS_SIZE <= PICO_FLASH_SIZE_BYTES,
@@ -253,8 +252,7 @@ bool flash_disk_flush_one(void) {
      * DMA ポインタの差分をリング長で剰余を取って積んでいるので、ここで
      * 基準点を張り直さないと総フレーム数に恒久的なずれが残る。
      */
-    ym3012_ring_resync();
-    i2s_resync();
+    capture_resync_after_blackout();
 
     stats_count_flash_write();
     stats_flash_blackout_add(elapsed);

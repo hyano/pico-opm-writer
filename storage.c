@@ -17,7 +17,6 @@
 #include "i2s.h"
 #include "mdx.h"
 #include "vgm.h"
-#include "ym3012.h"
 
 /* リンカが置くファームウェア末尾。領域の重なり検査に使う。 */
 extern char __flash_binary_end;
@@ -216,8 +215,7 @@ const char *storage_set_player(void) {
     if (!flushed) {
         s_fs_state = STORAGE_FS_IO_ERROR;
         i2s_set_enabled(true);
-        ym3012_ring_resync();
-        i2s_resync();
+        capture_resync_after_blackout();
         return "io error";
     }
 
@@ -228,8 +226,7 @@ const char *storage_set_player(void) {
      * ym3012 と I2S の総フレーム数にずれが溜まっている。ここで断ち切る。
      */
     i2s_set_enabled(true);
-    ym3012_ring_resync();
-    i2s_resync();
+    capture_resync_after_blackout();
 
     if (s_host_dirty) {
         printf("# warn    : host did not eject; files may be incomplete\n");

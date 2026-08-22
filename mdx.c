@@ -63,6 +63,7 @@
 
 #include "clockmode.h"
 #include "ff.h"
+#include "filelist.h"
 #include "opm.h"
 #include "pcm8.h"
 #include "pico/stdlib.h"
@@ -1269,120 +1270,13 @@ static void key_off_all(void) {
 
 /* ---- 一覧 -------------------------------------------------------------- */
 
-static int name_cmp(const char *a, const char *b) {
-    for (;;) {
-        unsigned char ca = (unsigned char)*a++;
-        unsigned char cb = (unsigned char)*b++;
-        if (ca >= 'a' && ca <= 'z') {
-            ca = (unsigned char)(ca - 'a' + 'A');
-        }
-        if (cb >= 'a' && cb <= 'z') {
-            cb = (unsigned char)(cb - 'a' + 'A');
-        }
-        if (ca != cb) {
-            return (ca < cb) ? -1 : 1;
-        }
-        if (ca == '\0') {
-            return 0;
-        }
-    }
-}
-
-static bool has_mdx_ext(const char *name) {
-    size_t n = strlen(name);
-    if (n < 4u) {
-        return false;
-    }
-    return name_cmp(name + n - 4u, ".MDX") == 0;
-}
-
-static bool is_listable(const FILINFO *fi) {
-    if ((fi->fattrib & (AM_DIR | AM_SYS | AM_HID)) != 0u) {
-        return false;
-    }
-    /* macOS が作る AppleDouble */
-    if (fi->fname[0] == '.') {
-        return false;
-    }
-    return has_mdx_ext(fi->fname);
-}
+/* 一覧に出す拡張子。 */
+static const char *const MDX_EXTS[] = {".mdx"};
 
 const char *mdx_list(void (*tick)(void)) {
-    if (!storage_fatfs_may_access()) {
-        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
-        return "wrong state";
-    }
-    if (storage_fs_state() != STORAGE_FS_MOUNTED) {
-        return "no filesystem";
-    }
-
-    /*
-     * vgm_list() と同じく、名前 2 個ぶんの RAM で「直前より大きいものの中で最小」を
-     * 毎回ディレクトリ走査で探す。
-     */
-    char prev[FF_LFN_BUF + 1];
-    char best[FF_LFN_BUF + 1];
-    static FILINFO fi;
-    DIR dir;
-
-    prev[0] = '\0';
-    uint32_t emitted = 0;
-    bool first = true;
-
-    for (;;) {
-        FRESULT fr = f_opendir(&dir, MDX_DIR);
-        if (fr == FR_NO_PATH || fr == FR_NO_FILE) {
-            return "not found";
-        }
-        if (fr != FR_OK) {
-            return "io error";
-        }
-
-        bool found = false;
-        uint32_t best_size = 0;
-        best[0] = '\0';
-
-        for (;;) {
-            if (f_readdir(&dir, &fi) != FR_OK || fi.fname[0] == '\0') {
-                break;
-            }
-            if (!is_listable(&fi)) {
-                continue;
-            }
-            if (!first && name_cmp(fi.fname, prev) <= 0) {
-                continue;
-            }
-            if (!found || name_cmp(fi.fname, best) < 0) {
-                snprintf(best, sizeof(best), "%s", fi.fname);
-                best_size = (uint32_t)fi.fsize;
-                found = true;
-            }
-        }
-
-        f_closedir(&dir);
-
-        if (!found) {
-            break;
-        }
-
-        /* サイズを先に置く。名前は空白を含みうるので必ず最後の欄にする。 */
-        printf("# file    : %9u %s\n", (unsigned)best_size, best);
-        if (tick != NULL) {
-            tick();
-        }
-
-        snprintf(prev, sizeof(prev), "%s", best);
-        first = false;
-        emitted++;
-
-        if (emitted >= MDX_LIST_MAX) {
-            printf("# warn    : truncated at %u entries\n", (unsigned)MDX_LIST_MAX);
-            break;
-        }
-    }
-
-    printf("# files   : %u\n", (unsigned)emitted);
-    return NULL;
+    return filelist_print(MDX_DIR, MDX_EXTS,
+                          (uint32_t)(sizeof(MDX_EXTS) / sizeof(MDX_EXTS[0])),
+                          MDX_LIST_MAX, tick);
 }
 
 /* ---- チャンネルの初期化 ------------------------------------------------ */

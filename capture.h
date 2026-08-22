@@ -38,6 +38,16 @@ void capture_init(void);
  */
 bool capture_service(void);
 
+/*
+ * リング一周 65.5ms を超えてメインループが止まったあとに呼ぶ
+ * （フラッシュの消去・書き込みなど）。
+ *
+ * 3 つのリングは DMA ポインタの差分をリング長で剰余を取って積んでいるので、
+ * 一周を超えて止まると位置を見失う。張り直しを 1 本にまとめてあるのは、
+ * 消費者が増えたときに呼び忘れが起きないようにするため。
+ */
+void capture_resync_after_blackout(void);
+
 /* p 1 相当。成功なら NULL、失敗ならエラー理由の文字列を返す。 */
 const char *capture_start(void);
 

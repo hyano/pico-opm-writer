@@ -5,7 +5,6 @@
  */
 #include "vgm.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,6 +13,7 @@
 #include "ff.h"
 
 #include "clockmode.h"
+#include "filelist.h"
 #include "mdx.h"
 #include "opm.h"
 #include "stats.h"
@@ -798,128 +798,13 @@ const char *vgm_stop(void) {
 
 /* ---- 一覧 -------------------------------------------------------------- */
 
-/* 大小を無視した比較。同じなら大小を見て決める（順序を一意にするため）。 */
-static int name_cmp(const char *a, const char *b) {
-    const char *pa = a;
-    const char *pb = b;
-    for (;;) {
-        int ca = tolower((unsigned char)*pa);
-        int cb = tolower((unsigned char)*pb);
-        if (ca != cb) {
-            return (ca < cb) ? -1 : 1;
-        }
-        if (ca == '\0') {
-            break;
-        }
-        pa++;
-        pb++;
-    }
-    return strcmp(a, b);
-}
-
-/* 拡張子が .vgm または .vgz（大小無視）か */
-static bool has_vgm_ext(const char *name) {
-    size_t len = strlen(name);
-    if (len < 5u) { /* "x.vgm" が最短 */
-        return false;
-    }
-    const char *ext = name + len - 4u;
-    if (ext[0] != '.' || tolower((unsigned char)ext[1]) != 'v' ||
-        tolower((unsigned char)ext[2]) != 'g') {
-        return false;
-    }
-    int c = tolower((unsigned char)ext[3]);
-    return c == 'm' || c == 'z';
-}
-
-static bool is_listable(const FILINFO *fi) {
-    if ((fi->fattrib & (AM_DIR | AM_HID | AM_SYS)) != 0) {
-        return false;
-    }
-    /* macOS が作る AppleDouble */
-    if (fi->fname[0] == '.') {
-        return false;
-    }
-    return has_vgm_ext(fi->fname);
-}
+/* 一覧に出す拡張子。gzip 圧縮された .vgz も同じ一覧に並べる。 */
+static const char *const VGM_EXTS[] = {".vgm", ".vgz"};
 
 const char *vgm_list(void (*tick)(void)) {
-    if (!storage_fatfs_may_access()) {
-        printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
-        return "wrong state";
-    }
-    if (storage_fs_state() != STORAGE_FS_MOUNTED) {
-        return "no filesystem";
-    }
-
-    /*
-     * 名前を全部ためてからソートすると数十 KB のバッファが要るので、
-     * 「直前に出した名前より大きいものの中で最小」を毎回ディレクトリ走査で
-     * 探す。走査は XIP からの読み出しだけなので速く、必要な RAM は名前 2 個ぶん。
-     */
-    char prev[FF_LFN_BUF + 1];
-    char best[FF_LFN_BUF + 1];
-    static FILINFO fi;
-    DIR dir;
-
-    prev[0] = '\0';
-    uint32_t emitted = 0;
-    bool first = true;
-
-    for (;;) {
-        FRESULT fr = f_opendir(&dir, VGM_DIR);
-        if (fr == FR_NO_PATH || fr == FR_NO_FILE) {
-            return "not found";
-        }
-        if (fr != FR_OK) {
-            return "io error";
-        }
-
-        bool found = false;
-        uint32_t best_size = 0;
-        best[0] = '\0';
-
-        for (;;) {
-            if (f_readdir(&dir, &fi) != FR_OK || fi.fname[0] == '\0') {
-                break; /* 終端かエラー */
-            }
-            if (!is_listable(&fi)) {
-                continue;
-            }
-            if (!first && name_cmp(fi.fname, prev) <= 0) {
-                continue; /* もう出した */
-            }
-            if (!found || name_cmp(fi.fname, best) < 0) {
-                snprintf(best, sizeof(best), "%s", fi.fname);
-                best_size = (uint32_t)fi.fsize;
-                found = true;
-            }
-        }
-
-        f_closedir(&dir);
-
-        if (!found) {
-            break;
-        }
-
-        /* サイズを先に置く。名前は空白を含みうるので必ず最後の欄にする。 */
-        printf("# file    : %9u %s\n", (unsigned)best_size, best);
-        if (tick != NULL) {
-            tick();
-        }
-
-        snprintf(prev, sizeof(prev), "%s", best);
-        first = false;
-        emitted++;
-
-        if (emitted >= VGM_LIST_MAX) {
-            printf("# warn    : truncated at %u entries\n", (unsigned)VGM_LIST_MAX);
-            break;
-        }
-    }
-
-    printf("# files   : %u\n", (unsigned)emitted);
-    return NULL;
+    return filelist_print(VGM_DIR, VGM_EXTS,
+                          (uint32_t)(sizeof(VGM_EXTS) / sizeof(VGM_EXTS[0])),
+                          VGM_LIST_MAX, tick);
 }
 
 /* ---- 問い合わせ -------------------------------------------------------- */
