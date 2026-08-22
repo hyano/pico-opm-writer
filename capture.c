@@ -104,7 +104,11 @@ static void capture_to_idle(void) {
 }
 
 bool capture_service(void) {
-    ym3012_ring_poll();
+    /*
+     * 書き込み位置の取り込み (ym3012_ring_poll) は service_all() が周回の先頭で
+     * 済ませている。ADPCM のミキサがどの消費者よりも先にレンダリングする必要が
+     * あり、そのためには poll がさらに前に来ていなければならない。
+     */
 
     /*
      * 取り込んだフレーム数は状態によらず数える。RATE (frames/s) が

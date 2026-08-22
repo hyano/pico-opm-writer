@@ -64,6 +64,7 @@
 #include "clockmode.h"
 #include "ff.h"
 #include "opm.h"
+#include "pcm8.h"
 #include "pico/stdlib.h"
 #include "stats.h"
 #include "storage.h"
@@ -173,6 +174,12 @@ static mdx_ch_t s_ch[MDX_CH_MAX];
 /* ---- 全体の状態（参照実装のグローバルワーク相当） ---------------------- */
 
 static uint8_t s_sync[MDX_CH_MAX]; /* L001df6。0xEF で立ち 0xEE で降りる */
+
+/*
+ * 参照実装の TieFlag。ch_len() の入口でそのチャンネルのレガート指定を写す
+ * （= 直前の音がタイだったか）。ADPCM の音量を発音中に変えるかの判定に使う。
+ */
+static bool s_tie_flag;
 static uint16_t s_enable;          /* L001e1a。まだ終わっていないチャンネル */
 static bool s_pcm8_mode;           /* L001df4。0xE8 で立つと 9-15ch も回る */
 
@@ -215,6 +222,13 @@ static const uint8_t CARRIER_SLOT[8] = {0x08, 0x08, 0x08, 0x08, 0x0c, 0x0e, 0x0e
 static const uint8_t VOLUME_TBL[16] = {
     0x2a, 0x28, 0x25, 0x22, 0x20, 0x1d, 0x1a, 0x18,
     0x15, 0x12, 0x10, 0x0d, 0x0a, 0x08, 0x05, 0x02,
+};
+
+/* TL 相当の 0-42 -> PCM8 の音量 0-15（参照実装 L000C6E） */
+static const uint8_t PCM_VOLUME_TBL[43] = {
+    15, 15, 15, 14, 14, 14, 13, 13, 13, 12, 12, 11, 11, 11, 10, 10,
+    10,  9,  9,  8,  8,  8,  7,  7,  7,  6,  6,  5,  5,  5,  4,  4,
+     4,  3,  3,  2,  2,  2,  1,  1,  1,  0,  0,
 };
 
 /* ---- 小物 -------------------------------------------------------------- */
@@ -513,18 +527,63 @@ static void snd_pitch(mdx_ch_t *c) {
     opm_put((uint8_t)(0x28u + c->ch), kc);
 }
 
-/* キーオン（参照実装 L000e7e） */
+/*
+ * ADPCM チャンネルの音量を PCM8 の 0-15 へ落とす（参照実装 L000BE4 の前半）。
+ * 範囲を外れたときは音量 0 を返し、呼び出し側は定位 0（= 停止）で発行する。
+ */
+static uint32_t pcm_volume(const mdx_ch_t *c, bool *audible) {
+    uint32_t v = c->vol;
+    if ((v & 0x80u) != 0u) {
+        v &= 0x7fu; /* @v。TL 直接指定 */
+    } else {
+        v = VOLUME_TBL[v & 0x0fu];
+    }
+
+    /* 参照実装は add.b + bmi なので 8bit で丸めてから符号を見る */
+    uint8_t t = (uint8_t)(v + s_fade_off);
+    if ((t & 0x80u) != 0u || t >= 0x2bu) {
+        *audible = false;
+        return 0u;
+    }
+    *audible = true;
+    return PCM_VOLUME_TBL[t];
+}
+
+/*
+ * ADPCM チャンネルの定位（参照実装 L000B4E）。
+ * 0xFC の側で 0 と 3 を入れ替えて格納してあり、ここでもう一度入れ替えるので
+ * MML の p0 = 停止 / p3 = 左右に戻る。初期値 0 は左右になる。
+ */
+static int pcm_pan(const mdx_ch_t *c) {
+    uint8_t p = (uint8_t)(c->pan & 0x03u);
+    if (p == 0x00u || p == 0x03u) {
+        p ^= 0x03u;
+    }
+    return (int)p;
+}
+
+/* キーオン（参照実装 L000e7e / ADPCM は L000BE4） */
 static void snd_key_on(mdx_ch_t *c) {
     if (is_adpcm(c)) {
-        return; /* 将来 PCM8 の発音開始をここへ */
+        bool audible = false;
+        uint32_t vol = pcm_volume(c, &audible);
+        int pan = audible ? pcm_pan(c) : 0; /* 定位 0 は PCM8 では停止 */
+        uint32_t ch = (uint32_t)(c->ch & 0x07u);
+
+        /* 参照実装は TRAP #2 を 2 回発行する（まず停止、次に発音） */
+        pcm8_stop(ch);
+        pcm8_key_on(ch, c->pcm_bank, (uint32_t)(c->pitch >> 6),
+                    (int)((c->pan >> 2) & 0x1fu), (int)vol, pan);
+        return;
     }
     opm_put(0x08u, c->keyon_slot);
 }
 
-/* キーオフ（参照実装 L000ff6） */
+/* キーオフ（参照実装 L000ff6 / ADPCM は L000CC6 = データ長 0 のチャネル停止） */
 static void snd_key_off(mdx_ch_t *c) {
     if (is_adpcm(c)) {
-        return; /* 将来 PCM8 の停止をここへ */
+        pcm8_stop((uint32_t)(c->ch & 0x07u));
+        return;
     }
     opm_put(0x08u, c->ch);
 }
@@ -705,6 +764,15 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
     case 0xFBu: /* v 音量 */
         c->vol = s_file[p++];
         c->f17 |= F17_VOL_DIRTY;
+        if (is_adpcm(c) && s_tie_flag) {
+            /*
+             * 参照実装 PCM_Vol。タイでつながっている間だけ、発音中の
+             * ADPCM の音量を差し替える（周波数と定位は据え置き）。
+             */
+            bool audible = false;
+            uint32_t vol = pcm_volume(c, &audible);
+            pcm8_set_mode((uint32_t)(c->ch & 0x07u), (int)vol, -1, audible ? -1 : 0);
+        }
         break;
     case 0xFAu: /* v- */
         if ((c->vol & 0x80u) == 0u) {
@@ -929,9 +997,25 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
             s_fade_speed = s_file[p++];
             s_fade_on = 0xffu;
             break;
-        case 0x02u: /* PCM8 へのコマンド。鳴らさないので読み飛ばす。 */
+        case 0x02u: { /* PCM8 へのコマンド。d0.w + d1.l がビッグエンディアンで並ぶ。 */
+            uint16_t fn = rd16(p);
+            uint32_t d1 = ((uint32_t)s_file[p + 2u] << 24) |
+                          ((uint32_t)s_file[p + 3u] << 16) |
+                          ((uint32_t)s_file[p + 4u] << 8) | (uint32_t)s_file[p + 5u];
             p += 6u;
+            if ((fn & 0xfff0u) == 0x0070u) { /* 動作モード変更 */
+                int vol = (int)(int8_t)(uint8_t)(d1 >> 16);
+                int mode = (int)(int8_t)(uint8_t)(d1 >> 8);
+                int pan = (int)(int8_t)(uint8_t)d1;
+                pcm8_set_mode((uint32_t)(fn & 0x07u), vol, mode, pan);
+            } else if (fn == 0x0100u) { /* 終了。鳴っている分は鳴らし切る。 */
+                pcm8_end_all();
+            } else if (fn == 0x0101u) { /* 一時停止 = 即時打ち切り */
+                pcm8_abort_all();
+            }
+            /* $01FC（多重/単音モード）などは本機に効く設定が無いので無視する */
             break;
+        }
         case 0x03u: /* キーオフ抑止 */
             if (s_file[p++] != 0u) {
                 c->f16 |= F16_NO_KEYOFF;
@@ -1061,6 +1145,9 @@ static void ch_key_off(mdx_ch_t *c) {
 
 /* 長さの消化と次の読み出し（参照実装 L0011b4 + L0011ce） */
 static void ch_len(mdx_ch_t *c, uint32_t idx) {
+    /* 参照実装 L000EA2 の sne.b TieFlag。次の読み出しへ渡る前に写しておく。 */
+    s_tie_flag = (c->f16 & F16_LEGATO) != 0u;
+
     if ((c->f17 & F17_SYNC_WAIT) != 0u) {
         /* 同期待ち。信号が来ていたら降ろして読み進める。 */
         if (s_sync[idx] == 0u) {
@@ -1177,6 +1264,7 @@ static void key_off_all(void) {
     for (uint8_t ch = 0; ch < 8u; ch++) {
         opm_put(0x08u, ch);
     }
+    pcm8_abort_all();
 }
 
 /* ---- 一覧 -------------------------------------------------------------- */
@@ -1344,13 +1432,68 @@ void mdx_init(void) {
     s_tempo = 200u;
 }
 
-/* PDX が要る曲かどうかを見せる。将来 PCM8 を足すときの入口でもある。 */
-static void report_pdx(void) {
+/*
+ * ヘッダの PDX 名から /MDX/<name>.PDX を組み立てる。
+ *
+ * 名前はファイルの中身なので信用しない。ディレクトリを跨がせず、制御文字も弾く。
+ * 拡張子は付いていないのが普通だが、付いていたら重ねない。
+ * FatFs の LFN 照合は大小を無視するので、実体が小文字でも当たる。
+ */
+static bool pdx_path(char *out, size_t out_len) {
+    char base[MDX_PDX_MAX];
+    size_t n = 0;
+
+    for (const char *q = s_pdx; *q != '\0' && n < sizeof(base) - 1u; q++) {
+        unsigned char ch = (unsigned char)*q;
+        if (ch < 0x20u || ch == '/' || ch == '\\' || ch == ':') {
+            return false;
+        }
+        base[n++] = (char)ch;
+    }
+    while (n > 0u && base[n - 1u] == ' ') {
+        n--; /* 末尾の空白は落とす */
+    }
+    base[n] = '\0';
+    if (n == 0u || strcmp(base, ".") == 0 || strcmp(base, "..") == 0) {
+        return false;
+    }
+
+    /* すでに .PDX が付いていたら重ねない */
+    if (n > 4u) {
+        const char *ext = &base[n - 4u];
+        if ((ext[0] == '.') && (ext[1] == 'p' || ext[1] == 'P') &&
+            (ext[2] == 'd' || ext[2] == 'D') && (ext[3] == 'x' || ext[3] == 'X')) {
+            base[n - 4u] = '\0';
+        }
+    }
+
+    int len = snprintf(out, out_len, "%s/%s.PDX", MDX_DIR, base);
+    return len > 0 && (size_t)len < out_len;
+}
+
+/* PDX を開く。曲が PDX を要求していなければ何もしない。 */
+static void open_pdx(void) {
     if (s_pdx[0] == '\0') {
         return;
     }
     printf("# pdx     : %s\n", s_pdx);
-    printf("# hint    : ADPCM パートは発音しない（FM パートだけ鳴る）\n");
+
+    char path[16 + MDX_PDX_MAX];
+    if (!pdx_path(path, sizeof(path))) {
+        printf("# hint    : PDX 名が不正。ADPCM パートは鳴らない\n");
+        return;
+    }
+
+    const char *err = pcm8_open_pdx(path);
+    if (err != NULL) {
+        printf("# hint    : %s を開けない (%s)。ADPCM パートは鳴らない\n", path, err);
+        return;
+    }
+    printf("# adpcm   : %s\n", path);
+    if (!pcm8_enabled()) {
+        /* mdx pcm off は起動まで残るので、鳴らない理由をここで必ず出す */
+        printf("# hint    : ADPCM のミキシングは off。mdx pcm on で戻す\n");
+    }
 }
 
 const char *mdx_play(const char *name) {
@@ -1422,6 +1565,9 @@ const char *mdx_play(const char *name) {
                (unsigned)actual);
     }
 
+    /* 前の曲の PDX が開いたままなら閉じる（ERROR のまま play できるため） */
+    pcm8_close_pdx();
+
     /* レジスタを既知の状態にしてから始める。opm_reset() は 20ms 止まるので使わない。 */
     opm_clear();
     memset(s_opm, 0, sizeof(s_opm));
@@ -1434,13 +1580,14 @@ const char *mdx_play(const char *name) {
     s_reslips = 0;
     s_cursor = 0;
     s_in_tick = false;
+    s_tie_flag = false;
 
     init_channels();
 
     printf("# mdx     : %s\n", s_name);
     printf("# title   : %s\n", s_title);
     printf("# ch      : %u  voices %u\n", (unsigned)s_nch, (unsigned)voice_count());
-    report_pdx();
+    open_pdx();
 
     uint64_t now = time_us_64();
     s_due_us = now;
@@ -1456,6 +1603,7 @@ const char *mdx_stop(void) {
     }
 
     key_off_all();
+    pcm8_close_pdx();
     s_state = MDX_STATE_STOPPED;
     s_cursor = 0;
     s_in_tick = false;
@@ -1504,6 +1652,7 @@ bool mdx_service(void) {
 
         if (fade_step()) {
             key_off_all();
+            pcm8_close_pdx();
             s_state = MDX_STATE_STOPPED;
             printf("# mdx     : fadeout end\n");
             return true;
@@ -1545,6 +1694,7 @@ bool mdx_service(void) {
 
     if (s_enable == 0u) {
         key_off_all();
+        pcm8_close_pdx();
         s_state = MDX_STATE_STOPPED;
         printf("# mdx     : end\n");
     }

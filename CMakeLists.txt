@@ -86,6 +86,7 @@ add_executable(pico-opm-writer
         vgm.c
         vgz.c
         mdx.c
+        pcm8.c
         usb_msc.c
         usb_descriptors.c
         )
@@ -121,6 +122,12 @@ target_compile_definitions(pico-opm-writer PRIVATE VGM_VGZ_ENABLED=${VGM_VGZ_ENA
 # リンクされず、mdx コマンドは wrong state になる。
 set(MDX_ENABLED "1" CACHE STRING "MDX (X68000/MXDRV) playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE MDX_ENABLED=${MDX_ENABLED})
+
+# MDX の ADPCM パート（PCM8 相当 8ch）のソフトデコードとミキシング。
+# 0 にするとデコーダとミックスリング（約 25KB）がリンクされず、
+# ADPCM パートはシーケンサとして回るだけで鳴らなくなる。
+set(PCM8_ENABLED "1" CACHE STRING "MDX ADPCM (PCM8) mixing: 1 = enabled, 0 = disabled")
+target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
 
 # FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
 # （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。

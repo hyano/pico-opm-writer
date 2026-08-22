@@ -21,6 +21,7 @@
 #include "led.h"
 #include "mdx.h"
 #include "opm.h"
+#include "pcm8.h"
 #include "stats.h"
 #include "storage.h"
 #include "usb_pcm.h"
@@ -55,6 +56,21 @@ static void service_all(void) {
     uint32_t t0 = time_us_32();
 
     tud_task();
+
+    /*
+     * 書き込み位置の取り込みと ADPCM のレンダリングは、どの消費者よりも先に
+     * 行う。capture も I2S も ym3012_reader_read_pcm() の中でミックス済みの
+     * PCM を受け取るので、そこまでに描き終わっていなければならない。
+     *
+     * pcm8_service() は発音中ほぼ毎周回で仕事をする。これを worked に混ぜると
+     * 周回まるごとが busy になって CPU 使用率が実態より大きく出るので、
+     * 他が何もしなかった周回では pcm8 が使った時間だけを計上する。
+     */
+    ym3012_ring_poll();
+    uint32_t p0 = time_us_32();
+    bool pcm_worked = pcm8_service();
+    uint32_t pcm_us = time_us_32() - p0;
+
     bool worked = capture_service();
     worked |= i2s_service();
     worked |= vgm_service();
@@ -64,6 +80,8 @@ static void service_all(void) {
 
     if (worked) {
         stats_busy_add(time_us_32() - t0);
+    } else if (pcm_worked) {
+        stats_busy_add(pcm_us);
     }
     stats_service();
 }
@@ -121,6 +139,9 @@ static void print_info(void) {
            VGM_DIR, (unsigned)VGM_SAMPLE_RATE, (unsigned)VGM_BUDGET_US);
     printf("# mdx     : dir %s  max %u KiB  budget %u us\n",
            MDX_DIR, (unsigned)(MDX_MAX_BYTES / 1024u), (unsigned)MDX_BUDGET_US);
+    printf("# adpcm   : %s  %u ch  pdx stream %u bytes/ch\n",
+           PCM8_ENABLED ? "enabled" : "disabled", (unsigned)PCM8_CH_MAX,
+           (unsigned)PCM8_PREFETCH_BYTES);
     reply_ok();
 }
 
@@ -152,6 +173,7 @@ static void print_stats(void) {
            (unsigned)stats_rxstall());
     printf("# RATE    : %u frames/s (expect %u)\n",
            (unsigned)stats_frame_rate(), (unsigned)(opm_clock_hz_actual() / 64u));
+    printf("# LOOP    : %u passes/s\n", (unsigned)stats_loop_rate());
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
     printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",
            (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
@@ -170,6 +192,11 @@ static void print_stats(void) {
            (unsigned)mdx_channels());
     printf("# MDX TICK: @t %u  %u us  reslip %u\n",
            (unsigned)mdx_tempo(), (unsigned)mdx_tick_us(), (unsigned)mdx_reslip_count());
+    printf("# MDX PCM : %s  %u/%u ch  mask %02x  keyon %u  miss %u  reads %u  CLIP %llu\n",
+           pcm8_enabled() ? "on" : "off", (unsigned)pcm8_active_count(),
+           (unsigned)PCM8_CH_MAX, (unsigned)pcm8_active_mask(),
+           (unsigned)pcm8_keyon_count(), (unsigned)pcm8_miss_count(),
+           (unsigned)pcm8_read_count(), (unsigned long long)stats_pcm_clip());
     /* スケジューラの遅れは VGM と MDX で共用（同時に走らないので 1 個で足りる） */
     printf("# SEQ LAG : max %u us\n", (unsigned)stats_seq_lag_max_us());
     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
@@ -199,6 +226,7 @@ static void print_help(void) {
     puts("# mdx list                            : list /MDX/*.mdx");
     puts("# mdx play <filename>                 : play /MDX/<filename>");
     puts("# mdx stop                            : stop playback");
+    puts("# mdx pcm | mdx pcm on | mdx pcm off  : show / toggle ADPCM (PCM8) mixing");
     puts("# h | ?                               : show this help");
     reply_ok();
 }
@@ -813,6 +841,37 @@ static void cmd_mdx(char **cursor) {
         return;
     }
 
+    if (tok_is(sub, "pcm")) {
+        char *arg = next_token(cursor);
+        if (arg != NULL) {
+            if (tok_is(arg, "on")) {
+                pcm8_set_enabled(true);
+            } else if (tok_is(arg, "off")) {
+                pcm8_set_enabled(false);
+            } else {
+                reply_err("bad argument");
+                return;
+            }
+            if (!expect_no_args(cursor)) {
+                return;
+            }
+        }
+
+        static const char *const PAN_NAME[4] = {"off", "L", "R", "L+R"};
+        const char *path = pcm8_pdx_path();
+        printf("# pcm     : %s\n", pcm8_enabled() ? "on" : "off");
+        printf("# pdx     : %s\n", path[0] != '\0' ? path : "(none)");
+        printf("# ch      : %u active  mask %02x  pan %s\n",
+               (unsigned)pcm8_active_count(), (unsigned)pcm8_active_mask(),
+               PAN_NAME[pcm8_pan() & 3u]);
+        printf("# keyon   : %u   miss %u\n", (unsigned)pcm8_keyon_count(),
+               (unsigned)pcm8_miss_count());
+        printf("# reads   : %u   clip %llu\n", (unsigned)pcm8_read_count(),
+               (unsigned long long)stats_pcm_clip());
+        reply_ok();
+        return;
+    }
+
     reply_err("unknown command");
 }
 
@@ -824,11 +883,15 @@ static void cmd_selftest(void) {
     const char *mdx_detail = NULL;
     bool mdx_ok = mdx_selftest(&mdx_detail);
 
+    const char *pcm8_detail = NULL;
+    bool pcm8_ok = pcm8_selftest(&pcm8_detail);
+
     printf("# pcm     : %s\n", detail);
     printf("# pio     : %s\n", ym3012_selftest_detail());
     printf("# mdx     : %s\n", mdx_detail);
+    printf("# adpcm   : %s\n", pcm8_detail);
 
-    if (pcm_ok && mdx_ok && ym3012_selftest_passed()) {
+    if (pcm_ok && mdx_ok && pcm8_ok && ym3012_selftest_passed()) {
         reply_ok();
     } else {
         reply_err("self test failed");
@@ -939,6 +1002,9 @@ int main(void) {
     /* PIO と DMA を起動する。以後キャプチャ経路は止めない。 */
     ym3012_init();
     capture_init();
+
+    /* ADPCM のミキサ。ym3012 の総フレーム数を起点にするので ym3012_init() の後。 */
+    pcm8_init();
 
     /*
      * I2S 出力。φM の分周比を使うので opm_init() より後、

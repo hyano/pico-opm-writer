@@ -42,6 +42,10 @@ static uint64_t s_write_total;
 /* USB キャプチャが使う既定の読み出しカーソル */
 static ym3012_reader_t s_reader;
 
+/* 変換直後に呼ぶミキサ（MDX の ADPCM パート）。未登録なら NULL。 */
+static ym3012_mixer_t s_mixer;
+static uint64_t s_mix_ready;
+
 static bool s_selftest_ok;
 static char s_selftest_detail[80];
 
@@ -263,6 +267,15 @@ uint64_t ym3012_write_total(void) {
 
 /* ---- 読み出しカーソル -------------------------------------------------- */
 
+void ym3012_set_mixer(ym3012_mixer_t fn) {
+    s_mixer = fn;
+    s_mix_ready = s_write_total;
+}
+
+void ym3012_set_mix_ready(uint64_t frame) {
+    s_mix_ready = frame;
+}
+
 void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden) {
     rd->read_total = s_write_total;
     rd->count_forbidden = count_forbidden;
@@ -286,6 +299,18 @@ uint32_t ym3012_reader_read_pcm(ym3012_reader_t *rd, int16_t *out, uint32_t max_
     if (n > max_frames) {
         n = max_frames;
     }
+
+    /* ミキサが描き終えたところまでしか渡さない（混ぜ損ねを作らない） */
+    if (s_mixer != NULL) {
+        if (rd->read_total >= s_mix_ready) {
+            return 0u;
+        }
+        uint64_t ready = s_mix_ready - rd->read_total;
+        if ((uint64_t)n > ready) {
+            n = (uint32_t)ready;
+        }
+    }
+
     if (n == 0u) {
         return 0u;
     }
@@ -315,6 +340,14 @@ uint32_t ym3012_reader_read_pcm(ym3012_reader_t *rd, int16_t *out, uint32_t max_
 
         out[2u * i] = ym3012_word_to_pcm(wl);       /* L */
         out[2u * i + 1u] = ym3012_word_to_pcm(wr);  /* R */
+    }
+
+    /*
+     * 変換した PCM に別の音源を混ぜる（MDX の ADPCM パート）。
+     * ここは USB キャプチャと I2S の唯一の合流点なので、1 箇所で両方に効く。
+     */
+    if (s_mixer != NULL) {
+        s_mixer(rd->read_total, n, out);
     }
 
     rd->read_total += n;

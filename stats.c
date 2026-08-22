@@ -13,11 +13,16 @@ static struct {
     uint32_t window_start_us;    /* 現在の窓の開始時刻 [us] */
     uint32_t busy_us;            /* 窓内の累積実行時間 [us] */
     uint64_t frames_in_window;   /* 窓内で追加されたフレーム数 */
+    uint32_t passes_in_window;   /* 窓内のメインループ周回数 */
 } s_window = {
     .window_start_us = 0,
     .busy_us = 0,
     .frames_in_window = 0,
+    .passes_in_window = 0,
 };
+
+/* 直近窓のメインループ周回数 [passes/s] */
+static uint32_t s_loop_rate;
 
 /* ---- CPU 使用率 -------------------------------------------------------- */
 
@@ -72,6 +77,7 @@ static struct {
     uint64_t frames;       /* 総フレーム数 */
     uint32_t frame_rate;   /* 直近窓でのフレームレート [frames/s] */
     uint32_t i2s_underrun; /* I2S の先行分が尽きた回数 */
+    uint64_t pcm_clip;     /* ADPCM を混ぜた結果あふれたサンプル数 */
 } s_counters = {
     .overrun = 0,
     .forbidden = 0,
@@ -79,6 +85,7 @@ static struct {
     .frames = 0,
     .frame_rate = 0,
     .i2s_underrun = 0,
+    .pcm_clip = 0,
 };
 
 /* ---- フラッシュ書き込み / VGM ------------------------------------------ */
@@ -100,6 +107,8 @@ void stats_busy_add(uint32_t busy_us) {
 }
 
 void stats_service(void) {
+    s_window.passes_in_window++;
+
     uint32_t now_us = time_us_32();
     uint32_t elapsed_us = now_us - s_window.window_start_us;
 
@@ -128,10 +137,18 @@ void stats_service(void) {
     );
     s_counters.frame_rate = frame_rate;
 
+    /* メインループの周回数（1 周あたりの固定費を見積もるのに使う） */
+    s_loop_rate = (uint32_t)(((uint64_t)s_window.passes_in_window * 1000000u) / elapsed_us);
+
     /* 次の窓へ */
     s_window.window_start_us = now_us;
     s_window.busy_us = 0;
     s_window.frames_in_window = 0;
+    s_window.passes_in_window = 0;
+}
+
+uint32_t stats_loop_rate(void) {
+    return s_loop_rate;
 }
 
 uint32_t stats_cpu_percent(void) {
@@ -216,6 +233,10 @@ void stats_count_i2s_underrun(void) {
     s_counters.i2s_underrun++;
 }
 
+void stats_count_pcm_clip(uint32_t n) {
+    s_counters.pcm_clip += n;
+}
+
 uint32_t stats_overrun(void) {
     return s_counters.overrun;
 }
@@ -234,6 +255,10 @@ uint64_t stats_frames(void) {
 
 uint32_t stats_i2s_underrun(void) {
     return s_counters.i2s_underrun;
+}
+
+uint64_t stats_pcm_clip(void) {
+    return s_counters.pcm_clip;
 }
 
 uint32_t stats_frame_rate(void) {
@@ -297,6 +322,7 @@ void stats_init(void) {
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
+    s_counters.pcm_clip = 0;
 
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
@@ -316,6 +342,7 @@ void stats_reset(void) {
     s_counters.frames = 0;
     s_counters.frame_rate = 0;
     s_counters.i2s_underrun = 0;
+    s_counters.pcm_clip = 0;
 
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;

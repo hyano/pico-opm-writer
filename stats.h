@@ -54,15 +54,20 @@ void stats_count_forbidden(uint32_t n);    /* YM3012 の禁止コード E=0 を 
 void stats_count_rxstall(void);            /* PIO RX FIFO あふれ */
 void stats_count_frames(uint32_t n);       /* 取り込んだフレーム数を n 加算 */
 void stats_count_i2s_underrun(void);       /* I2S の先行分が尽きた */
+void stats_count_pcm_clip(uint32_t n);     /* ADPCM を混ぜた結果 n サンプルが飽和した */
 
 uint32_t stats_overrun(void);
 uint64_t stats_forbidden(void);
 uint32_t stats_rxstall(void);
 uint64_t stats_frames(void);
 uint32_t stats_i2s_underrun(void);
+uint64_t stats_pcm_clip(void);
 
 /* 直近 1 秒窓で数えた実測フレームレート [frames/s]。 */
 uint32_t stats_frame_rate(void);
+
+/* メインループの周回数。1 周あたりの固定費を見積もるのに使う。 */
+uint32_t stats_loop_rate(void);
 
 /* ---- フラッシュ書き込み ------------------------------------------------ */
 
