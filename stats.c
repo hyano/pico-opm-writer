@@ -11,12 +11,14 @@
 
 static struct {
     uint32_t window_start_us;    /* 現在の窓の開始時刻 [us] */
-    uint32_t busy_us;            /* 窓内の累積実行時間 [us] */
+    uint32_t busy_us;            /* 窓内でサービス関数の中に居た時間 [us] */
+    uint32_t usb_busy_us;        /* 窓内で tud_task() の中に居た時間 [us] */
     uint64_t frames_in_window;   /* 窓内で追加されたフレーム数 */
     uint32_t passes_in_window;   /* 窓内のメインループ周回数 */
 } s_window = {
     .window_start_us = 0,
     .busy_us = 0,
+    .usb_busy_us = 0,
     .frames_in_window = 0,
     .passes_in_window = 0,
 };
@@ -29,9 +31,11 @@ static uint32_t s_loop_rate;
 static struct {
     uint32_t cpu_percent;     /* 直近窓の CPU 使用率 [%] */
     uint32_t cpu_percent_max; /* リセット以降の最大値 [%] */
+    uint32_t usb_percent;     /* 直近窓の tud_task() の占有率 [%] */
 } s_cpu = {
     .cpu_percent = 0,
     .cpu_percent_max = 0,
+    .usb_percent = 0,
 };
 
 /* ---- DMA リング -------------------------------------------------------- */
@@ -106,6 +110,10 @@ void stats_busy_add(uint32_t busy_us) {
     s_window.busy_us += busy_us;
 }
 
+void stats_usb_busy_add(uint32_t busy_us) {
+    s_window.usb_busy_us += busy_us;
+}
+
 void stats_service(void) {
     s_window.passes_in_window++;
 
@@ -131,6 +139,9 @@ void stats_service(void) {
         s_cpu.cpu_percent_max = cpu_pct;
     }
 
+    uint32_t usb_pct = (uint32_t)(((uint64_t)s_window.usb_busy_us * 100u) / elapsed_us);
+    s_cpu.usb_percent = (usb_pct > 100u) ? 100u : usb_pct;
+
     /* フレームレートを計算（frames/s） */
     uint32_t frame_rate = (uint32_t)(
         (s_window.frames_in_window * 1000000u) / elapsed_us
@@ -143,12 +154,17 @@ void stats_service(void) {
     /* 次の窓へ */
     s_window.window_start_us = now_us;
     s_window.busy_us = 0;
+    s_window.usb_busy_us = 0;
     s_window.frames_in_window = 0;
     s_window.passes_in_window = 0;
 }
 
 uint32_t stats_loop_rate(void) {
     return s_loop_rate;
+}
+
+uint32_t stats_usb_percent(void) {
+    return s_cpu.usb_percent;
 }
 
 uint32_t stats_cpu_percent(void) {

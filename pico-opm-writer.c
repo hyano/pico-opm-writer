@@ -49,40 +49,35 @@ static bool s_overflow;
  * コマンドの待ち時間（`d` の遅延や `p 0` のドレイン待ち）の中からも呼ぶので、
  * 待っている間も PCM の送出・I2S への供給・USB の処理が止まらない。
  *
- * CPU 使用率は「PCM を実際に動かせた周回」だけを busy として積む。USB の空き待ちで
- * 何も送れなかった周回は idle として扱い、送信待ちを CPU 処理時間と取り違えない。
+ * CPU 使用率は「サービス関数の中に居た時間」をそのまま積む。サービスは連続して
+ * 呼ばれるので区間は 1 本で足りる。何もする事が無い周回はどれもすぐ返るので
+ * 自然に 0 に近づき、USB の空き待ちで送れなかった周回も CPU としては数えない。
+ * tud_task() は毎周回走る固定費でどのサービスの負荷でもないので、別に集計する。
  */
 static void service_all(void) {
     uint32_t t0 = time_us_32();
 
     tud_task();
 
+    uint32_t t1 = time_us_32();
+
     /*
      * 書き込み位置の取り込みと ADPCM のレンダリングは、どの消費者よりも先に
      * 行う。capture も I2S も ym3012_reader_read_pcm() の中でミックス済みの
      * PCM を受け取るので、そこまでに描き終わっていなければならない。
-     *
-     * pcm8_service() は発音中ほぼ毎周回で仕事をする。これを worked に混ぜると
-     * 周回まるごとが busy になって CPU 使用率が実態より大きく出るので、
-     * 他が何もしなかった周回では pcm8 が使った時間だけを計上する。
      */
     ym3012_ring_poll();
-    uint32_t p0 = time_us_32();
-    bool pcm_worked = pcm8_service();
-    uint32_t pcm_us = time_us_32() - p0;
+    (void)pcm8_service();
 
-    bool worked = capture_service();
-    worked |= i2s_service();
-    worked |= vgm_service();
-    worked |= mdx_service();
-    worked |= storage_service();
+    (void)capture_service();
+    (void)i2s_service();
+    (void)vgm_service();
+    (void)mdx_service();
+    (void)storage_service();
     led_service();
 
-    if (worked) {
-        stats_busy_add(time_us_32() - t0);
-    } else if (pcm_worked) {
-        stats_busy_add(pcm_us);
-    }
+    stats_usb_busy_add(t1 - t0);
+    stats_busy_add(time_us_32() - t1);
     stats_service();
 }
 
@@ -152,8 +147,9 @@ static void print_stats(void) {
     uint32_t tx_cap = usb_pcm_capacity();
 
     printf("# state   : %s\n", capture_state_name());
-    printf("# CPU     : %u%% (max %u%%)\n",
-           (unsigned)stats_cpu_percent(), (unsigned)stats_cpu_percent_max());
+    printf("# CPU     : %u%% (max %u%%)   USB %u%%\n",
+           (unsigned)stats_cpu_percent(), (unsigned)stats_cpu_percent_max(),
+           (unsigned)stats_usb_percent());
     printf("# RING    : %u/%u bytes  MAX %u/%u  FREE %u\n",
            (unsigned)ring, (unsigned)YM3012_RING_BYTES,
            (unsigned)ring_max, (unsigned)YM3012_RING_BYTES,
@@ -540,6 +536,7 @@ static void cmd_stats(char **cursor) {
     }
 
     stats_reset();
+    pcm8_reset_counters(); /* `s` の MDX PCM 行はここも含めてまとめて 0 に戻す */
     reply_ok();
 }
 

@@ -26,8 +26,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "mdx.h"
+
+/*
+ * MDX の ADPCM パート専用なので、指定が無ければ MDX_ENABLED に従う。
+ * MDX を落としたまま PCM8 だけ残すと、誰も呼ばないデコーダとリング
+ * （約 27KB）が居座ることになる。
+ */
 #ifndef PCM8_ENABLED
-#define PCM8_ENABLED 1
+#define PCM8_ENABLED MDX_ENABLED
 #endif
 
 /* PCM8 のチャンネル数 */
@@ -95,7 +102,7 @@ uint32_t pcm8_pan(void);          /* 現在の定位（全チャネル共通） 
 uint32_t pcm8_read_count(void);   /* PDX を読んだ回数 */
 
 /*
- * キーオンの内訳（PDX を開いた時点で 0 に戻る）。
+ * キーオンの内訳。`mdx play`（PDX を開いた時点）と `s 0` の両方で 0 に戻る。
  *
  * 「曲が ADPCM を鳴らそうとしたのか」「鳴らそうとして失敗したのか」を、聴かずに
  * 切り分けられるようにしておく。ADPCM が終盤にしか出てこない曲もあるので、
@@ -103,6 +110,9 @@ uint32_t pcm8_read_count(void);   /* PDX を読んだ回数 */
  */
 uint32_t pcm8_keyon_count(void); /* 発音を開始した回数 */
 uint32_t pcm8_miss_count(void);  /* 波形が無い / 音量 0 で鳴らせなかった回数 */
+
+/* keyon / miss / reads を 0 に戻す（`s 0` から呼ぶ。PDX は閉じない） */
+void pcm8_reset_counters(void);
 
 /* FM だけの音と聴き比べるための切り替え。音量の調整つまみではない。 */
 void pcm8_set_enabled(bool on);

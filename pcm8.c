@@ -563,8 +563,7 @@ const char *pcm8_open_pdx(const char *path) {
     s_pdx_size = (uint32_t)size;
     s_pdx_open = true;
     s_tbl_bank = -1;
-    s_keyon = 0;
-    s_miss = 0;
+    pcm8_reset_counters();
     snprintf(s_pdx_path, sizeof(s_pdx_path), "%s", path);
     return NULL;
 }
@@ -717,6 +716,12 @@ uint32_t pcm8_miss_count(void) {
     return s_miss;
 }
 
+void pcm8_reset_counters(void) {
+    s_keyon = 0;
+    s_miss = 0;
+    s_reads = 0;
+}
+
 void pcm8_set_enabled(bool on) {
     s_enabled = on;
 }
@@ -833,6 +838,7 @@ uint32_t pcm8_pan(void) { return 0; }
 uint32_t pcm8_read_count(void) { return 0; }
 uint32_t pcm8_keyon_count(void) { return 0; }
 uint32_t pcm8_miss_count(void) { return 0; }
+void pcm8_reset_counters(void) {}
 void pcm8_set_enabled(bool on) { (void)on; }
 bool pcm8_enabled(void) { return false; }
 

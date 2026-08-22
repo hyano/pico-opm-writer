@@ -124,10 +124,13 @@ set(MDX_ENABLED "1" CACHE STRING "MDX (X68000/MXDRV) playback: 1 = enabled, 0 = 
 target_compile_definitions(pico-opm-writer PRIVATE MDX_ENABLED=${MDX_ENABLED})
 
 # MDX の ADPCM パート（PCM8 相当 8ch）のソフトデコードとミキシング。
-# 0 にするとデコーダとミックスリング（約 25KB）がリンクされず、
+# 0 にするとデコーダとミックスリング（約 27KB）がリンクされず、
 # ADPCM パートはシーケンサとして回るだけで鳴らなくなる。
-set(PCM8_ENABLED "1" CACHE STRING "MDX ADPCM (PCM8) mixing: 1 = enabled, 0 = disabled")
-target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
+# 空なら pcm8.h の既定（MDX_ENABLED に従う）を使う。
+set(PCM8_ENABLED "" CACHE STRING "MDX ADPCM (PCM8) mixing: 1 = on, 0 = off, empty = follow MDX_ENABLED")
+if(NOT PCM8_ENABLED STREQUAL "")
+    target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
+endif()
 
 # FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
 # （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。

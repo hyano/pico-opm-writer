@@ -166,7 +166,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `I2S_ENABLED` | 1 | I2S 出力（GP26-GP28） |
 | `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
 | `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
-| `PCM8_ENABLED` | 1 | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 25KB）がリンクされず、ADPCM は鳴らない |
+| `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
 
@@ -242,7 +242,7 @@ EOF
 
 **ファームウェア自身が持つ自己診断**：
 - `t` コマンド — PCM 変換、MDX の音程 / テンポ換算、ADPCM デコーダの既知ベクタ検証と、起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（CPU 使用率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
+- `s` コマンド — 実行時統計を表示（サービス関数に居た時間の割合と `tud_task()` の占有率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
 - `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
 - `s 0` — 統計をリセット
 
