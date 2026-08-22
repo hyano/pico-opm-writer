@@ -133,6 +133,12 @@ if(NOT PCM8_ENABLED STREQUAL "")
     target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
 endif()
 
+# サービスごとの滞在時間の計測。1 にすると service_all() の各呼び出しが
+# time_us_32() を 2 回読むようになり、`s` の SVC 行に us/s が付く。
+# 常設するには重いので、内訳を見たいときだけ 1 で焼く。
+set(STATS_PROFILE "0" CACHE STRING "per-service timing profile: 1 = on, 0 = off")
+target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE})
+
 # FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
 # （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。
 set(FLASH_FATFS_OFFSET "" CACHE STRING "FatFs region offset from XIP_BASE, in bytes")

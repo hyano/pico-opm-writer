@@ -9,6 +9,20 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/*
+ * サービスごとの滞在時間を測るかどうか（cmake -DSTATS_PROFILE=1）。
+ *
+ * 区間ごとに time_us_32() を 2 回読むので常設はしない。既定の実仕事率
+ * （stats_svc_note()）で当たりを付け、内訳が要るときだけこちらで焼く。
+ */
+#ifndef STATS_PROFILE
+#define STATS_PROFILE 0
+#endif
+
+#if STATS_PROFILE
+#include "pico/time.h"
+#endif
+
 /* ---- CPU 使用率 -------------------------------------------------------- */
 
 /*
@@ -34,6 +48,52 @@ void stats_service(void);
 uint32_t stats_cpu_percent(void);     /* 直近 1 秒窓の CPU 使用率 [%] */
 uint32_t stats_cpu_percent_max(void); /* リセット以降の最大値 [%] */
 uint32_t stats_usb_percent(void);     /* 直近 1 秒窓の tud_task() の占有率 [%] */
+
+/* ---- サービスごとの実仕事率 -------------------------------------------- */
+
+/*
+ * 各サービスが「何回呼ばれて、そのうち何回が実仕事だったか」。
+ *
+ * CPU 使用率はサービス関数に居た時間の合計なので、空振りの固定費と実負荷が
+ * 混ざる。どのサービスが空振りしているかはこちらで分かる。サービスはどれも
+ * 実仕事をしたかを bool で返すので、拾ってインクリメントするだけで足りる。
+ */
+typedef enum {
+    STATS_SVC_PCM8 = 0,
+    STATS_SVC_CAPTURE,
+    STATS_SVC_I2S,
+    STATS_SVC_VGM,
+    STATS_SVC_MDX,
+    STATS_SVC_STORAGE,
+    STATS_SVC_COUNT,
+} stats_svc_t;
+
+void stats_svc_note(stats_svc_t svc, bool worked);
+
+uint32_t stats_svc_calls(stats_svc_t svc);  /* 直近 1 秒窓の呼び出し回数 [calls/s] */
+uint32_t stats_svc_worked(stats_svc_t svc); /* うち実仕事をした回数 [calls/s] */
+const char *stats_svc_name(stats_svc_t svc);
+
+#if STATS_PROFILE
+void stats_svc_busy_add(stats_svc_t svc, uint32_t us);
+uint32_t stats_svc_busy_us(stats_svc_t svc); /* 直近 1 秒窓の滞在時間 [us/s] */
+#endif
+
+/*
+ * サービスを 1 本呼んで実仕事率を数える。STATS_PROFILE=1 なら滞在時間も測る。
+ * call は bool を返す式（i2s_service() など）。
+ */
+#if STATS_PROFILE
+#define STATS_SVC(svc, call)                                                   \
+    do {                                                                       \
+        uint32_t stats_svc_t0_ = time_us_32();                                 \
+        bool stats_svc_worked_ = (call);                                       \
+        stats_svc_busy_add((svc), time_us_32() - stats_svc_t0_);               \
+        stats_svc_note((svc), stats_svc_worked_);                              \
+    } while (0)
+#else
+#define STATS_SVC(svc, call) stats_svc_note((svc), (call))
+#endif
 
 /* ---- DMA リング -------------------------------------------------------- */
 

@@ -37,9 +37,92 @@
 /* `p 0` のドレインを打ち切るまでの時間 */
 #define DRAIN_TIMEOUT_MS 2000u
 
+/* コマンド用 CDC のインスタンス番号（stdio が使う #0。PCM 出力は usb_pcm.h の #1） */
+#define USB_CMD_CDC_ITF 0u
+
+/*
+ * 音声チェーン（リング位置の取り込み / ADPCM / キャプチャ送出 / I2S 供給）を
+ * 回す最短間隔。
+ *
+ * フレームは φM/64 = 62500/s で届くので、毎周回回すと 1 回あたり 1 フレーム
+ * 未満のために毎回ブロックの支度をすることになり、
+ * 固定費だけで CPU の大半を使う（pcm8.c の PCM8_BATCH_FRAMES と同じ理屈を
+ * チェーン全体へ広げたもの）。どのリングも一周 65.5ms あるので、この間隔なら
+ * DMA の位置を見失わない。
+ *
+ * 大きくするほど固定費は下がるが、1 回で埋める量が増えて I2S の先行量の谷が
+ * 深くなる。STATS_PROFILE=1 で測った実測（BOS14.MDX + USB キャプチャ、
+ * サービス滞在時間の合計 us/s）:
+ *
+ *   間隔なし 620,718 / 100us 206,435 / 250us 160,238 / 500us 135,048 / 1000us 120,566
+ *
+ * 250us 以降は逓減し、1000us では SEQ LAG が 220us まで伸びる。500us を採る。
+ * このとき 1 回で扱うのは 31 フレームで、I2S の先行 1024 フレームに対して十分小さい。
+ */
+#ifndef AUDIO_SERVICE_INTERVAL_US
+#define AUDIO_SERVICE_INTERVAL_US 500u
+#endif
+
+/*
+ * tud_task() を回す最短間隔。
+ *
+ * これも毎周回の固定費なので、音声チェーンだけを間引くとループが速く回るように
+ * なったぶん呼び出し回数が増え、浮いた時間をそのまま食う（実測: 音声チェーンを
+ * 250us 間隔にしたら LOOP が 3.4 倍になり USB の占有率が 15% -> 26% へ上がった）。
+ *
+ * **下限は PCM 出力のパケットレートで決まる。** tud_task() 1 回で CDC の
+ * バルクエンドポイントへ載るのは EP バッファ 1 個ぶん (CFG_TUD_CDC_EP_BUFSIZE
+ * = 64 バイト) なので、
+ *
+ *   下限 = 64 バイト / (phiM/64 x 4 バイト) = 64 / 250000 = 256us   (phiM 4MHz)
+ *
+ * を超えるとホストへ送り出す速さが取り込む速さに追いつかず、CDC #1 の送信 FIFO が
+ * 詰まってキャプチャのリングが 65.5ms で overrun する。実測でも 500us にすると
+ * `p 1` の直後に STATE が ERROR へ落ちた（250us でも USB_TX が 3968/4096 まで
+ * 埋まって余裕が無い）。2 倍の余裕を見て 125us にしてある。
+ *
+ * phiM を下げるとレートも下がるので制約は緩む方向。上げる場合はここを見直すこと。
+ */
+#ifndef USB_TASK_INTERVAL_US
+#define USB_TASK_INTERVAL_US 125u
+#endif
+
+/*
+ * シーケンサ (VGM / MDX) の予定時刻を確かめる最短間隔。
+ *
+ * これも毎周回では多すぎる。MDX の 1 tick は最短でも 4ms 台、VGM の wait は
+ * 最短 1 サンプル = 22.7us で、どちらも予算ループの中で遅れを取り返すので、
+ * この間隔ぶんの遅れは `s` の SEQ LAG に乗るだけで発行そのものは詰まらない。
+ * 音声チェーンより短くして、遅れが目に見えて増えないようにしてある。
+ */
+#ifndef SEQ_SERVICE_INTERVAL_US
+#define SEQ_SERVICE_INTERVAL_US 50u
+#endif
+
+/*
+ * ストレージの書き出しを確かめる最短間隔。
+ *
+ * 書き出しの判断は STORAGE_FLUSH_IDLE_MS (250ms) のアイドル期限なので、
+ * 1ms 刻みで見れば足りる。HOST モードでなければ即座に返る。
+ */
+#ifndef STORAGE_SERVICE_INTERVAL_US
+#define STORAGE_SERVICE_INTERVAL_US 1000u
+#endif
+
+/* 接続状態の確認間隔。起動バナーはこの遅れの範囲で出れば足りる。 */
+#ifndef CONNECT_POLL_INTERVAL_US
+#define CONNECT_POLL_INTERVAL_US 100000u
+#endif
+
 static char s_line[LINE_MAX_LEN + 1];
 static size_t s_len;
 static bool s_overflow;
+
+/* 各グループを最後に回した時刻。上の *_INTERVAL_US の基準。 */
+static uint32_t s_usb_last_us;
+static uint32_t s_audio_last_us;
+static uint32_t s_seq_last_us;
+static uint32_t s_storage_last_us;
 
 /* ---- メインループの 1 周分 --------------------------------------------- */
 
@@ -54,26 +137,58 @@ static bool s_overflow;
  * 自然に 0 に近づき、USB の空き待ちで送れなかった周回も CPU としては数えない。
  * tud_task() は毎周回走る固定費でどのサービスの負荷でもないので、別に集計する。
  */
+/*
+ * 前回から interval_us 以上たっていたら true を返し、基準時刻を進める。
+ *
+ * 「最短でもこの間隔を空ける」であって「この周期ちょうどで回す」ではない。
+ * メインループが長く止まったあとは 1 回だけ真になり、取りこぼしを溜めない。
+ */
+static bool due(uint32_t *last_us, uint32_t now_us, uint32_t interval_us) {
+    if ((uint32_t)(now_us - *last_us) < interval_us) {
+        return false;
+    }
+    *last_us = now_us;
+    return true;
+}
+
 static void service_all(void) {
     uint32_t t0 = time_us_32();
 
-    tud_task();
+    if (due(&s_usb_last_us, t0, USB_TASK_INTERVAL_US)) {
+        tud_task();
+    }
 
     uint32_t t1 = time_us_32();
 
     /*
+     * 音声チェーンは AUDIO_SERVICE_INTERVAL_US ごとにまとめて回す。
+     *
      * 書き込み位置の取り込みと ADPCM のレンダリングは、どの消費者よりも先に
      * 行う。capture も I2S も ym3012_reader_read_pcm() の中でミックス済みの
      * PCM を受け取るので、そこまでに描き終わっていなければならない。
+     * 間隔を空けても**この順序は変えない**。
      */
-    ym3012_ring_poll();
-    (void)pcm8_service();
+    if (due(&s_audio_last_us, t1, AUDIO_SERVICE_INTERVAL_US)) {
+        ym3012_ring_poll();
+        STATS_SVC(STATS_SVC_PCM8, pcm8_service());
 
-    (void)capture_service();
-    (void)i2s_service();
-    (void)vgm_service();
-    (void)mdx_service();
-    (void)storage_service();
+        STATS_SVC(STATS_SVC_CAPTURE, capture_service());
+        STATS_SVC(STATS_SVC_I2S, i2s_service());
+    }
+
+    /*
+     * シーケンサは音声チェーンより短い間隔で見る。予定時刻の判定そのものは軽いが、
+     * 毎周回だと周回数ぶんの固定費がそのまま乗る。
+     */
+    if (due(&s_seq_last_us, t1, SEQ_SERVICE_INTERVAL_US)) {
+        STATS_SVC(STATS_SVC_VGM, vgm_service());
+        STATS_SVC(STATS_SVC_MDX, mdx_service());
+    }
+
+    if (due(&s_storage_last_us, t1, STORAGE_SERVICE_INTERVAL_US)) {
+        STATS_SVC(STATS_SVC_STORAGE, storage_service());
+    }
+
     led_service();
 
     stats_usb_busy_add(t1 - t0);
@@ -141,6 +256,43 @@ static void print_info(void) {
     reply_ok();
 }
 
+/*
+ * サービスごとの「呼ばれた回数」と「そのうち実仕事だった回数」を 1 行で出す。
+ * どのサービスが空振りしているかは CPU 使用率からは読めないので、ここで分ける。
+ * STATS_PROFILE=1 で焼いた場合だけ滞在時間の行が続く。
+ */
+static void print_svc(void) {
+    char line[192];
+    size_t n = 0;
+
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+        stats_svc_t svc = (stats_svc_t)i;
+        int w = snprintf(line + n, sizeof(line) - n, "%s%s %u/%u",
+                         (i == 0u) ? "" : "  ", stats_svc_name(svc),
+                         (unsigned)stats_svc_worked(svc), (unsigned)stats_svc_calls(svc));
+        if (w < 0 || (size_t)w >= sizeof(line) - n) {
+            break; /* 収まらない分は落とす（行を壊さない） */
+        }
+        n += (size_t)w;
+    }
+    printf("# SVC     : %s  worked/calls per s\n", line);
+
+#if STATS_PROFILE
+    n = 0;
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+        stats_svc_t svc = (stats_svc_t)i;
+        int w = snprintf(line + n, sizeof(line) - n, "%s%s %u",
+                         (i == 0u) ? "" : "  ", stats_svc_name(svc),
+                         (unsigned)stats_svc_busy_us(svc));
+        if (w < 0 || (size_t)w >= sizeof(line) - n) {
+            break;
+        }
+        n += (size_t)w;
+    }
+    printf("# SVCTIME : %s  us per s\n", line);
+#endif
+}
+
 /* `s` の出力。単位はすべてバイト。 */
 static void print_stats(void) {
     uint32_t ring = stats_ring_frames() * 4u;
@@ -171,6 +323,7 @@ static void print_stats(void) {
     printf("# RATE    : %u frames/s (expect %u)\n",
            (unsigned)stats_frame_rate(), (unsigned)(opm_clock_hz_actual() / 64u));
     printf("# LOOP    : %u passes/s\n", (unsigned)stats_loop_rate());
+    print_svc();
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
     printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",
            (unsigned)stats_flash_write(), (unsigned)stats_flash_blackout_max_us());
@@ -1096,19 +1249,40 @@ int main(void) {
     mdx_init();
 
     bool connected = false;
+    uint32_t connect_poll_us = time_us_32();
 
     for (;;) {
         service_all();
 
-        bool now_connected = stdio_usb_connected();
-        if (now_connected != connected) {
-            connected = now_connected;
-            s_len = 0;
-            s_overflow = false;
-            if (connected) {
-                /* 接続前の出力は捨てられるので、検出した時点で起動バナーを出す。 */
-                print_info();
+        /*
+         * 接続の確認は 100ms ごとで足りる。stdio_usb_connected() は毎周回
+         * 呼ぶには重く（TinyUSB の状態を 2 段見る）、バナーはこの遅れの
+         * 範囲で出れば足りる。
+         */
+        uint32_t now_us = time_us_32();
+        if ((uint32_t)(now_us - connect_poll_us) >= CONNECT_POLL_INTERVAL_US) {
+            connect_poll_us = now_us;
+
+            bool now_connected = stdio_usb_connected();
+            if (now_connected != connected) {
+                connected = now_connected;
+                s_len = 0;
+                s_overflow = false;
+                if (connected) {
+                    /* 接続前の出力は捨てられるので、検出した時点で起動バナーを出す。 */
+                    print_info();
+                }
             }
+        }
+
+        /*
+         * 受信 FIFO が空のときに getchar_timeout_us() まで降りると、SDK 側で
+         * ドライバ走査と time_us_64() の読み出しが毎周回入る。先に TinyUSB の
+         * FIFO を見て、空なら降りない。読む経路そのものは stdio のままにする。
+         */
+        if (tud_cdc_n_available(USB_CMD_CDC_ITF) == 0u) {
+            tight_loop_contents();
+            continue;
         }
 
         int ch = getchar_timeout_us(0);

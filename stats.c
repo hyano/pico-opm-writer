@@ -26,6 +26,95 @@ static struct {
 /* 直近窓のメインループ周回数 [passes/s] */
 static uint32_t s_loop_rate;
 
+/* ---- サービスごとの実仕事率 -------------------------------------------- */
+
+/* 窓の中の生カウント。窓が閉じたときに 1 秒あたりへ直して s_svc へ移す。 */
+static struct {
+    uint32_t calls;
+    uint32_t worked;
+#if STATS_PROFILE
+    uint32_t busy_us;
+#endif
+} s_svc_win[STATS_SVC_COUNT];
+
+/* 直近窓の確定値 [回/s] */
+static struct {
+    uint32_t calls;
+    uint32_t worked;
+#if STATS_PROFILE
+    uint32_t busy_us;
+#endif
+} s_svc[STATS_SVC_COUNT];
+
+/* `s` の 1 行に 6 個並べるので短くする */
+static const char *const SVC_NAME[STATS_SVC_COUNT] = {
+    [STATS_SVC_PCM8] = "pcm8",    [STATS_SVC_CAPTURE] = "cap",
+    [STATS_SVC_I2S] = "i2s",      [STATS_SVC_VGM] = "vgm",
+    [STATS_SVC_MDX] = "mdx",      [STATS_SVC_STORAGE] = "sto",
+};
+
+void stats_svc_note(stats_svc_t svc, bool worked) {
+    s_svc_win[svc].calls++;
+    if (worked) {
+        s_svc_win[svc].worked++;
+    }
+}
+
+#if STATS_PROFILE
+void stats_svc_busy_add(stats_svc_t svc, uint32_t us) {
+    s_svc_win[svc].busy_us += us;
+}
+
+uint32_t stats_svc_busy_us(stats_svc_t svc) {
+    return s_svc[svc].busy_us;
+}
+#endif
+
+uint32_t stats_svc_calls(stats_svc_t svc) {
+    return s_svc[svc].calls;
+}
+
+uint32_t stats_svc_worked(stats_svc_t svc) {
+    return s_svc[svc].worked;
+}
+
+const char *stats_svc_name(stats_svc_t svc) {
+    return SVC_NAME[svc];
+}
+
+/* 窓が閉じたときに 1 秒あたりへ直す。窓は 1 秒ちょうどとは限らない。 */
+static void svc_close_window(uint32_t elapsed_us) {
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+        s_svc[i].calls =
+            (uint32_t)(((uint64_t)s_svc_win[i].calls * 1000000u) / elapsed_us);
+        s_svc[i].worked =
+            (uint32_t)(((uint64_t)s_svc_win[i].worked * 1000000u) / elapsed_us);
+#if STATS_PROFILE
+        s_svc[i].busy_us =
+            (uint32_t)(((uint64_t)s_svc_win[i].busy_us * 1000000u) / elapsed_us);
+#endif
+        s_svc_win[i].calls = 0;
+        s_svc_win[i].worked = 0;
+#if STATS_PROFILE
+        s_svc_win[i].busy_us = 0;
+#endif
+    }
+}
+
+/* 起動時と `s 0` で全部 0 に戻す */
+static void svc_clear(void) {
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+        s_svc_win[i].calls = 0;
+        s_svc_win[i].worked = 0;
+        s_svc[i].calls = 0;
+        s_svc[i].worked = 0;
+#if STATS_PROFILE
+        s_svc_win[i].busy_us = 0;
+        s_svc[i].busy_us = 0;
+#endif
+    }
+}
+
 /* ---- CPU 使用率 -------------------------------------------------------- */
 
 static struct {
@@ -151,6 +240,9 @@ void stats_service(void) {
     /* メインループの周回数（1 周あたりの固定費を見積もるのに使う） */
     s_loop_rate = (uint32_t)(((uint64_t)s_window.passes_in_window * 1000000u) / elapsed_us);
 
+    /* サービスごとの呼び出し回数と実仕事回数 */
+    svc_close_window(elapsed_us);
+
     /* 次の窓へ */
     s_window.window_start_us = now_us;
     s_window.busy_us = 0;
@@ -211,7 +303,7 @@ uint32_t stats_usb_tx_bytes_max(void) {
 
 /* ---- I2S 出力 ---------------------------------------------------------- */
 
-void stats_i2s_update(uint32_t depth_frames) {
+void __not_in_flash_func(stats_i2s_update)(uint32_t depth_frames) {
     s_i2s.depth_current = depth_frames;
     if (depth_frames < s_i2s.depth_min) {
         s_i2s.depth_min = depth_frames;
@@ -232,7 +324,7 @@ void stats_count_overrun(void) {
     s_counters.overrun++;
 }
 
-void stats_count_forbidden(uint32_t n) {
+void __not_in_flash_func(stats_count_forbidden)(uint32_t n) {
     s_counters.forbidden += n;
 }
 
@@ -245,11 +337,11 @@ void stats_count_frames(uint32_t n) {
     s_window.frames_in_window += n;
 }
 
-void stats_count_i2s_underrun(void) {
+void __not_in_flash_func(stats_count_i2s_underrun)(void) {
     s_counters.i2s_underrun++;
 }
 
-void stats_count_pcm_clip(uint32_t n) {
+void __not_in_flash_func(stats_count_pcm_clip)(uint32_t n) {
     s_counters.pcm_clip += n;
 }
 
@@ -316,6 +408,8 @@ uint32_t stats_seq_lag_max_us(void) {
 /* ---- 初期化・リセット -------------------------------------------------- */
 
 void stats_init(void) {
+    svc_clear();
+
     s_window.window_start_us = time_us_32();
     s_window.busy_us = 0;
     s_window.frames_in_window = 0;
@@ -346,6 +440,8 @@ void stats_init(void) {
 }
 
 void stats_reset(void) {
+    svc_clear();
+
     /* high-water / low-water とカウンタを初期値に戻す */
     s_cpu.cpu_percent_max = 0;
     s_ring.frames_max = 0;
