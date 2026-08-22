@@ -207,14 +207,14 @@ static void print_help(void) {
     puts("# d <ms>                              : delay, decimal 0-60000");
     puts("# p 1 | p 0                           : start / stop PCM output on CDC #1");
     puts("# s | s 0                             : show / reset statistics");
-    puts("# t                                   : run PCM conversion self test");
+    puts("# t                                   : run self tests (pcm / pio / mdx / adpcm)");
     puts("# i                                   : show info");
     puts("# clock                               : show phiM / sys_clk / i2s rate");
     puts("# clock 4 | clock 3.58                : switch phiM to 4.000000 / 3.579545 MHz");
-    puts("# clock auto | clock fixed            : follow / ignore the clock in a VGM header");
+    puts("# clock auto | clock fixed            : follow / ignore the clock a file asks for");
     puts("# storage status                      : show storage state");
     puts("# storage host | storage player       : hand the flash to PC / to firmware");
-    puts("# storage format yes                  : make a new filesystem (FAT12)");
+    puts("# storage format [force] yes          : make a new filesystem (FAT12)");
     puts("# storage trace                       : show the SCSI commands the PC sent");
     puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
     puts("# vgm play <filename>                 : play /VGM/<filename>");

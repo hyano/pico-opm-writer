@@ -1321,6 +1321,7 @@ const char *mdx_list(void (*tick)(void)) {
     DIR dir;
 
     prev[0] = '\0';
+    uint32_t emitted = 0;
     bool first = true;
 
     for (;;) {
@@ -1367,8 +1368,10 @@ const char *mdx_list(void (*tick)(void)) {
 
         snprintf(prev, sizeof(prev), "%s", best);
         first = false;
+        emitted++;
     }
 
+    printf("# files   : %u\n", (unsigned)emitted);
     return NULL;
 }
 
