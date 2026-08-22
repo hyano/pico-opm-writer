@@ -5,8 +5,16 @@
  *
  * ---- 参照実装との対応 --------------------------------------------------
  *
- * 解釈は MXDRV 2.06+17 に合わせてある。参照実装のチャンネルワーク
- * (MXWORK_CH) のオフセットと、この mdx_ch_t のフィールドの対応:
+ * 解釈は MXDRV 2.06+16 Rel.3+25 に合わせてある。
+ *
+ * コメント中の参照実装のラベルは 2 系統ある。ADPCM / PCM8 まわりの `COM_*` /
+ * `PCM_*` / `FADE_*` のような記号名と、それと同じ節に出てくる番地
+ * （L000B18 / L000B4E / L000B94 / L000BE4 / L000C6E / L000CAA / L000CC6 /
+ * L000CEC / L000EA2 / L001290）は **2.06+16 Rel.3+25 のソース**のもの。
+ * それ以外の L00xxxx は **2.06+17 の逆アセンブル**の番地で、番地は対応しない。
+ *
+ * 参照実装のチャンネルワーク (MXWORK_CH) のオフセットと、この mdx_ch_t の
+ * フィールドの対応:
  *
  *   S0000 Ptr                    -> p           MML の読み出し位置
  *   S0004 voice ptr              -> voice       音色レコード（番号の次）
@@ -88,6 +96,7 @@
 #define F17_VOICE_REQ 0x02u /* 音色の書き込み待ち（実際に書くのはキーオン時） */
 #define F17_PAN_DIRTY 0x04u
 #define F17_SYNC_WAIT 0x08u /* 0xEE で同期待ち */
+#define F17_PCM_KEEP  0x80u /* 0xE7 0x06。非 PCM8 のキーオフで「中止」を抑止する */
 
 /* ---- 状態 -------------------------------------------------------------- */
 
@@ -181,12 +190,13 @@ static uint8_t s_sync[MDX_CH_MAX]; /* L001df6。0xEF で立ち 0xEE で降りる
  * （= 直前の音がタイだったか）。ADPCM の音量を発音中に変えるかの判定に使う。
  */
 static bool s_tie_flag;
-static uint16_t s_enable;          /* L001e1a。まだ終わっていないチャンネル */
-static bool s_pcm8_mode;           /* L001df4。0xE8 で立つと 9-15ch も回る */
+static uint16_t s_enable;    /* LOOP_FLG。まだ終わっていないチャンネル */
+static uint16_t s_loop_mask; /* END_FLG。今の周回でまだループ点に来ていないチャンネル */
+static bool s_pcm8_mode;     /* PCM8_FLG。0xE8 で立つ。ADPCM の制御ごと切り替わる */
 
-/* フェードアウト（L001e14 / L001e15 / L001e17 / L001e1e） */
+/* フェードアウト（FADE_ADD / PCM_CUT / FADE_FLG / FADE_SPEED / NOW_SPEED） */
 static uint8_t s_fade_off;
-static uint8_t s_fade_flag;
+static uint8_t s_fade_flag; /* PCM_CUT。非 PCM8 の ADPCM を定位 0 で黙らせる */
 static uint8_t s_fade_on;
 static uint16_t s_fade_speed;
 static uint16_t s_fade_cnt;
@@ -563,27 +573,61 @@ static int pcm_pan(const mdx_ch_t *c) {
     return (int)p;
 }
 
-/* キーオン（参照実装 L000e7e / ADPCM は L000BE4） */
+/*
+ * 非 PCM8 モードの ADPCM 停止（参照実装 L000CEC）。
+ * IOCS の「中止」は 0xE7 0x06 で抑止できる。「終了」は常に発行する。
+ */
+static void snd_pcm_iocs_off(const mdx_ch_t *c) {
+    pcm8_iocs_mod((c->f17 & F17_PCM_KEEP) == 0u);
+    pcm8_iocs_mod(false);
+}
+
+/*
+ * キーオン（参照実装 L000B18 / ADPCM は L000B4E）。
+ *
+ * ADPCM は PCM8 モード（0xE8）かどうかで叩く先が変わる。周波数と定位は共通だが、
+ * PCM8 のファンクションコールにしかない音量・バンク・24bit 長は、
+ * IOCS 経路（= 非 PCM8）では指定できない。
+ */
 static void snd_key_on(mdx_ch_t *c) {
     if (is_adpcm(c)) {
+        int mode = (int)((c->pan >> 2) & 0x1fu);
+        int pan = pcm_pan(c);
+
+        if (!s_pcm8_mode) {
+            /* 参照実装 L000B94。IOCS _ADPCMOUT なので音量もバンクも効かない。 */
+            if (s_fade_flag != 0u) {
+                pan = 0; /* PCM_CUT。フェードアウトが進んだら鳴らさない */
+            }
+            snd_pcm_iocs_off(c);
+            pcm8_iocs_out((uint32_t)(c->pitch >> 6), mode, pan);
+            return;
+        }
+
+        /* 参照実装 L000BE4 */
         bool audible = false;
         uint32_t vol = pcm_volume(c, &audible);
-        int pan = audible ? pcm_pan(c) : 0; /* 定位 0 は PCM8 では停止 */
+        if (!audible) {
+            pan = 0; /* 定位 0 は PCM8 では停止 */
+        }
         uint32_t ch = (uint32_t)(c->ch & 0x07u);
 
         /* 参照実装は TRAP #2 を 2 回発行する（まず停止、次に発音） */
         pcm8_stop(ch);
-        pcm8_key_on(ch, c->pcm_bank, (uint32_t)(c->pitch >> 6),
-                    (int)((c->pan >> 2) & 0x1fu), (int)vol, pan);
+        pcm8_key_on(ch, c->pcm_bank, (uint32_t)(c->pitch >> 6), mode, (int)vol, pan);
         return;
     }
     opm_put(0x08u, c->keyon_slot);
 }
 
-/* キーオフ（参照実装 L000ff6 / ADPCM は L000CC6 = データ長 0 のチャネル停止） */
+/* キーオフ（参照実装 L000CAA / ADPCM は L000CC6） */
 static void snd_key_off(mdx_ch_t *c) {
     if (is_adpcm(c)) {
-        pcm8_stop((uint32_t)(c->ch & 0x07u));
+        if (!s_pcm8_mode) {
+            snd_pcm_iocs_off(c); /* 参照実装 L000CEC */
+        } else {
+            pcm8_stop((uint32_t)(c->ch & 0x07u)); /* データ長 0 のチャネル停止 */
+        }
         return;
     }
     opm_put(0x08u, c->ch);
@@ -715,6 +759,7 @@ static void set_len(mdx_ch_t *c, uint32_t gate, uint32_t len, uint32_t p) {
  */
 static void end_channel(mdx_ch_t *c, uint32_t idx, uint32_t op_at) {
     s_enable &= (uint16_t)~(1u << idx);
+    s_loop_mask &= (uint16_t)~(1u << idx);
     set_len(c, 0x7fu, 0x7fu, op_at);
 }
 
@@ -765,14 +810,16 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
     case 0xFBu: /* v 音量 */
         c->vol = s_file[p++];
         c->f17 |= F17_VOL_DIRTY;
-        if (is_adpcm(c) && s_tie_flag) {
+        if (is_adpcm(c) && s_tie_flag && s_pcm8_mode) {
             /*
-             * 参照実装 PCM_Vol。タイでつながっている間だけ、発音中の
-             * ADPCM の音量を差し替える（周波数と定位は据え置き）。
+             * 参照実装 PCM_Vol。タイでつながっている間だけ、発音中の ADPCM の
+             * 音量を差し替える（周波数と定位は -1 で据え置き）。音量は PCM8 の
+             * ファンクションコールにしかないので、PCM8 モードでなければ出さない。
              */
             bool audible = false;
             uint32_t vol = pcm_volume(c, &audible);
-            pcm8_set_mode((uint32_t)(c->ch & 0x07u), (int)vol, -1, audible ? -1 : 0);
+            (void)audible; /* 範囲外は音量 0 になるだけで、停止はしない */
+            pcm8_set_mode((uint32_t)(c->ch & 0x07u), (int)vol, -1, -1);
         }
         break;
     case 0xFAu: /* v- */
@@ -868,7 +915,19 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
             return true;
         }
         p -= back;
-        s_loops++;
+
+        /*
+         * 参照実装 COM_F1。END_FLG から自分のビットを落とし、まだ終わっていない
+         * チャンネル（LOOP_FLG）が全部ループ点に来たところで 1 ループと数える。
+         */
+        s_loop_mask &= (uint16_t)~(1u << idx);
+        if ((s_loop_mask & s_enable) == 0u) {
+            s_loop_mask = 0x01ffu;
+            if (s_pcm8_mode && s_nch > 9u) {
+                s_loop_mask |= 0xfe00u;
+            }
+            s_loops++;
+        }
         break;
     }
     case 0xF0u: /* キーオン遅延 */
@@ -987,9 +1046,17 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
     case 0xE9u: /* LFO ディレイ */
         c->lfo_delay = s_file[p++];
         break;
-    case 0xE8u: /* PCM8 モード宣言 */
+    case 0xE8u: /* PCM8 モード宣言（参照実装 COM_E8） */
         s_pcm8_mode = true;
-        s_enable |= 0xfe00u;
+        /*
+         * 参照実装は 9-15ch を無条件に足すが、本機は 9ch のファイルでその 7 本を
+         * 回さない（MML の位置がヘッダに無い）。ビットだけ立てると永久に落ちず、
+         * 曲の終わりを検出できなくなるので、16ch のファイルに限る。
+         */
+        if (s_nch > 9u) {
+            s_enable |= 0xfe00u;
+            s_loop_mask |= 0xfe00u;
+        }
         break;
     case 0xE7u: { /* 拡張 */
         uint8_t sub = s_file[p++];
@@ -1004,6 +1071,10 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
                           ((uint32_t)s_file[p + 3u] << 16) |
                           ((uint32_t)s_file[p + 4u] << 8) | (uint32_t)s_file[p + 5u];
             p += 6u;
+            if (!s_pcm8_mode) {
+                /* 参照実装 PCM8Ctrl。PCM8 モードでなければ 6 バイト読み飛ばすだけ。 */
+                break;
+            }
             if ((fn & 0xfff0u) == 0x0070u) { /* 動作モード変更 */
                 int vol = (int)(int8_t)(uint8_t)(d1 >> 16);
                 int mode = (int)(int8_t)(uint8_t)(d1 >> 8);
@@ -1032,8 +1103,13 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
             snd_key_on(c);
             return true;
         }
-        case 0x06u: /* 参照実装ではフラグの上げ下げのみ。FM の発音には効かない。 */
-            p++;
+        case 0x06u: /* ADPCM 多重再生 mode（参照実装 F2_bit7） */
+            /* 非 PCM8 のキーオフで IOCS の「中止」を抑止する。FM には効かない。 */
+            if (s_file[p++] != 0u) {
+                c->f17 |= F17_PCM_KEEP;
+            } else {
+                c->f17 &= (uint8_t)~F17_PCM_KEEP;
+            }
             break;
         default: /* 0x00 と 0x04 以上は演奏終了扱い */
             end_channel(c, idx, op_at);
@@ -1244,9 +1320,8 @@ static bool fade_step(void) {
         s_fade_cnt = (uint16_t)(s_fade_cnt - 2u);
         return false;
     }
-    if ((int8_t)s_fade_off >= 0x0a) {
-        s_fade_flag = 0xffu;
-    }
+    /* 参照実装は sge なので、条件が偽になれば降りる（フェードインで戻る） */
+    s_fade_flag = ((int8_t)s_fade_off >= 0x0a) ? 0xffu : 0u;
     if ((int8_t)s_fade_off >= 0x3e) {
         return true;
     }
@@ -1313,6 +1388,7 @@ static void init_channels(void) {
     }
 
     s_enable = 0x01ffu;
+    s_loop_mask = 0x01ffu;
     s_pcm8_mode = false;
     s_fade_off = 0;
     s_fade_flag = 0;
@@ -1521,6 +1597,7 @@ const char *mdx_stop(void) {
 
     key_off_all();
     pcm8_close_pdx();
+    s_pcm8_mode = false; /* 参照実装 L00034E の clr.b PCM8_FLG */
     s_state = MDX_STATE_STOPPED;
     s_cursor = 0;
     s_in_tick = false;
@@ -1570,6 +1647,7 @@ bool mdx_service(void) {
         if (fade_step()) {
             key_off_all();
             pcm8_close_pdx();
+            s_pcm8_mode = false;
             s_state = MDX_STATE_STOPPED;
             printf("# mdx     : end of fadeout\n");
             return true;
@@ -1612,6 +1690,7 @@ bool mdx_service(void) {
     if (s_enable == 0u) {
         key_off_all();
         pcm8_close_pdx();
+        s_pcm8_mode = false; /* 参照実装 L001290 の clr.b PCM8_FLG */
         s_state = MDX_STATE_STOPPED;
         printf("# mdx     : end of data\n");
     }

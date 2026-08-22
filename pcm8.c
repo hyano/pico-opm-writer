@@ -140,8 +140,13 @@ static uint32_t rd32be(const uint8_t *p) {
            (uint32_t)p[3];
 }
 
-/* (bank, note) のサンプル位置を引く。無い / 壊れているなら false。 */
-static bool pdx_entry(uint32_t bank, uint32_t note, uint32_t *off, uint32_t *len) {
+/*
+ * (bank, note) のサンプル位置を引く。無い / 壊れているなら false。
+ * word_len は「長さを下位 16bit だけ見る」= IOCS 経路（参照実装 L000B94）。
+ * PCM8 経路（L000BE4）は 32bit で読んでから 24bit へ切る。
+ */
+static bool pdx_entry(uint32_t bank, uint32_t note, bool word_len, uint32_t *off,
+                      uint32_t *len) {
     if (!s_pdx_open || note >= PDX_BANK_NOTES) {
         return false;
     }
@@ -166,7 +171,8 @@ static bool pdx_entry(uint32_t bank, uint32_t note, uint32_t *off, uint32_t *len
 
     const uint8_t *e = &s_tbl[note * PDX_ENTRY_BYTES];
     uint32_t o = rd32be(e);
-    uint32_t n = rd32be(e + 4) & 0x00ffffffu; /* 参照実装が長さを 24bit で切る */
+    uint32_t n = rd32be(e + 4);
+    n &= word_len ? 0x0000ffffu : 0x00ffffffu;
 
     if (n == 0u || o >= s_pdx_size || (o + n) > s_pdx_size) {
         return false;
@@ -612,14 +618,10 @@ static bool apply_params(pcm8_ch_t *c, int mode, int vol, int pan) {
     return true;
 }
 
-void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan) {
-    if (ch >= PCM8_CH_MAX) {
-        return;
-    }
-    pcm8_ch_t *c = &s_ch[ch];
-
-    bool sound = apply_params(c, mode, vol, pan);
-    if (!sound) {
+/* 発音の共通部。定位 0（停止）と波形なしはどちらも miss として数える。 */
+static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, int mode,
+                   int vol, int pan) {
+    if (!apply_params(c, mode, vol, pan)) {
         s_miss++;
         c->active = false;
         return;
@@ -627,7 +629,7 @@ void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, i
 
     uint32_t off = 0;
     uint32_t len = 0;
-    if (!pdx_entry(bank, note, &off, &len)) {
+    if (!pdx_entry(bank, note, word_len, &off, &len)) {
         s_miss++;
         c->active = false;
         return;
@@ -644,6 +646,13 @@ void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, i
     c->cur = 0;
     c->active = true;
     s_keyon++;
+}
+
+void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan) {
+    if (ch >= PCM8_CH_MAX) {
+        return;
+    }
+    key_on(&s_ch[ch], bank, note, false, mode, vol, pan);
 }
 
 void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan) {
@@ -677,6 +686,22 @@ void pcm8_abort_all(void) {
     for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
         s_ch[i].active = false;
     }
+}
+
+/* ---- 発音（PCM8 モードでないときの IOCS 経路）------------------------- */
+
+/* IOCS の原音量。PCM8 の音量 0-15 のうち 8 が原音（PCM8TECH.DOC）。 */
+#define PCM8_IOCS_VOLUME 8
+
+void pcm8_iocs_out(uint32_t note, int mode, int pan) {
+    key_on(&s_ch[0], 0u, note, true, mode, PCM8_IOCS_VOLUME, pan);
+}
+
+void pcm8_iocs_mod(bool abort) {
+    if (abort) {
+        s_ch[0].active = false; /* d1=1 中止 */
+    }
+    /* d1=0 終了 = チェイン動作の終了。チェインを使っていないので何もしない。 */
 }
 
 /* ---- 問い合わせ -------------------------------------------------------- */
@@ -832,6 +857,13 @@ void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan) {
 void pcm8_stop(uint32_t ch) { (void)ch; }
 void pcm8_end_all(void) {}
 void pcm8_abort_all(void) {}
+
+void pcm8_iocs_out(uint32_t note, int mode, int pan) {
+    (void)note;
+    (void)mode;
+    (void)pan;
+}
+void pcm8_iocs_mod(bool abort) { (void)abort; }
 
 uint32_t pcm8_active_mask(void) { return 0; }
 uint32_t pcm8_active_count(void) { return 0; }

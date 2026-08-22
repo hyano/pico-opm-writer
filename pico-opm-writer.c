@@ -337,7 +337,7 @@ static void print_stats(void) {
            (unsigned)vgm_reslip_count(), (unsigned)vgm_gz_reload_count());
     const char *mdx_name = mdx_current_name();
     printf("# MDX     : %s%s%s\n", mdx_state_name(), mdx_name[0] ? " " : "", mdx_name);
-    printf("# MDX POS : %llu clocks  loopjump %u  ch %u\n",
+    printf("# MDX POS : %llu clocks  loop %u  ch %u\n",
            (unsigned long long)mdx_tick_count(), (unsigned)mdx_loop_count(),
            (unsigned)mdx_channels());
     printf("# MDX TICK: @t %u  %u us  reslip %u\n",
@@ -991,7 +991,7 @@ static void print_mdx_status(void) {
     if (mdx_title()[0] != '\0') {
         printf("# title   : %s\n", mdx_title());
     }
-    printf("# pos     : %llu clocks  loopjump %u  ch %u\n",
+    printf("# pos     : %llu clocks  loop %u  ch %u\n",
            (unsigned long long)mdx_tick_count(), (unsigned)mdx_loop_count(),
            (unsigned)mdx_channels());
     printf("# tick    : @t %u  %u us  reslip %u\n",

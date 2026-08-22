@@ -114,7 +114,7 @@ const char *mdx_pdx_name(void);     /* ヘッダが要求する PDX 名。無け
 
 uint32_t mdx_channels(void);    /* 9 または 16 */
 uint64_t mdx_tick_count(void);  /* 発行済みの clock 数 */
-uint32_t mdx_loop_count(void);
+uint32_t mdx_loop_count(void);  /* 曲が何周したか（全チャンネルがループ点に到達した回数） */
 uint32_t mdx_reslip_count(void); /* 時計を張り直した回数 */
 uint32_t mdx_tempo(void);        /* 現在の Timer-B 値 */
 uint32_t mdx_tick_us(void);      /* 現在の 1 clock の長さ [us] */
