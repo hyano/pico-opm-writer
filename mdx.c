@@ -1342,10 +1342,16 @@ static bool fade_step(void) {
 
 static void key_off_all(void) {
     /*
-     * 全 8 チャンネルをキーオフする。8 回 x 32us = 約 256us。
+     * 全 8 チャンネルをキーオフする。キーオフだけでは音色の RR 次第で音が長く
+     * 残るので、直前に 4 スロットの RR を 15（最速）にしてから落とす。
+     * 8ch x (RR 4 回 + キーオフ 1 回) x 32us = 約 1.3ms。
      * opm_reset() は 20ms ブロックして I2S アンダーランが確定するので使わない。
      */
     for (uint8_t ch = 0; ch < 8u; ch++) {
+        for (uint8_t slot = 0; slot < 4u; slot++) {
+            /* D1L/RR。リリース中は D1L を見ないので D1L=0 / RR=15 でよい。 */
+            opm_put((uint8_t)(0xe0u + slot * 8u + ch), 0x0fu);
+        }
         opm_put(0x08u, ch);
     }
     pcm8_abort_all();

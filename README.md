@@ -583,7 +583,7 @@ ERR wrong state
 | `vgm` / `vgm status` | 再生状態を表示する |
 | `vgm list` | `/VGM/` の `.vgm` と `.vgz` を名前順（大小無視）に並べる |
 | `vgm play <filename>` | `/VGM/<filename>` を再生する。`/VGM/` は付けない |
-| `vgm stop` | 再生を止めて全チャンネルをキーオフする。**冪等**（停止中でも `OK`） |
+| `vgm stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
 
 ```
 > vgm
@@ -679,7 +679,7 @@ ERR not found
 | `mdx` / `mdx status` | 再生状態を表示する |
 | `mdx list` | `/MDX/` の `.mdx` を名前順（大小無視）に並べる。256 件で打ち切る |
 | `mdx play <filename>` | `/MDX/<filename>` を再生する。`/MDX/` は付けない |
-| `mdx stop` | 再生を止めて全チャンネルをキーオフする。**冪等**（停止中でも `OK`） |
+| `mdx stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
 | `mdx pcm` | ADPCM ミキシングの状態を表示する |
 | `mdx pcm on` / `mdx pcm off` | ADPCM を足す / 足さない（FM だけの音と聴き比べる用） |
 
