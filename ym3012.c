@@ -233,7 +233,7 @@ const char *ym3012_selftest_detail(void) {
 
 /* ---- リング操作 -------------------------------------------------------- */
 
-void ym3012_ring_poll(void) {
+void __not_in_flash_func(ym3012_ring_poll)(void) {
     uintptr_t wp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->write_addr;
     uint32_t widx = (uint32_t)((wp - (uintptr_t)s_ring) >> 2);
 
@@ -261,7 +261,7 @@ void ym3012_ring_resync(void) {
     ym3012_reader_sync(&s_reader);
 }
 
-uint64_t ym3012_write_total(void) {
+uint64_t __not_in_flash_func(ym3012_write_total)(void) {
     return s_write_total;
 }
 
@@ -272,7 +272,7 @@ void ym3012_set_mixer(ym3012_mixer_t fn) {
     s_mix_ready = s_write_total;
 }
 
-void ym3012_set_mix_ready(uint64_t frame) {
+void __not_in_flash_func(ym3012_set_mix_ready)(uint64_t frame) {
     s_mix_ready = frame;
 }
 
@@ -286,7 +286,7 @@ uint32_t ym3012_reader_unread(const ym3012_reader_t *rd) {
     return (unread > YM3012_RING_FRAMES) ? YM3012_RING_FRAMES : (uint32_t)unread;
 }
 
-void ym3012_reader_sync(ym3012_reader_t *rd) {
+void __not_in_flash_func(ym3012_reader_sync)(ym3012_reader_t *rd) {
     rd->read_total = s_write_total;
 }
 
@@ -294,7 +294,8 @@ uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd) {
     return rd->read_total;
 }
 
-uint32_t ym3012_reader_read_pcm(ym3012_reader_t *rd, int16_t *out, uint32_t max_frames) {
+uint32_t __not_in_flash_func(ym3012_reader_read_pcm)(ym3012_reader_t *rd, int16_t *out,
+                                                    uint32_t max_frames) {
     uint32_t n = ym3012_reader_unread(rd);
     if (n > max_frames) {
         n = max_frames;

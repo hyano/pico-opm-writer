@@ -147,7 +147,7 @@ void i2s_init(void) {
 
 /* ---- 毎周回の処理 ------------------------------------------------------ */
 
-bool i2s_service(void) {
+bool __not_in_flash_func(i2s_service)(void) {
     i2s_poll();
 
     int64_t depth = (int64_t)(s_fill_total - s_dma_total);

@@ -50,21 +50,21 @@
  * φM の値によらず比は整数になる。5 (16bit PCM) と 6 (8bit PCM) は
  * 15.6kHz 固定なので mode 4 と同じ。
  */
-static const uint8_t HOLD_FOR_MODE[7] = {16u, 12u, 8u, 6u, 4u, 4u, 4u};
+static const uint8_t __not_in_flash("pcm8_tbl") HOLD_FOR_MODE[7] = {16u, 12u, 8u, 6u, 4u, 4u, 4u};
 
 /*
  * PCM8 の音量 0-15 -> 線形ゲイン (Q16)。1step = 2dB で 8 が原音。
  * gain[v] = round(65536 * 10^((v - 8) / 10))
  */
-static const int32_t GAIN_Q16[16] = {
+static const int32_t __not_in_flash("pcm8_tbl") GAIN_Q16[16] = {
     10387,  13076,  16462,  20724,  26090,  32846,  41350,  52057,
     65536,  82505,  103868, 130762, 164619, 207243, 260904, 328458,
 };
 
 /* MSM6258V の ADPCM。ステップ番号の増減とステップ幅。 */
-static const int8_t STEP_ADJ[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
+static const int8_t __not_in_flash("pcm8_tbl") STEP_ADJ[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 
-static const int16_t STEP_SIZE[49] = {
+static const int16_t __not_in_flash("pcm8_tbl") STEP_SIZE[49] = {
     16,   17,   19,   21,   23,   25,   28,   31,   34,   37,   41,   45,  50,
     55,   60,   66,   73,   80,   88,   97,   107,  118,  130,  143,  157, 173,
     190,  209,  230,  253,  279,  307,  337,  371,  408,  449,  494,  544, 598,
@@ -200,7 +200,7 @@ static bool refill(pcm8_ch_t *c) {
     return true;
 }
 
-static int next_byte(pcm8_ch_t *c) {
+static int __not_in_flash_func(next_byte)(pcm8_ch_t *c) {
     if (c->buf_pos >= c->buf_len) {
         if (!refill(c)) {
             return -1;
@@ -390,7 +390,8 @@ static inline int16_t sat16(int32_t v, uint32_t *clip) {
  * ym3012_reader_read_pcm() から呼ばれる。first_frame は消費者によらない
  * 絶対フレーム番号なので、カーソルが 2 本あってもここは冪等でよい。
  */
-static void pcm8_mix(uint64_t first_frame, uint32_t frames, int16_t *inout) {
+static void __not_in_flash_func(pcm8_mix)(uint64_t first_frame, uint32_t frames,
+                                          int16_t *inout) {
     if (!s_enabled || s_quiet_frames >= PCM8_MIX_FRAMES) {
         return;
     }
@@ -478,7 +479,7 @@ void pcm8_init(void) {
     ym3012_set_mix_ready(s_rendered_total);
 }
 
-bool pcm8_service(void) {
+bool __not_in_flash_func(pcm8_service)(void) {
     uint64_t w = ym3012_write_total();
     if (s_rendered_total >= w) {
         return false;
