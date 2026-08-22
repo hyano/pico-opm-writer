@@ -46,17 +46,22 @@ static uint32_t s_setup_cycles;
  * なので φM は目標以下にしかならず、H/L 期間が公称値より短くならない。クロック
  * 切り替えの途中（sys_clk が中途半端な 48MHz のとき）に使う。
  */
-static void opm_clock_compute(uint32_t sys_hz, uint32_t phim_hz, bool round_up) {
+static void opm_clock_compute(uint32_t sys_hz, uint32_t phim_hz, bool round_up)
+{
     uint64_t div256;
 
-    if (round_up) {
+    if (round_up)
+    {
         uint64_t den = 2ull * phim_hz;
         uint64_t div = ((uint64_t)sys_hz + den - 1u) / den;
         div256 = div << 8;
-    } else {
+    }
+    else
+    {
         div256 = ((uint64_t)sys_hz * 128u + phim_hz / 2u) / phim_hz;
     }
-    if (div256 < 256u) {
+    if (div256 < 256u)
+    {
         div256 = 256u; /* 分周比 1 未満にはできない */
     }
 
@@ -77,7 +82,8 @@ static void opm_clock_compute(uint32_t sys_hz, uint32_t phim_hz, bool round_up) 
  * 進行中の H/L 期間は数百 ns 伸びるだけで、短くはならない。
  * clkdiv_restart は分周カウンタを 0 に戻すだけで PC / X / Y には触らない。
  */
-static void opm_clock_apply(void) {
+static void opm_clock_apply(void)
+{
     pio_sm_set_enabled(s_pio, s_sm, false);
     pio_sm_set_clkdiv_int_frac8(s_pio, s_sm, s_div_int, (uint8_t)s_div_frac);
     pio_sm_clkdiv_restart(s_pio, s_sm);
@@ -85,7 +91,8 @@ static void opm_clock_apply(void) {
 }
 
 /* φM の分周比を算出して PIO を起動する。 */
-static void opm_clock_start(void) {
+static void opm_clock_start(void)
+{
     opm_clock_compute(clock_get_hz(clk_sys), OPM_CLOCK_HZ, false);
 
     bool ok = pio_claim_free_sm_and_add_program(&opm_clock_program, &s_pio, &s_sm, &s_offset);
@@ -95,12 +102,14 @@ static void opm_clock_start(void) {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz) {
+void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz)
+{
     opm_clock_compute(sys_hz, phim_hz, false);
     opm_clock_apply();
 }
 
-void opm_clock_retune_up(uint32_t phim_hz) {
+void opm_clock_retune_up(uint32_t phim_hz)
+{
     opm_clock_compute(clock_get_hz(clk_sys), phim_hz, true);
     opm_clock_apply();
 }
@@ -111,16 +120,21 @@ void opm_clock_retune_up(uint32_t phim_hz) {
  * 現状は書き込み専用なので常に出力だが、将来 /RD を使ってステータスや
  * レジスタを読み出すときは、ここを入力へ倒してから /RD を叩くことになる。
  */
-static void opm_bus_set_dir(bool out) {
-    if (out) {
+static void opm_bus_set_dir(bool out)
+{
+    if (out)
+    {
         gpio_set_dir_out_masked(OPM_MASK_DATA);
-    } else {
+    }
+    else
+    {
         gpio_set_dir_in_masked(OPM_MASK_DATA);
     }
 }
 
 /* データバスと A0 を確定させてから /CS と /WR を制御する（1 バスサイクル） */
-static void opm_bus_cycle(bool a0, uint8_t value) {
+static void opm_bus_cycle(bool a0, uint8_t value)
+{
     /* データ・A0 と同時に /CS を L にする */
     gpio_put_masked(OPM_MASK_DATA | OPM_MASK_A0 | OPM_MASK_CS,
                     ((uint32_t)value << OPM_PIN_D0) | (a0 ? OPM_MASK_A0 : 0u));
@@ -134,7 +148,8 @@ static void opm_bus_cycle(bool a0, uint8_t value) {
     gpio_set_mask(OPM_MASK_CS);
 }
 
-void opm_init(void) {
+void opm_init(void)
+{
     /* 出力ピンをまとめて初期化。/CS・/WR・/RD・/IC は負論理なので H から始める。 */
     gpio_init_mask(OPM_MASK_ALL);
     gpio_put_masked(OPM_MASK_ALL, OPM_MASK_CS | OPM_MASK_WR | OPM_MASK_RD | OPM_MASK_IC);
@@ -152,7 +167,8 @@ void opm_init(void) {
     opm_reset();
 }
 
-void opm_write(uint8_t addr, uint8_t data) {
+void opm_write(uint8_t addr, uint8_t data)
+{
     /* アドレスサイクル */
     opm_bus_cycle(false, addr);
     busy_wait_us_32(OPM_T_ADDR_US);
@@ -162,21 +178,25 @@ void opm_write(uint8_t addr, uint8_t data) {
     busy_wait_us_32(OPM_T_DATA_US);
 }
 
-void opm_reset(void) {
+void opm_reset(void)
+{
     gpio_clr_mask(OPM_MASK_IC);
     sleep_ms(OPM_T_IC_LOW_MS);
     gpio_set_mask(OPM_MASK_IC);
     sleep_ms(OPM_T_IC_WAIT_MS);
 }
 
-void opm_clear(void) {
+void opm_clear(void)
+{
     /* 1. 全 8 チャンネルを KEY OFF */
-    for (uint8_t ch = 0; ch < 8; ch++) {
+    for (uint8_t ch = 0; ch < 8; ch++)
+    {
         opm_write(0x08, ch);
     }
 
     /* 2. 全 32 スロットの TL を最小音量に */
-    for (uint8_t reg = 0x60; reg <= 0x7f; reg++) {
+    for (uint8_t reg = 0x60; reg <= 0x7f; reg++)
+    {
         opm_write(reg, 0x7f);
     }
 
@@ -192,23 +212,28 @@ void opm_clear(void) {
     opm_write(0x1b, 0x00); /* 8. LFO 波形 / CT1・CT2 */
 
     /* 9. RL / FB / CONNECT */
-    for (uint8_t reg = 0x20; reg <= 0x27; reg++) {
+    for (uint8_t reg = 0x20; reg <= 0x27; reg++)
+    {
         opm_write(reg, 0x00);
     }
 }
 
-uint32_t opm_clock_hz_actual(void) {
+uint32_t opm_clock_hz_actual(void)
+{
     return s_clock_hz_actual;
 }
 
-uint32_t opm_clock_div_int(void) {
+uint32_t opm_clock_div_int(void)
+{
     return s_div_int;
 }
 
-uint32_t opm_clock_div_frac(void) {
+uint32_t opm_clock_div_frac(void)
+{
     return s_div_frac;
 }
 
-bool opm_irq_level(void) {
+bool opm_irq_level(void)
+{
     return gpio_get(OPM_PIN_IRQ);
 }

@@ -44,12 +44,12 @@
  */
 #define FF_USE_FASTSEEK 0
 
-#define FF_USE_EXPAND 0
-#define FF_USE_CHMOD 0
-#define FF_USE_LABEL 1 /* format 時の f_setlabel と storage status の表示 */
+#define FF_USE_EXPAND  0
+#define FF_USE_CHMOD   0
+#define FF_USE_LABEL   1 /* format 時の f_setlabel と storage status の表示 */
 #define FF_USE_FORWARD 0
 #define FF_USE_STRFUNC 0 /* f_gets / f_printf は使わない */
-#define FF_PRINT_LLI 0
+#define FF_PRINT_LLI   0
 #define FF_PRINT_FLOAT 0
 #define FF_STRF_ENCODE 0
 
@@ -63,28 +63,28 @@
  * 1 = 静的バッファ。3（ヒープ）は ff_memalloc を要求し ffsystem.c が必要になる。
  * 単一スレッドなので 1 で足りる。
  */
-#define FF_USE_LFN 1
-#define FF_MAX_LFN 255 /* 静的バッファは (255+1)*2 = 512 バイトだけ */
-#define FF_LFN_UNICODE 0 /* TCHAR = char。ANSI/OEM のまま扱う */
-#define FF_LFN_BUF 255
-#define FF_SFN_BUF 12
+#define FF_USE_LFN     1
+#define FF_MAX_LFN     255 /* 静的バッファは (255+1)*2 = 512 バイトだけ */
+#define FF_LFN_UNICODE 0   /* TCHAR = char。ANSI/OEM のまま扱う */
+#define FF_LFN_BUF     255
+#define FF_SFN_BUF     12
 
 /* ---- ドライブとボリューム ---------------------------------------------- */
 
-#define FF_FS_RPATH 0 /* "/VGM/xxx" の絶対パスしか使わない */
+#define FF_FS_RPATH   0  /* "/VGM/xxx" の絶対パスしか使わない */
 #define FF_PATH_DEPTH 10 /* FF_FS_RPATH 0 なので効かない */
 
-#define FF_VOLUMES 1
-#define FF_STR_VOLUME_ID 0 /* "0:" の接頭辞を書かなくてよい */
-#define FF_VOLUME_STRS "RAM"
+#define FF_VOLUMES         1
+#define FF_STR_VOLUME_ID   0 /* "0:" の接頭辞を書かなくてよい */
+#define FF_VOLUME_STRS     "RAM"
 #define FF_MULTI_PARTITION 0 /* SFD（MBR 無し）で作るので不要 */
 
 /* 論理セクタは 512 固定。MIN == MAX なので disk_ioctl(GET_SECTOR_SIZE) は呼ばれない。 */
 #define FF_MIN_SS 512
 #define FF_MAX_SS 512
 
-#define FF_LBA64 0 /* 2MiB。32bit LBA で足りる */
-#define FF_MIN_GPT 0x10000000
+#define FF_LBA64    0 /* 2MiB。32bit LBA で足りる */
+#define FF_MIN_GPT  0x10000000
 #define FF_USE_TRIM 0 /* 消去はフラッシュ側（flash_disk.c）で管理する */
 
 /* ---- システム ---------------------------------------------------------- */
@@ -98,11 +98,11 @@
 /*
  * RTC が無いので固定の日時を使う。これにより get_fattime() を実装しなくて済む。
  */
-#define FF_FS_NORTC 1
-#define FF_NORTC_MON 1
+#define FF_FS_NORTC   1
+#define FF_NORTC_MON  1
 #define FF_NORTC_MDAY 1
 #define FF_NORTC_YEAR 2026
-#define FF_FS_CRTIME 0
+#define FF_FS_CRTIME  0
 
 #define FF_FS_NOFSINFO 0 /* FAT32 用。FAT12 では効かない */
 
@@ -111,6 +111,6 @@
 
 /* 単一コア・単一スレッドなので ff_mutex_* を実装しなくて済む。 */
 #define FF_FS_REENTRANT 0
-#define FF_FS_TIMEOUT 1000
+#define FF_FS_TIMEOUT   1000
 
 #endif /* OPM_FFCONF_H */

@@ -69,7 +69,8 @@ static char s_selftest_detail[80];
  * 並びは受信順で bit0 から「無効 3 / 仮数 10 / 指数 3」を L・R の順に 2 組。
  */
 static uint32_t frame_pack(uint32_t ul, uint32_t ml, uint32_t el,
-                           uint32_t ur, uint32_t mr, uint32_t er) {
+                           uint32_t ur, uint32_t mr, uint32_t er)
+{
     return ((ul & 7u)) | ((ml & 0x3ffu) << 3) | ((el & 7u) << 13) |
            ((ur & 7u) << 16) | ((mr & 0x3ffu) << 19) | ((er & 7u) << 29);
 }
@@ -86,7 +87,8 @@ static uint32_t frame_pack(uint32_t ul, uint32_t ml, uint32_t el,
  * キャプチャ用 PIO は純粋にエッジ駆動でタイミング制約が無いので、CPU が
  * 好きな速さで叩いてよい。ここでは余裕を見て 1 クロック 2us で送る。
  */
-static void loopback_send_frame(uint32_t word) {
+static void loopback_send_frame(uint32_t word)
+{
     /* SH1 の立ち下がりでフレームの先頭を作る */
     gpio_put(LOOPBACK_PIN_SH1, 1);
     busy_wait_us_32(2);
@@ -94,7 +96,8 @@ static void loopback_send_frame(uint32_t word) {
     busy_wait_us_32(2);
 
     /* YM3012 は LSB first。word の bit0 が最初に出る。 */
-    for (uint i = 0; i < 32; i++) {
+    for (uint i = 0; i < 32; i++)
+    {
         gpio_put(LOOPBACK_PIN_SO, (word >> i) & 1u);
         gpio_put(LOOPBACK_PIN_PHI1, 0);
         busy_wait_us_32(1);
@@ -109,9 +112,11 @@ static void loopback_send_frame(uint32_t word) {
  * PIO は FUNCSEL に関係なくパッドの入力値を読めるので、ループバック用ピンは
  * SIO の出力にしたまま CPU から駆動してよい。DMA 開始前に 1 回だけ実行する。
  */
-static bool loopback_selftest(void) {
+static bool loopback_selftest(void)
+{
     /* 期待する (L, R) は左右で別の値にして、入れ替わりを検出できるようにする */
-    static const struct {
+    static const struct
+    {
         uint32_t ul, ml, el; /* L の無効ビット・仮数・指数 */
         uint32_t ur, mr, er; /* R の無効ビット・仮数・指数 */
         int16_t expect_l;
@@ -125,7 +130,8 @@ static bool loopback_selftest(void) {
         {3u, 511u, 1u, 4u, 768u, 2u, -1, 512},
     };
 
-    for (uint i = 0; i < 3; i++) {
+    for (uint i = 0; i < 3; i++)
+    {
         gpio_init(YM3012_LOOPBACK_BASE + i);
         gpio_set_dir(YM3012_LOOPBACK_BASE + i, GPIO_OUT);
     }
@@ -138,12 +144,14 @@ static bool loopback_selftest(void) {
     pio_sm_set_enabled(s_pio, s_sm, true);
 
     bool ok = true;
-    for (uint i = 0; i < count_of(cases) && ok; i++) {
+    for (uint i = 0; i < count_of(cases) && ok; i++)
+    {
         uint32_t word = frame_pack(cases[i].ul, cases[i].ml, cases[i].el,
                                    cases[i].ur, cases[i].mr, cases[i].er);
         loopback_send_frame(word);
 
-        if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+        if (pio_sm_is_rx_fifo_empty(s_pio, s_sm))
+        {
             snprintf(s_selftest_detail, sizeof(s_selftest_detail),
                      "FAIL case %u: no data pushed", i);
             ok = false;
@@ -151,7 +159,8 @@ static bool loopback_selftest(void) {
         }
 
         uint32_t got = pio_sm_get(s_pio, s_sm);
-        if (got != word) {
+        if (got != word)
+        {
             snprintf(s_selftest_detail, sizeof(s_selftest_detail),
                      "FAIL case %u: word %08lx expect %08lx",
                      i, (unsigned long)got, (unsigned long)word);
@@ -161,7 +170,8 @@ static bool loopback_selftest(void) {
 
         int16_t l, r;
         ym3012_frame_to_pcm(got, &l, &r);
-        if (l != cases[i].expect_l || r != cases[i].expect_r) {
+        if (l != cases[i].expect_l || r != cases[i].expect_r)
+        {
             snprintf(s_selftest_detail, sizeof(s_selftest_detail),
                      "FAIL case %u: pcm L=%d R=%d expect L=%d R=%d",
                      i, l, r, cases[i].expect_l, cases[i].expect_r);
@@ -174,11 +184,13 @@ static bool loopback_selftest(void) {
     pio_sm_clear_fifos(s_pio, s_sm);
 
     /* ループバック用ピンは入力へ戻して手を引く */
-    for (uint i = 0; i < 3; i++) {
+    for (uint i = 0; i < 3; i++)
+    {
         gpio_deinit(YM3012_LOOPBACK_BASE + i);
     }
 
-    if (ok) {
+    if (ok)
+    {
         snprintf(s_selftest_detail, sizeof(s_selftest_detail), "PASS");
     }
     return ok;
@@ -186,7 +198,8 @@ static bool loopback_selftest(void) {
 
 #else /* YM3012_LOOPBACK_ENABLED */
 
-static bool loopback_selftest(void) {
+static bool loopback_selftest(void)
+{
     snprintf(s_selftest_detail, sizeof(s_selftest_detail), "SKIP (disabled)");
     return true;
 }
@@ -195,7 +208,8 @@ static bool loopback_selftest(void) {
 
 /* ---- 初期化 ------------------------------------------------------------ */
 
-void ym3012_init(void) {
+void ym3012_init(void)
+{
     bool ok = pio_claim_free_sm_and_add_program(&ym3012_capture_program, &s_pio,
                                                 &s_sm, &s_offset);
     hard_assert(ok);
@@ -204,7 +218,8 @@ void ym3012_init(void) {
     s_selftest_ok = loopback_selftest();
 
     /* 本番の入力ピン。PIO は駆動しないので pindirs は入力のまま。 */
-    for (uint pin = YM3012_PIN_SO; pin <= YM3012_PIN_SH2; pin++) {
+    for (uint pin = YM3012_PIN_SO; pin <= YM3012_PIN_SH2; pin++)
+    {
         pio_gpio_init(s_pio, pin);
     }
     (void)pio_sm_set_consecutive_pindirs(s_pio, s_sm, YM3012_PIN_SO, 4, false);
@@ -236,17 +251,20 @@ void ym3012_init(void) {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-bool ym3012_selftest_passed(void) {
+bool ym3012_selftest_passed(void)
+{
     return s_selftest_ok;
 }
 
-const char *ym3012_selftest_detail(void) {
+const char *ym3012_selftest_detail(void)
+{
     return s_selftest_detail;
 }
 
 /* ---- リング操作 -------------------------------------------------------- */
 
-void __not_in_flash_func(ym3012_ring_poll)(void) {
+void __not_in_flash_func(ym3012_ring_poll)(void)
+{
     uintptr_t wp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->write_addr;
     uint32_t widx = (uint32_t)((wp - (uintptr_t)s_ring) >> 2);
 
@@ -258,7 +276,8 @@ void __not_in_flash_func(ym3012_ring_poll)(void) {
     s_last_widx = widx;
 }
 
-void ym3012_ring_resync(void) {
+void ym3012_ring_resync(void)
+{
     /*
      * 差分を積まずに基準点だけ張り直す。ym3012_ring_poll() の差分はリング長
      * 4096 フレームで剰余を取るので、フラッシュ書き込みのように 65.5ms を超えて
@@ -274,25 +293,30 @@ void ym3012_ring_resync(void) {
     ym3012_reader_sync(&s_reader);
 }
 
-uint64_t __not_in_flash_func(ym3012_write_total)(void) {
+uint64_t __not_in_flash_func(ym3012_write_total)(void)
+{
     return s_write_total;
 }
 
 /* ---- 読み出しカーソル -------------------------------------------------- */
 
-void ym3012_set_mixer(ym3012_mixer_t fn) {
+void ym3012_set_mixer(ym3012_mixer_t fn)
+{
     s_mixer = fn;
     s_mix_ready = s_write_total;
 }
 
-void __not_in_flash_func(ym3012_set_mix_ready)(uint64_t frame) {
+void __not_in_flash_func(ym3012_set_mix_ready)(uint64_t frame)
+{
     s_mix_ready = frame;
 }
 
 /* ---- 出力ゲイン（フェードアウト）-------------------------------------- */
 
-void ym3012_fade_start(uint64_t start_frame, uint32_t frames) {
-    if (frames == 0u) {
+void ym3012_fade_start(uint64_t start_frame, uint32_t frames)
+{
+    if (frames == 0u)
+    {
         ym3012_fade_clear();
         return;
     }
@@ -303,8 +327,10 @@ void ym3012_fade_start(uint64_t start_frame, uint32_t frames) {
     s_fade_frames = frames;
 }
 
-void ym3012_fade_clear(void) {
-    if (s_fade_frames == 0u) {
+void ym3012_fade_clear(void)
+{
+    if (s_fade_frames == 0u)
+    {
         return;
     }
     /*
@@ -321,21 +347,25 @@ void ym3012_fade_clear(void) {
     s_fade_release = s_write_total;
 }
 
-void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden) {
+void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden)
+{
     rd->read_total = s_write_total;
     rd->count_forbidden = count_forbidden;
 }
 
-uint32_t ym3012_reader_unread(const ym3012_reader_t *rd) {
+uint32_t ym3012_reader_unread(const ym3012_reader_t *rd)
+{
     uint64_t unread = s_write_total - rd->read_total;
     return (unread > YM3012_RING_FRAMES) ? YM3012_RING_FRAMES : (uint32_t)unread;
 }
 
-void __not_in_flash_func(ym3012_reader_sync)(ym3012_reader_t *rd) {
+void __not_in_flash_func(ym3012_reader_sync)(ym3012_reader_t *rd)
+{
     rd->read_total = s_write_total;
 }
 
-uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd) {
+uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd)
+{
     return rd->read_total;
 }
 
@@ -344,20 +374,27 @@ uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd) {
  * どのカーソルから何フレーム単位で読まれても同じ結果になる。
  */
 static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frames,
-                                            int16_t *inout) {
-    if (first_frame >= s_fade_release) {
+                                            int16_t *inout)
+{
+    if (first_frame >= s_fade_release)
+    {
         return; /* 解除済みの区間。まるごと素通し */
     }
 
-    for (uint32_t i = 0; i < frames; i++) {
+    for (uint32_t i = 0; i < frames; i++)
+    {
         uint32_t g = 0;
         uint64_t f = first_frame + i;
 
-        if (f < s_fade_start || f >= s_fade_release) {
+        if (f < s_fade_start || f >= s_fade_release)
+        {
             g = 65536u; /* まだ始まっていない / もう解除された */
-        } else {
+        }
+        else
+        {
             uint64_t d = f - s_fade_start;
-            if (d < (uint64_t)s_fade_frames) {
+            if (d < (uint64_t)s_fade_frames)
+            {
                 /* 残り比 q を Q16 で求め、その 2 乗をゲインにする */
                 uint32_t t = (uint32_t)(((uint64_t)(uint32_t)d * s_fade_inv) >> 16);
                 uint32_t q = (t < 65536u) ? (65536u - t) : 0u;
@@ -365,7 +402,8 @@ static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frame
             }
         }
 
-        if (g == 65536u) {
+        if (g == 65536u)
+        {
             continue;
         }
         inout[2u * i] = (int16_t)(((int32_t)inout[2u * i] * (int32_t)g) >> 16);
@@ -374,70 +412,83 @@ static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frame
 }
 
 uint32_t __not_in_flash_func(ym3012_reader_read_pcm)(ym3012_reader_t *rd, int16_t *out,
-                                                    uint32_t max_frames) {
+                                                     uint32_t max_frames)
+{
     uint32_t n = ym3012_reader_unread(rd);
-    if (n > max_frames) {
+    if (n > max_frames)
+    {
         n = max_frames;
     }
 
     /* ミキサが描き終えたところまでしか渡さない（混ぜ損ねを作らない） */
-    if (s_mixer != NULL) {
-        if (rd->read_total >= s_mix_ready) {
+    if (s_mixer != NULL)
+    {
+        if (rd->read_total >= s_mix_ready)
+        {
             return 0u;
         }
         uint64_t ready = s_mix_ready - rd->read_total;
-        if ((uint64_t)n > ready) {
+        if ((uint64_t)n > ready)
+        {
             n = (uint32_t)ready;
         }
     }
 
-    if (n == 0u) {
+    if (n == 0u)
+    {
         return 0u;
     }
 
     /* リング末尾をまたぐ分は次回に回す（呼び出し側は残量を見て再度呼ぶ） */
     uint32_t ridx = (uint32_t)(rd->read_total & (YM3012_RING_FRAMES - 1u));
     uint32_t to_end = YM3012_RING_FRAMES - ridx;
-    if (n > to_end) {
+    if (n > to_end)
+    {
         n = to_end;
     }
 
     const uint32_t *src = &s_ring[ridx];
     uint32_t forbidden = 0;
 
-    for (uint32_t i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++)
+    {
         uint32_t frame = src[i];
         uint16_t wl = (uint16_t)frame;
         uint16_t wr = (uint16_t)(frame >> 16);
 
         /* 禁止コード E=0 の数はビット位相が正しいかの指標になる */
-        if ((((uint32_t)wl >> 13) & 7u) == 0u) {
+        if ((((uint32_t)wl >> 13) & 7u) == 0u)
+        {
             forbidden++;
         }
-        if ((((uint32_t)wr >> 13) & 7u) == 0u) {
+        if ((((uint32_t)wr >> 13) & 7u) == 0u)
+        {
             forbidden++;
         }
 
-        out[2u * i] = ym3012_word_to_pcm(wl);       /* L */
-        out[2u * i + 1u] = ym3012_word_to_pcm(wr);  /* R */
+        out[2u * i] = ym3012_word_to_pcm(wl);      /* L */
+        out[2u * i + 1u] = ym3012_word_to_pcm(wr); /* R */
     }
 
     /*
      * 変換した PCM に別の音源を混ぜる（MDX の ADPCM パート）。
      * ここは USB キャプチャと I2S の唯一の合流点なので、1 箇所で両方に効く。
      */
-    if (s_mixer != NULL) {
+    if (s_mixer != NULL)
+    {
         s_mixer(rd->read_total, n, out);
     }
 
     /* フェードアウト。混ぜたあとに掛けるので ADPCM も一緒に落ちる。 */
-    if (s_fade_frames != 0u) {
+    if (s_fade_frames != 0u)
+    {
         fade_apply(rd->read_total, n, out);
     }
 
     rd->read_total += n;
 
-    if (forbidden != 0u && rd->count_forbidden) {
+    if (forbidden != 0u && rd->count_forbidden)
+    {
         stats_count_forbidden(forbidden);
     }
     return n;
@@ -445,25 +496,31 @@ uint32_t __not_in_flash_func(ym3012_reader_read_pcm)(ym3012_reader_t *rd, int16_
 
 /* ---- 既定カーソル（USB キャプチャ用）---------------------------------- */
 
-uint32_t ym3012_unread(void) {
+uint32_t ym3012_unread(void)
+{
     return ym3012_reader_unread(&s_reader);
 }
 
-void ym3012_ring_sync(void) {
+void ym3012_ring_sync(void)
+{
     ym3012_reader_sync(&s_reader);
 }
 
-uint64_t ym3012_read_total(void) {
+uint64_t ym3012_read_total(void)
+{
     return ym3012_reader_read_total(&s_reader);
 }
 
-uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames) {
+uint32_t ym3012_read_pcm(int16_t *out, uint32_t max_frames)
+{
     return ym3012_reader_read_pcm(&s_reader, out, max_frames);
 }
 
-bool ym3012_check_rxstall(void) {
+bool ym3012_check_rxstall(void)
+{
     uint32_t mask = 1u << (PIO_FDEBUG_RXSTALL_LSB + s_sm);
-    if ((s_pio->fdebug & mask) == 0u) {
+    if ((s_pio->fdebug & mask) == 0u)
+    {
         return false;
     }
     s_pio->fdebug = mask; /* 1 を書いてクリア */
@@ -472,9 +529,11 @@ bool ym3012_check_rxstall(void) {
 
 /* ---- PCM 変換の自己テスト ---------------------------------------------- */
 
-bool ym3012_pcm_selftest(const char **detail) {
+bool ym3012_pcm_selftest(const char **detail)
+{
     /* ワードは受信順 bit0 から「無効 3 / 仮数 10 / 指数 3」 */
-    static const struct {
+    static const struct
+    {
         uint32_t undef;
         uint32_t m;
         uint32_t e;
@@ -511,12 +570,14 @@ bool ym3012_pcm_selftest(const char **detail) {
 
     static char msg[80];
 
-    for (uint i = 0; i < count_of(cases); i++) {
+    for (uint i = 0; i < count_of(cases); i++)
+    {
         uint16_t w = (uint16_t)((cases[i].undef & 7u) |
                                 ((cases[i].m & 0x3ffu) << 3) |
                                 ((cases[i].e & 7u) << 13));
         int16_t got = ym3012_word_to_pcm(w);
-        if (got != cases[i].expect) {
+        if (got != cases[i].expect)
+        {
             snprintf(msg, sizeof(msg), "FAIL m=%u e=%u: %d expect %d",
                      (unsigned)cases[i].m, (unsigned)cases[i].e, got,
                      cases[i].expect);
@@ -529,14 +590,17 @@ bool ym3012_pcm_selftest(const char **detail) {
      * 全域の不変量。E=1..7 で仮数を 1 増やすとちょうど 1<<(E-1) 増え、
      * 値域が -32768..+32704 に収まることを確認する。
      */
-    for (uint32_t e = 1u; e <= 7u; e++) {
+    for (uint32_t e = 1u; e <= 7u; e++)
+    {
         int32_t step = (int32_t)1 << (e - 1u);
-        for (uint32_t m = 0u; m < 1023u; m++) {
+        for (uint32_t m = 0u; m < 1023u; m++)
+        {
             uint16_t w0 = (uint16_t)((m << 3) | (e << 13));
             uint16_t w1 = (uint16_t)(((m + 1u) << 3) | (e << 13));
             int32_t d = (int32_t)ym3012_word_to_pcm(w1) -
                         (int32_t)ym3012_word_to_pcm(w0);
-            if (d != step) {
+            if (d != step)
+            {
                 snprintf(msg, sizeof(msg), "FAIL step m=%u e=%u: %ld expect %ld",
                          (unsigned)m, (unsigned)e, (long)d, (long)step);
                 *detail = msg;
@@ -549,7 +613,8 @@ bool ym3012_pcm_selftest(const char **detail) {
     uint32_t frame = frame_pack(7u, 1023u, 7u, 0u, 0u, 7u);
     int16_t l, r;
     ym3012_frame_to_pcm(frame, &l, &r);
-    if (l != 32704 || r != -32768) {
+    if (l != 32704 || r != -32768)
+    {
         snprintf(msg, sizeof(msg), "FAIL frame: L=%d R=%d expect L=32704 R=-32768",
                  l, r);
         *detail = msg;

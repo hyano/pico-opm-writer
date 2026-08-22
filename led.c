@@ -16,16 +16,17 @@
  */
 
 /* 基本パターン：状態ごとの定義 */
-static const char s_pattern_idle[] = "1";              /* 常時点灯 */
-static const char s_pattern_capture[] = "1111100000";  /* 500ms ON / 500ms OFF */
+static const char s_pattern_idle[] = "1";                 /* 常時点灯 */
+static const char s_pattern_capture[] = "1111100000";     /* 500ms ON / 500ms OFF */
 static const char s_pattern_error[] = "1010100000000000"; /* 100ms ON/OFF x3 → 1s OFF */
 
 /* オーバーレイ（コマンド受信） */
-static const char s_pattern_command[] = "101";         /* 100ms ON / OFF / ON */
+static const char s_pattern_command[] = "101"; /* 100ms ON / OFF / ON */
 
 /* ---- 状態管理 ------------------------------------------------------------ */
 
-static struct {
+static struct
+{
     led_state_t state;       /* 現在の基本状態 */
     uint32_t pattern_idx;    /* 基本パターンの現在スロット */
     uint32_t overlay_idx;    /* オーバーレイの現在スロット。-1 = 非アクティブ */
@@ -45,41 +46,50 @@ static struct {
  * 状態に応じた基本パターンへのポインタと長さを取得する。
  * pattern_idx の値が有効か確認済みの前提で呼び出す。
  */
-static const char* pattern_for_state(led_state_t state, uint32_t *out_len) {
-    switch (state) {
-        case LED_STATE_IDLE:
-            *out_len = sizeof(s_pattern_idle) - 1;
-            return s_pattern_idle;
-        case LED_STATE_CAPTURE:
-            *out_len = sizeof(s_pattern_capture) - 1;
-            return s_pattern_capture;
-        case LED_STATE_ERROR:
-            *out_len = sizeof(s_pattern_error) - 1;
-            return s_pattern_error;
-        default:
-            *out_len = 0;
-            return "";
+static const char *pattern_for_state(led_state_t state, uint32_t *out_len)
+{
+    switch (state)
+    {
+    case LED_STATE_IDLE:
+        *out_len = sizeof(s_pattern_idle) - 1;
+        return s_pattern_idle;
+    case LED_STATE_CAPTURE:
+        *out_len = sizeof(s_pattern_capture) - 1;
+        return s_pattern_capture;
+    case LED_STATE_ERROR:
+        *out_len = sizeof(s_pattern_error) - 1;
+        return s_pattern_error;
+    default:
+        *out_len = 0;
+        return "";
     }
 }
 
 /* ---- 内部ヘルパー ------------------------------------------------------ */
 
 /* LED を更新して、現在のスロット位置でビットを読み取る */
-static void led_update_from_patterns(void) {
+static void led_update_from_patterns(void)
+{
     uint32_t active_idx = s_led.pattern_idx;
 
     /* オーバーレイがアクティブなら優先する */
-    if (s_led.overlay_idx < (uint32_t)sizeof(s_pattern_command) - 1) {
+    if (s_led.overlay_idx < (uint32_t)sizeof(s_pattern_command) - 1)
+    {
         active_idx = s_led.overlay_idx;
         /* パターン文字 '1' = ON（'0' = OFF） */
         s_led.led_level = (s_pattern_command[active_idx] == '1');
-    } else {
+    }
+    else
+    {
         /* 基本パターンを使う */
         uint32_t pattern_len = 0;
         const char *pattern = pattern_for_state(s_led.state, &pattern_len);
-        if (pattern_len > 0 && active_idx < pattern_len) {
+        if (pattern_len > 0 && active_idx < pattern_len)
+        {
             s_led.led_level = (pattern[active_idx] == '1');
-        } else {
+        }
+        else
+        {
             s_led.led_level = false;
         }
     }
@@ -90,7 +100,8 @@ static void led_update_from_patterns(void) {
 
 /* ---- API 実装 ------------------------------------------------------------ */
 
-void led_init(void) {
+void led_init(void)
+{
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 
@@ -103,8 +114,10 @@ void led_init(void) {
     led_update_from_patterns();
 }
 
-void led_set_state(led_state_t state) {
-    if (state != s_led.state) {
+void led_set_state(led_state_t state)
+{
+    if (state != s_led.state)
+    {
         /* 状態が変わったので位相をリセット */
         s_led.state = state;
         s_led.pattern_idx = 0;
@@ -114,19 +127,22 @@ void led_set_state(led_state_t state) {
     /* 同じ状態を再設定した場合は位相を維持（無変更） */
 }
 
-void led_notify_command(void) {
+void led_notify_command(void)
+{
     /* オーバーレイを先頭から再スタート */
     s_led.overlay_idx = 0;
     s_led.last_update_us = time_us_32();
     led_update_from_patterns();
 }
 
-void led_service(void) {
+void led_service(void)
+{
     uint32_t now_us = time_us_32();
     uint32_t elapsed_us = now_us - s_led.last_update_us;
 
     /* 100ms (100000us) 以上経過していなければ何もしない */
-    if (elapsed_us < 100000u) {
+    if (elapsed_us < 100000u)
+    {
         return;
     }
 
@@ -136,21 +152,26 @@ void led_service(void) {
     s_led.last_update_us += slots_advanced * 100000u;
 
     /* オーバーレイがアクティブか判定 */
-    if (s_led.overlay_idx < (uint32_t)sizeof(s_pattern_command) - 1) {
+    if (s_led.overlay_idx < (uint32_t)sizeof(s_pattern_command) - 1)
+    {
         /* オーバーレイの進行 */
         s_led.overlay_idx += slots_advanced;
 
-        if (s_led.overlay_idx >= (uint32_t)sizeof(s_pattern_command) - 1) {
+        if (s_led.overlay_idx >= (uint32_t)sizeof(s_pattern_command) - 1)
+        {
             /* オーバーレイが終了したので基本パターンを位相 0 から再開 */
             s_led.overlay_idx = (uint32_t)(-1);
             s_led.pattern_idx = 0;
         }
-    } else {
+    }
+    else
+    {
         /* 基本パターンの進行 */
         uint32_t pattern_len = 0;
         pattern_for_state(s_led.state, &pattern_len);
 
-        if (pattern_len > 0) {
+        if (pattern_len > 0)
+        {
             s_led.pattern_idx = (s_led.pattern_idx + slots_advanced) % pattern_len;
         }
     }

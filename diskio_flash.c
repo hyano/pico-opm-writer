@@ -28,8 +28,10 @@ _Static_assert(FF_MIN_SS == FF_MAX_SS, "論理セクタ長は固定にするこ�
 
 /* ---- 状態 -------------------------------------------------------------- */
 
-DSTATUS disk_status(BYTE pdrv) {
-    if (pdrv != 0) {
+DSTATUS disk_status(BYTE pdrv)
+{
+    if (pdrv != 0)
+    {
         return STA_NOINIT;
     }
 
@@ -37,38 +39,47 @@ DSTATUS disk_status(BYTE pdrv) {
      * HOST モード中はフラッシュの持ち主が PC（USB MSC）なので、FatFs 側からも
      * 触れないようにしておく。storage 側で f_unmount しているうえの二重の防御。
      */
-    if (!storage_fatfs_may_access()) {
+    if (!storage_fatfs_may_access())
+    {
         return STA_NOINIT;
     }
 
     return 0;
 }
 
-DSTATUS disk_initialize(BYTE pdrv) {
+DSTATUS disk_initialize(BYTE pdrv)
+{
     return disk_status(pdrv);
 }
 
 /* ---- 読み書き ---------------------------------------------------------- */
 
-DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
-    if (pdrv != 0) {
+DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
+{
+    if (pdrv != 0)
+    {
         return RES_PARERR;
     }
-    if (!storage_fatfs_may_access()) {
+    if (!storage_fatfs_may_access())
+    {
         return RES_NOTRDY;
     }
-    if (!flash_disk_read((uint32_t)sector, buff, (uint32_t)count)) {
+    if (!flash_disk_read((uint32_t)sector, buff, (uint32_t)count))
+    {
         return RES_PARERR;
     }
     return RES_OK;
 }
 
 #if !FF_FS_READONLY
-DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
-    if (pdrv != 0) {
+DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
+{
+    if (pdrv != 0)
+    {
         return RES_PARERR;
     }
-    if (!storage_fatfs_may_access()) {
+    if (!storage_fatfs_may_access())
+    {
         return RES_NOTRDY;
     }
 
@@ -80,15 +91,19 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
      * フォーマットは利用者が明示的に叩いたコマンドなので待たせてよい。
      * 数回の I2S アンダーランは避けられない（README に記載）。
      */
-    for (;;) {
+    for (;;)
+    {
         int rc = flash_disk_write((uint32_t)sector, buff, (uint32_t)count);
-        if (rc == FLASH_DISK_OK) {
+        if (rc == FLASH_DISK_OK)
+        {
             return RES_OK;
         }
-        if (rc != FLASH_DISK_BUSY) {
+        if (rc != FLASH_DISK_BUSY)
+        {
             return RES_PARERR;
         }
-        if (!flash_disk_flush_one()) {
+        if (!flash_disk_flush_one())
+        {
             return RES_ERROR; /* 書き出せない = フラッシュ側の異常 */
         }
     }
@@ -97,12 +112,15 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
 
 /* ---- 制御 -------------------------------------------------------------- */
 
-DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
-    if (pdrv != 0) {
+DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff)
+{
+    if (pdrv != 0)
+    {
         return RES_PARERR;
     }
 
-    switch (cmd) {
+    switch (cmd)
+    {
     case CTRL_SYNC:
         return flash_disk_flush_all() ? RES_OK : RES_ERROR;
 

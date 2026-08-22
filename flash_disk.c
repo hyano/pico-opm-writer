@@ -33,7 +33,8 @@ _Static_assert(FLASH_DISK_ES % FLASH_PAGE_SIZE == 0,
  */
 static uint8_t s_data[FLASH_DISK_CACHE_LINES][FLASH_DISK_ES] __attribute__((aligned(4)));
 
-static struct {
+static struct
+{
     uint32_t es_index; /* 担当する 4KiB ブロック番号 */
     uint32_t lru;      /* 単調増加のアクセス通し番号。小さいほど古い */
     bool valid;
@@ -45,15 +46,19 @@ static bool s_failed;
 
 /* ---- XIP 直読み -------------------------------------------------------- */
 
-static const uint8_t *xip_at(uint32_t offset_in_region) {
+static const uint8_t *xip_at(uint32_t offset_in_region)
+{
     return (const uint8_t *)(XIP_BASE + FLASH_FATFS_OFFSET + offset_in_region);
 }
 
 /* ---- 行の割り当て ------------------------------------------------------ */
 
-static int find_line(uint32_t es_index) {
-    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++) {
-        if (s_meta[i].valid && s_meta[i].es_index == es_index) {
+static int find_line(uint32_t es_index)
+{
+    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++)
+    {
+        if (s_meta[i].valid && s_meta[i].es_index == es_index)
+        {
             return (int)i;
         }
     }
@@ -65,34 +70,42 @@ static int find_line(uint32_t es_index) {
  * XIP から 4KiB 読み込んで満たす。全行が valid かつ追い出す相手が dirty なら
  * -1（呼び出し側は BUSY として扱い、書き出し後に再試行する）。
  */
-static int acquire_line(uint32_t es_index) {
+static int acquire_line(uint32_t es_index)
+{
     int idx = find_line(es_index);
-    if (idx >= 0) {
+    if (idx >= 0)
+    {
         s_meta[idx].lru = ++s_lru_clock;
         return idx;
     }
 
     /* 空き行を探す */
     int victim = -1;
-    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++) {
-        if (!s_meta[i].valid) {
+    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++)
+    {
+        if (!s_meta[i].valid)
+        {
             victim = (int)i;
             break;
         }
     }
 
     /* 無ければ clean な行のうち最も古いものを再利用する */
-    if (victim < 0) {
+    if (victim < 0)
+    {
         uint32_t oldest = UINT32_MAX;
-        for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++) {
-            if (!s_meta[i].dirty && s_meta[i].lru < oldest) {
+        for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++)
+        {
+            if (!s_meta[i].dirty && s_meta[i].lru < oldest)
+            {
                 oldest = s_meta[i].lru;
                 victim = (int)i;
             }
         }
     }
 
-    if (victim < 0) {
+    if (victim < 0)
+    {
         return -1; /* 全行 dirty。書き出すまで待つ */
     }
 
@@ -106,32 +119,38 @@ static int acquire_line(uint32_t es_index) {
 
 /* ---- 初期化 ------------------------------------------------------------ */
 
-void flash_disk_init(void) {
+void flash_disk_init(void)
+{
     memset(s_meta, 0, sizeof(s_meta));
     s_lru_clock = 0;
     s_failed = false;
 }
 
-void flash_disk_invalidate(void) {
+void flash_disk_invalidate(void)
+{
     memset(s_meta, 0, sizeof(s_meta));
     s_lru_clock = 0;
 }
 
-bool flash_disk_failed(void) {
+bool flash_disk_failed(void)
+{
     return s_failed;
 }
 
 /* ---- 読み書き ---------------------------------------------------------- */
 
-bool flash_disk_read(uint32_t lba, void *dst, uint32_t count) {
+bool flash_disk_read(uint32_t lba, void *dst, uint32_t count)
+{
     if (count == 0u || lba > FLASH_DISK_LBA_COUNT ||
-        count > FLASH_DISK_LBA_COUNT - lba) {
+        count > FLASH_DISK_LBA_COUNT - lba)
+    {
         return false;
     }
 
     uint8_t *out = (uint8_t *)dst;
 
-    for (uint32_t i = 0; i < count; i++) {
+    for (uint32_t i = 0; i < count; i++)
+    {
         uint32_t l = lba + i;
         uint32_t es = l / FLASH_DISK_LBA_PER_ES;
         uint32_t off = (l % FLASH_DISK_LBA_PER_ES) * FLASH_DISK_SS;
@@ -141,9 +160,12 @@ bool flash_disk_read(uint32_t lba, void *dst, uint32_t count) {
          * それ以外は XIP から直接読む（キャッシュを汚さない）。
          */
         int idx = find_line(es);
-        if (idx >= 0 && s_meta[idx].dirty) {
+        if (idx >= 0 && s_meta[idx].dirty)
+        {
             memcpy(out, &s_data[idx][off], FLASH_DISK_SS);
-        } else {
+        }
+        else
+        {
             memcpy(out, xip_at(es * FLASH_DISK_ES + off), FLASH_DISK_SS);
         }
         out += FLASH_DISK_SS;
@@ -152,21 +174,25 @@ bool flash_disk_read(uint32_t lba, void *dst, uint32_t count) {
     return true;
 }
 
-int flash_disk_write(uint32_t lba, const void *src, uint32_t count) {
+int flash_disk_write(uint32_t lba, const void *src, uint32_t count)
+{
     if (count == 0u || lba > FLASH_DISK_LBA_COUNT ||
-        count > FLASH_DISK_LBA_COUNT - lba) {
+        count > FLASH_DISK_LBA_COUNT - lba)
+    {
         return FLASH_DISK_ERR;
     }
 
     const uint8_t *in = (const uint8_t *)src;
 
-    for (uint32_t i = 0; i < count; i++) {
+    for (uint32_t i = 0; i < count; i++)
+    {
         uint32_t l = lba + i;
         uint32_t es = l / FLASH_DISK_LBA_PER_ES;
         uint32_t off = (l % FLASH_DISK_LBA_PER_ES) * FLASH_DISK_SS;
 
         int idx = acquire_line(es);
-        if (idx < 0) {
+        if (idx < 0)
+        {
             return FLASH_DISK_BUSY;
         }
 
@@ -180,10 +206,13 @@ int flash_disk_write(uint32_t lba, const void *src, uint32_t count) {
 
 /* ---- フラッシュへの書き出し -------------------------------------------- */
 
-uint32_t flash_disk_dirty_lines(void) {
+uint32_t flash_disk_dirty_lines(void)
+{
     uint32_t n = 0;
-    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++) {
-        if (s_meta[i].valid && s_meta[i].dirty) {
+    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++)
+    {
+        if (s_meta[i].valid && s_meta[i].dirty)
+        {
             n++;
         }
     }
@@ -191,10 +220,13 @@ uint32_t flash_disk_dirty_lines(void) {
 }
 
 /* 消去済み（全 0xFF）なら消去を省ける。新品基板の初回書き込みが速くなる。 */
-static bool region_is_erased(uint32_t offset_in_region) {
+static bool region_is_erased(uint32_t offset_in_region)
+{
     const uint32_t *p = (const uint32_t *)(const void *)xip_at(offset_in_region);
-    for (uint32_t i = 0; i < FLASH_DISK_ES / 4u; i++) {
-        if (p[i] != 0xffffffffu) {
+    for (uint32_t i = 0; i < FLASH_DISK_ES / 4u; i++)
+    {
+        if (p[i] != 0xffffffffu)
+        {
             return false;
         }
     }
@@ -202,32 +234,39 @@ static bool region_is_erased(uint32_t offset_in_region) {
 }
 
 /* flash_safe_execute() から IRQ を落とした状態で呼ばれる */
-typedef struct {
-    uint32_t offset;      /* フラッシュ先頭からのオフセット */
-    const uint8_t *data;  /* RAM 上の 4KiB */
+typedef struct
+{
+    uint32_t offset;     /* フラッシュ先頭からのオフセット */
+    const uint8_t *data; /* RAM 上の 4KiB */
     bool need_erase;
 } flush_arg_t;
 
-static void do_flush(void *param) {
+static void do_flush(void *param)
+{
     const flush_arg_t *a = (const flush_arg_t *)param;
 
-    if (a->need_erase) {
+    if (a->need_erase)
+    {
         flash_range_erase(a->offset, FLASH_DISK_ES);
     }
     flash_range_program(a->offset, a->data, FLASH_DISK_ES);
 }
 
-bool flash_disk_flush_one(void) {
+bool flash_disk_flush_one(void)
+{
     /* 最も古い dirty 行を選ぶ */
     int idx = -1;
     uint32_t oldest = UINT32_MAX;
-    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++) {
-        if (s_meta[i].valid && s_meta[i].dirty && s_meta[i].lru < oldest) {
+    for (uint32_t i = 0; i < FLASH_DISK_CACHE_LINES; i++)
+    {
+        if (s_meta[i].valid && s_meta[i].dirty && s_meta[i].lru < oldest)
+        {
             oldest = s_meta[i].lru;
             idx = (int)i;
         }
     }
-    if (idx < 0) {
+    if (idx < 0)
+    {
         return false;
     }
 
@@ -257,7 +296,8 @@ bool flash_disk_flush_one(void) {
     stats_count_flash_write();
     stats_flash_blackout_add(elapsed);
 
-    if (rc != PICO_OK) {
+    if (rc != PICO_OK)
+    {
         s_failed = true;
         return false;
     }
@@ -266,10 +306,13 @@ bool flash_disk_flush_one(void) {
     return true;
 }
 
-bool flash_disk_flush_all(void) {
+bool flash_disk_flush_all(void)
+{
     bool ok = true;
-    while (flash_disk_dirty_lines() > 0u) {
-        if (!flash_disk_flush_one()) {
+    while (flash_disk_dirty_lines() > 0u)
+    {
+        if (!flash_disk_flush_one())
+        {
             ok = false;
             break;
         }

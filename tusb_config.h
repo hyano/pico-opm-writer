@@ -61,8 +61,8 @@
 #define CFG_TUD_MSC_EP_BUFSIZE 512
 
 /* 残りのクラスは使わない */
-#define CFG_TUD_HID 0
-#define CFG_TUD_MIDI 0
+#define CFG_TUD_HID    0
+#define CFG_TUD_MIDI   0
 #define CFG_TUD_VENDOR 0
 
 /*

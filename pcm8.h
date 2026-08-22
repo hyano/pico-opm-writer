@@ -41,9 +41,9 @@
 #define PCM8_CH_MAX 8u
 
 /* PDX のエントリ表。1 バンク = 96 音 x 8 バイト (BE offset + BE length)。 */
-#define PDX_BANK_NOTES 96u
+#define PDX_BANK_NOTES  96u
 #define PDX_ENTRY_BYTES 8u
-#define PDX_BANK_BYTES (PDX_BANK_NOTES * PDX_ENTRY_BYTES)
+#define PDX_BANK_BYTES  (PDX_BANK_NOTES * PDX_ENTRY_BYTES)
 
 /* チャンネルごとの先読み量。15.6kHz の ADPCM でも 131ms 分になる。 */
 #define PCM8_PREFETCH_BYTES 1024u
@@ -116,10 +116,10 @@ void pcm8_iocs_mod(bool abort);
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 
-uint32_t pcm8_active_mask(void);  /* 発音中チャンネルのビットマスク */
+uint32_t pcm8_active_mask(void); /* 発音中チャンネルのビットマスク */
 uint32_t pcm8_active_count(void);
-uint32_t pcm8_pan(void);          /* 現在の定位（全チャネル共通） */
-uint32_t pcm8_read_count(void);   /* PDX を読んだ回数 */
+uint32_t pcm8_pan(void);        /* 現在の定位（全チャネル共通） */
+uint32_t pcm8_read_count(void); /* PDX を読んだ回数 */
 
 /*
  * キーオンの内訳。`mdx play`（PDX を開いた時点）と `s 0` の両方で 0 に戻る。

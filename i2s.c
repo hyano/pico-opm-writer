@@ -68,7 +68,8 @@ static bool s_enabled = true;
 
 /* ---- リング操作 -------------------------------------------------------- */
 
-static void i2s_poll(void) {
+static void i2s_poll(void)
+{
     uintptr_t rp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->read_addr;
     uint32_t ridx = (uint32_t)((rp - (uintptr_t)s_ring) >> 2);
 
@@ -78,14 +79,18 @@ static void i2s_poll(void) {
 }
 
 /* 書き込み位置から frames 個を無音で埋める */
-static void fill_silence(uint32_t frames) {
-    while (frames > 0u) {
+static void fill_silence(uint32_t frames)
+{
+    while (frames > 0u)
+    {
         uint32_t widx = (uint32_t)(s_fill_total & (I2S_RING_FRAMES - 1u));
         uint32_t n = I2S_RING_FRAMES - widx;
-        if (n > frames) {
+        if (n > frames)
+        {
             n = frames;
         }
-        for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t i = 0; i < n; i++)
+        {
             s_ring[widx + i] = 0u;
         }
         s_fill_total += n;
@@ -105,11 +110,13 @@ static void fill_silence(uint32_t frames) {
  * φM 側が何を入れていてもこの関係だけで決まるので、クロック切り替えの途中で
  * 使う切り上げ分周比にもそのまま追従する。
  */
-static void i2s_compute_div(void) {
+static void i2s_compute_div(void)
+{
     s_div256 = (((opm_clock_div_int() << 8) | opm_clock_div_frac()) * 2u);
 }
 
-void i2s_init(void) {
+void i2s_init(void)
+{
     bool ok = pio_claim_free_sm_and_add_program(&i2s_out_program, &s_pio, &s_sm, &s_offset);
     hard_assert(ok);
 
@@ -147,12 +154,14 @@ void i2s_init(void) {
 
 /* ---- 毎周回の処理 ------------------------------------------------------ */
 
-bool __not_in_flash_func(i2s_service)(void) {
+bool __not_in_flash_func(i2s_service)(void)
+{
     i2s_poll();
 
     int64_t depth = (int64_t)(s_fill_total - s_dma_total);
 
-    if (depth <= 0) {
+    if (depth <= 0)
+    {
         /*
          * アンダーラン。ENDLESS のリング DMA は止まらないので、DMA は無音ではなく
          * 古いリング内容を再生している。溜まった古いフレームを捨て、先行分を
@@ -168,13 +177,15 @@ bool __not_in_flash_func(i2s_service)(void) {
 
     stats_i2s_update((uint32_t)depth);
 
-    if ((uint64_t)depth >= I2S_TARGET_FRAMES) {
+    if ((uint64_t)depth >= I2S_TARGET_FRAMES)
+    {
         return false; /* 先行量は足りている */
     }
 
     uint32_t want = I2S_TARGET_FRAMES - (uint32_t)depth;
 
-    if (!s_enabled) {
+    if (!s_enabled)
+    {
         /*
          * 無効中。ソースを読まずに無音で埋める。リング全体が無音になるので、
          * フラッシュ消去でサービスが止まって DMA が古い内容を再生しても無音のまま。
@@ -185,10 +196,12 @@ bool __not_in_flash_func(i2s_service)(void) {
 
     bool worked = false;
 
-    while (want > 0u) {
+    while (want > 0u)
+    {
         uint32_t widx = (uint32_t)(s_fill_total & (I2S_RING_FRAMES - 1u));
         uint32_t n = I2S_RING_FRAMES - widx; /* 出力リング末尾で切る */
-        if (n > want) {
+        if (n > want)
+        {
             n = want;
         }
 
@@ -199,7 +212,8 @@ bool __not_in_flash_func(i2s_service)(void) {
          * 並べ替えは要らない。
          */
         n = ym3012_reader_read_pcm(&s_reader, (int16_t *)&s_ring[widx], n);
-        if (n == 0u) {
+        if (n == 0u)
+        {
             /*
              * ソースに未処理が無い。レートは厳密に一致しているので、ポーリングの
              * 位相差で一瞬空になるのは正常。ここで無音を差し込むと差し込んだ分だけ
@@ -219,7 +233,8 @@ bool __not_in_flash_func(i2s_service)(void) {
 
 /* ---- クロック切り替え -------------------------------------------------- */
 
-void i2s_retune(void) {
+void i2s_retune(void)
+{
     i2s_compute_div();
 
     /*
@@ -239,7 +254,8 @@ void i2s_retune(void) {
 
 /* ---- 停止をまたいだ復帰 ------------------------------------------------ */
 
-void i2s_resync(void) {
+void i2s_resync(void)
+{
     /*
      * i2s_poll() の差分はリング長 4096 フレームで剰余を取るので、リング一周
      * 65.5ms を超えて止まったあとは s_dma_total に一周単位のずれが残る。
@@ -257,40 +273,49 @@ void i2s_resync(void) {
     stats_i2s_update(I2S_TARGET_FRAMES);
 }
 
-void i2s_set_enabled(bool enabled) {
+void i2s_set_enabled(bool enabled)
+{
     s_enabled = enabled;
 }
 
-bool i2s_enabled(void) {
+bool i2s_enabled(void)
+{
     return s_enabled;
 }
 
 /* ---- 情報 -------------------------------------------------------------- */
 
-uint32_t i2s_depth(void) {
+uint32_t i2s_depth(void)
+{
     int64_t depth = (int64_t)(s_fill_total - s_dma_total);
     return (depth <= 0) ? 0u : (uint32_t)depth;
 }
 
-uint32_t i2s_clkdiv_int(void) {
+uint32_t i2s_clkdiv_int(void)
+{
     return s_div256 >> 8;
 }
 
-uint32_t i2s_clkdiv_frac(void) {
+uint32_t i2s_clkdiv_frac(void)
+{
     return s_div256 & 0xffu;
 }
 
-uint32_t i2s_rate_hz(void) {
+uint32_t i2s_rate_hz(void)
+{
     /* fs = sys_clk / (64 x div256/256) = sys_clk x 4 / div256 */
-    if (s_div256 == 0u) {
+    if (s_div256 == 0u)
+    {
         return 0u;
     }
     return (uint32_t)(((uint64_t)clock_get_hz(clk_sys) * 4u) / s_div256);
 }
 
-uint32_t i2s_bck_hz(void) {
+uint32_t i2s_bck_hz(void)
+{
     /* BCK = 32 x fs = sys_clk x 128 / div256 */
-    if (s_div256 == 0u) {
+    if (s_div256 == 0u)
+    {
         return 0u;
     }
     return (uint32_t)(((uint64_t)clock_get_hz(clk_sys) * 128u) / s_div256);
@@ -298,44 +323,55 @@ uint32_t i2s_bck_hz(void) {
 
 #else /* !I2S_ENABLED */
 
-void i2s_init(void) {
+void i2s_init(void)
+{
 }
 
-bool i2s_service(void) {
+bool i2s_service(void)
+{
     return false;
 }
 
-void i2s_retune(void) {
+void i2s_retune(void)
+{
 }
 
-void i2s_resync(void) {
+void i2s_resync(void)
+{
 }
 
-void i2s_set_enabled(bool enabled) {
+void i2s_set_enabled(bool enabled)
+{
     (void)enabled;
 }
 
-bool i2s_enabled(void) {
+bool i2s_enabled(void)
+{
     return false;
 }
 
-uint32_t i2s_depth(void) {
+uint32_t i2s_depth(void)
+{
     return 0u;
 }
 
-uint32_t i2s_clkdiv_int(void) {
+uint32_t i2s_clkdiv_int(void)
+{
     return 0u;
 }
 
-uint32_t i2s_clkdiv_frac(void) {
+uint32_t i2s_clkdiv_frac(void)
+{
     return 0u;
 }
 
-uint32_t i2s_rate_hz(void) {
+uint32_t i2s_rate_hz(void)
+{
     return 0u;
 }
 
-uint32_t i2s_bck_hz(void) {
+uint32_t i2s_bck_hz(void)
+{
     return 0u;
 }
 

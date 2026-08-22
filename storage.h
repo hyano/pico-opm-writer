@@ -20,7 +20,8 @@
 
 /* ---- モード ------------------------------------------------------------ */
 
-typedef enum {
+typedef enum
+{
     /*
      * 0 にしておくと .bss の初期値が PLAYER = メディア非挿入になる。
      * tusb_init() から storage_init() までの隙間で MSC のコールバックが
@@ -31,7 +32,8 @@ typedef enum {
 } storage_mode_t;
 
 /* ファイルシステムの状態。モードとは別に持つ。 */
-typedef enum {
+typedef enum
+{
     STORAGE_FS_UNMOUNTED = 0, /* HOST 中 */
     STORAGE_FS_MOUNTED,
     STORAGE_FS_NO_FILESYSTEM, /* 未フォーマット */
@@ -86,7 +88,7 @@ bool storage_host_dirty(void);
 
 uint32_t storage_region_offset(void); /* XIP_BASE からのオフセット */
 uint32_t storage_region_size(void);
-uint32_t storage_firmware_end(void);  /* ファームウェア末尾のオフセット */
+uint32_t storage_firmware_end(void); /* ファームウェア末尾のオフセット */
 
 /* FAT の種類（"FAT12" など）。マウントしていなければ "-"。 */
 const char *storage_fs_type_name(void);

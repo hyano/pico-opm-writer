@@ -71,7 +71,8 @@
 #define MDX_TITLE_MAX 128u
 #define MDX_PDX_MAX   32u
 
-typedef enum {
+typedef enum
+{
     MDX_STATE_STOPPED = 0,
     MDX_STATE_PLAYING,
     MDX_STATE_ERROR, /* データの途中で壊れていた */
@@ -123,9 +124,9 @@ const char *mdx_current_name(void); /* 再生中のファイル名。無けれ�
 const char *mdx_title(void);        /* タイトル (Shift_JIS のまま) */
 const char *mdx_pdx_name(void);     /* ヘッダが要求する PDX 名。無ければ空文字列 */
 
-uint32_t mdx_channels(void);    /* 9 または 16 */
-uint64_t mdx_tick_count(void);  /* 発行済みの clock 数 */
-uint32_t mdx_loop_count(void);  /* 曲が何周したか（全チャンネルがループ点に到達した回数） */
+uint32_t mdx_channels(void);     /* 9 または 16 */
+uint64_t mdx_tick_count(void);   /* 発行済みの clock 数 */
+uint32_t mdx_loop_count(void);   /* 曲が何周したか（全チャンネルがループ点に到達した回数） */
 uint32_t mdx_reslip_count(void); /* 時計を張り直した回数 */
 uint32_t mdx_tempo(void);        /* 現在の Timer-B 値 */
 uint32_t mdx_tick_us(void);      /* 現在の 1 clock の長さ [us] */

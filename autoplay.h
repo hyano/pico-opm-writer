@@ -38,27 +38,30 @@
 #define AUTOPLAY_POOL_BYTES  12288u
 
 /* 既定値。autoplay stop では消えず、電源投入時にここへ戻る。 */
-#define AUTOPLAY_LOOP_DEFAULT 2u
+#define AUTOPLAY_LOOP_DEFAULT    2u
 #define AUTOPLAY_FADE_MS_DEFAULT 2000u
-#define AUTOPLAY_GAP_MS_DEFAULT 2000u
+#define AUTOPLAY_GAP_MS_DEFAULT  2000u
 
 /* loop / fade / gap の上限（`d <ms>` と同じ 10 進） */
 #define AUTOPLAY_LOOP_MAX 99u
 #define AUTOPLAY_MS_MAX   60000u
 
-typedef enum {
+typedef enum
+{
     AUTOPLAY_STOPPED = 0,
     AUTOPLAY_PLAYING, /* 曲を鳴らしている */
     AUTOPLAY_FADING,  /* フェード中。終わったら停止して間隔へ */
     AUTOPLAY_GAP,     /* 曲間の無音 */
 } autoplay_state_t;
 
-typedef enum {
+typedef enum
+{
     AUTOPLAY_MODE_LIST = 0, /* 一覧の順 */
     AUTOPLAY_MODE_RANDOM,   /* シャッフル */
 } autoplay_mode_t;
 
-typedef enum {
+typedef enum
+{
     AUTOPLAY_SOURCE_BOTH = 0,
     AUTOPLAY_SOURCE_VGM,
     AUTOPLAY_SOURCE_MDX,
@@ -101,9 +104,9 @@ const char *autoplay_skip(int dir);
 /* 実行中に変えてもよい。次の判定から効く。 */
 void autoplay_set_mode(autoplay_mode_t mode);
 void autoplay_set_source(autoplay_source_t source);
-void autoplay_set_loop(uint32_t loops);   /* 0 = 無限（自然終了でだけ曲を送る） */
-void autoplay_set_fade_ms(uint32_t ms);   /* 0 = フェードせず即停止 */
-void autoplay_set_gap_ms(uint32_t ms);    /* 0 = 間隔なし */
+void autoplay_set_loop(uint32_t loops); /* 0 = 無限（自然終了でだけ曲を送る） */
+void autoplay_set_fade_ms(uint32_t ms); /* 0 = フェードせず即停止 */
+void autoplay_set_gap_ms(uint32_t ms);  /* 0 = 間隔なし */
 
 autoplay_mode_t autoplay_mode(void);
 autoplay_source_t autoplay_source(void);

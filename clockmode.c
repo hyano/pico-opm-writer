@@ -17,7 +17,8 @@
 #include "opm.h"
 
 /* プリセットの表。並びは clock_preset_t と同じ。 */
-static const struct {
+static const struct
+{
     const char *name;
     uint32_t phim_hz;
     uint32_t sys_khz;
@@ -37,30 +38,36 @@ static bool s_auto = true;
 
 /* ---- 初期化 ------------------------------------------------------------ */
 
-void clockmode_init(void) {
+void clockmode_init(void)
+{
     s_preset_cur = CLOCK_PRESET_BOOT;
     s_auto = true;
 }
 
 /* ---- プリセットの情報 -------------------------------------------------- */
 
-clock_preset_t clockmode_preset(void) {
+clock_preset_t clockmode_preset(void)
+{
     return s_preset_cur;
 }
 
-const char *clockmode_preset_name(clock_preset_t p) {
+const char *clockmode_preset_name(clock_preset_t p)
+{
     return s_preset[p].name;
 }
 
-uint32_t clockmode_preset_hz(clock_preset_t p) {
+uint32_t clockmode_preset_hz(clock_preset_t p)
+{
     return s_preset[p].phim_hz;
 }
 
-uint32_t clockmode_preset_sys_khz(clock_preset_t p) {
+uint32_t clockmode_preset_sys_khz(clock_preset_t p)
+{
     return s_preset[p].sys_khz;
 }
 
-clock_preset_t clockmode_nearest(uint32_t hz) {
+clock_preset_t clockmode_nearest(uint32_t hz)
+{
     /* 2 つしかないので中点で分ける。3789772Hz 未満なら NTSC 側。 */
     uint32_t mid = (s_preset[CLOCK_PRESET_NTSC].phim_hz + s_preset[CLOCK_PRESET_4MHZ].phim_hz) / 2u;
     return (hz < mid) ? CLOCK_PRESET_NTSC : CLOCK_PRESET_4MHZ;
@@ -68,11 +75,13 @@ clock_preset_t clockmode_nearest(uint32_t hz) {
 
 /* ---- VGM への追従 ------------------------------------------------------ */
 
-bool clockmode_auto(void) {
+bool clockmode_auto(void)
+{
     return s_auto;
 }
 
-void clockmode_set_auto(bool enabled) {
+void clockmode_set_auto(bool enabled)
+{
     s_auto = enabled;
 }
 
@@ -112,7 +121,8 @@ void clockmode_set_auto(bool enabled) {
  *
  * clk_peri と clk_ref は起動時の設定（pll_usb / XOSC）のままで触らない。
  */
-static void clockmode_apply(uint32_t vco, uint post_div1, uint post_div2, uint32_t phim_hz) {
+static void clockmode_apply(uint32_t vco, uint post_div1, uint post_div2, uint32_t phim_hz)
+{
     uint32_t sys_hz = vco / (post_div1 * post_div2);
 
     /* A */
@@ -139,8 +149,10 @@ static void clockmode_apply(uint32_t vco, uint post_div1, uint post_div2, uint32
                               sys_hz);
 }
 
-const char *clockmode_set(clock_preset_t p) {
-    if (p == s_preset_cur) {
+const char *clockmode_set(clock_preset_t p)
+{
+    if (p == s_preset_cur)
+    {
         return NULL;
     }
 
@@ -148,13 +160,15 @@ const char *clockmode_set(clock_preset_t p) {
      * キャプチャ中に切り替えると、ホストへ流している PCM のサンプリングレートが
      * ストリームの途中で変わってしまい、出来上がる WAV の時間軸が黙って狂う。
      */
-    if (capture_state() != CAPTURE_STATE_IDLE) {
+    if (capture_state() != CAPTURE_STATE_IDLE)
+    {
         printf("# hint    : cannot switch phiM while capturing PCM; run p 0 first\n");
         return "wrong state";
     }
 
     uint vco, post_div1, post_div2;
-    if (!check_sys_clock_khz(s_preset[p].sys_khz, &vco, &post_div1, &post_div2)) {
+    if (!check_sys_clock_khz(s_preset[p].sys_khz, &vco, &post_div1, &post_div2))
+    {
         return "unsupported";
     }
 
@@ -170,8 +184,10 @@ const char *clockmode_set(clock_preset_t p) {
     return NULL;
 }
 
-const char *clockmode_follow_file(uint32_t file_clock_hz) {
-    if (!s_auto || file_clock_hz == 0u) {
+const char *clockmode_follow_file(uint32_t file_clock_hz)
+{
+    if (!s_auto || file_clock_hz == 0u)
+    {
         return NULL;
     }
     return clockmode_set(clockmode_nearest(file_clock_hz));

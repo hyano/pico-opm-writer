@@ -56,24 +56,29 @@ static const uint8_t __not_in_flash("pcm8_tbl") HOLD_FOR_MODE[7] = {16u, 12u, 8u
  * PCM8 の音量 0-15 -> 線形ゲイン (Q16)。1step = 2dB で 8 が原音。
  * gain[v] = round(65536 * 10^((v - 8) / 10))
  */
+/* clang-format off */
 static const int32_t __not_in_flash("pcm8_tbl") GAIN_Q16[16] = {
     10387,  13076,  16462,  20724,  26090,  32846,  41350,  52057,
     65536,  82505,  103868, 130762, 164619, 207243, 260904, 328458,
 };
+/* clang-format on */
 
 /* MSM6258V の ADPCM。ステップ番号の増減とステップ幅。 */
 static const int8_t __not_in_flash("pcm8_tbl") STEP_ADJ[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 
+/* clang-format off */
 static const int16_t __not_in_flash("pcm8_tbl") STEP_SIZE[49] = {
     16,   17,   19,   21,   23,   25,   28,   31,   34,   37,   41,   45,  50,
     55,   60,   66,   73,   80,   88,   97,   107,  118,  130,  143,  157, 173,
     190,  209,  230,  253,  279,  307,  337,  371,  408,  449,  494,  544, 598,
     658,  724,  796,  876,  963,  1060, 1166, 1282, 1411, 1552,
 };
+/* clang-format on */
 
 /* ---- チャンネル -------------------------------------------------------- */
 
-typedef struct {
+typedef struct
+{
     bool active;
 
     /* PDX 上の読み出し範囲 */
@@ -135,7 +140,8 @@ static char s_pdx_path[80];
 static uint8_t s_tbl[PDX_BANK_BYTES];
 static int32_t s_tbl_bank = -1;
 
-static uint32_t rd32be(const uint8_t *p) {
+static uint32_t rd32be(const uint8_t *p)
+{
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
            (uint32_t)p[3];
 }
@@ -146,22 +152,28 @@ static uint32_t rd32be(const uint8_t *p) {
  * PCM8 経路（L000BE4）は 32bit で読んでから 24bit へ切る。
  */
 static bool pdx_entry(uint32_t bank, uint32_t note, bool word_len, uint32_t *off,
-                      uint32_t *len) {
-    if (!s_pdx_open || note >= PDX_BANK_NOTES) {
+                      uint32_t *len)
+{
+    if (!s_pdx_open || note >= PDX_BANK_NOTES)
+    {
         return false;
     }
 
-    if ((int32_t)bank != s_tbl_bank) {
+    if ((int32_t)bank != s_tbl_bank)
+    {
         FSIZE_t at = (FSIZE_t)bank * PDX_BANK_BYTES;
-        if (at + PDX_BANK_BYTES > s_pdx_size) {
+        if (at + PDX_BANK_BYTES > s_pdx_size)
+        {
             return false;
         }
-        if (f_lseek(&s_pdx_fp, at) != FR_OK) {
+        if (f_lseek(&s_pdx_fp, at) != FR_OK)
+        {
             return false;
         }
         UINT got = 0;
         if (f_read(&s_pdx_fp, s_tbl, PDX_BANK_BYTES, &got) != FR_OK ||
-            got != PDX_BANK_BYTES) {
+            got != PDX_BANK_BYTES)
+        {
             s_tbl_bank = -1;
             return false;
         }
@@ -174,7 +186,8 @@ static bool pdx_entry(uint32_t bank, uint32_t note, bool word_len, uint32_t *off
     uint32_t n = rd32be(e + 4);
     n &= word_len ? 0x0000ffffu : 0x00ffffffu;
 
-    if (n == 0u || o >= s_pdx_size || (o + n) > s_pdx_size) {
+    if (n == 0u || o >= s_pdx_size || (o + n) > s_pdx_size)
+    {
         return false;
     }
     *off = o;
@@ -184,19 +197,24 @@ static bool pdx_entry(uint32_t bank, uint32_t note, bool word_len, uint32_t *off
 
 /* ---- サンプルの取り出し ------------------------------------------------ */
 
-static bool refill(pcm8_ch_t *c) {
-    if (!s_pdx_open || c->data_pos >= c->data_end) {
+static bool refill(pcm8_ch_t *c)
+{
+    if (!s_pdx_open || c->data_pos >= c->data_end)
+    {
         return false;
     }
     uint32_t want = c->data_end - c->data_pos;
-    if (want > PCM8_PREFETCH_BYTES) {
+    if (want > PCM8_PREFETCH_BYTES)
+    {
         want = PCM8_PREFETCH_BYTES;
     }
-    if (f_lseek(&s_pdx_fp, (FSIZE_t)c->data_pos) != FR_OK) {
+    if (f_lseek(&s_pdx_fp, (FSIZE_t)c->data_pos) != FR_OK)
+    {
         return false;
     }
     UINT got = 0;
-    if (f_read(&s_pdx_fp, c->buf, (UINT)want, &got) != FR_OK || got == 0u) {
+    if (f_read(&s_pdx_fp, c->buf, (UINT)want, &got) != FR_OK || got == 0u)
+    {
         return false;
     }
     c->buf_len = got;
@@ -206,9 +224,12 @@ static bool refill(pcm8_ch_t *c) {
     return true;
 }
 
-static int __not_in_flash_func(next_byte)(pcm8_ch_t *c) {
-    if (c->buf_pos >= c->buf_len) {
-        if (!refill(c)) {
+static int __not_in_flash_func(next_byte)(pcm8_ch_t *c)
+{
+    if (c->buf_pos >= c->buf_len)
+    {
+        if (!refill(c))
+        {
             return -1;
         }
     }
@@ -220,34 +241,45 @@ static int __not_in_flash_func(next_byte)(pcm8_ch_t *c) {
  *   delta = step/8 + step/4 * b0 + step/2 * b1 + step * b2、符号は b3
  *   出力は 12bit で頭打ち、ステップ番号は 0-48 で頭打ち
  */
-static int32_t adpcm_step(int32_t *sigp, int32_t *idxp, uint8_t nib) {
+static int32_t adpcm_step(int32_t *sigp, int32_t *idxp, uint8_t nib)
+{
     int32_t step = STEP_SIZE[*idxp];
     int32_t d = step >> 3;
-    if ((nib & 1u) != 0u) {
+    if ((nib & 1u) != 0u)
+    {
         d += step >> 2;
     }
-    if ((nib & 2u) != 0u) {
+    if ((nib & 2u) != 0u)
+    {
         d += step >> 1;
     }
-    if ((nib & 4u) != 0u) {
+    if ((nib & 4u) != 0u)
+    {
         d += step;
     }
-    if ((nib & 8u) != 0u) {
+    if ((nib & 8u) != 0u)
+    {
         d = -d;
     }
 
     int32_t sig = *sigp + d;
-    if (sig > 2047) {
+    if (sig > 2047)
+    {
         sig = 2047;
-    } else if (sig < -2048) {
+    }
+    else if (sig < -2048)
+    {
         sig = -2048;
     }
     *sigp = sig;
 
     int32_t idx = *idxp + STEP_ADJ[nib & 7u];
-    if (idx > 48) {
+    if (idx > 48)
+    {
         idx = 48;
-    } else if (idx < 0) {
+    }
+    else if (idx < 0)
+    {
         idx = 0;
     }
     *idxp = idx;
@@ -257,37 +289,50 @@ static int32_t adpcm_step(int32_t *sigp, int32_t *idxp, uint8_t nib) {
 }
 
 /* 次のソースサンプルを取り出してゲインを掛ける。尽きたら false。 */
-static bool next_sample(pcm8_ch_t *c) {
+static bool next_sample(pcm8_ch_t *c)
+{
     int32_t raw;
 
-    if (c->mode <= 4u) {
+    if (c->mode <= 4u)
+    {
         uint8_t nib;
-        if (!c->nib_high) {
+        if (!c->nib_high)
+        {
             int b = next_byte(c);
-            if (b < 0) {
+            if (b < 0)
+            {
                 return false;
             }
             c->nib_byte = (uint8_t)b;
             nib = (uint8_t)((uint32_t)b & 0x0fu); /* 下位ニブルが先 */
             c->nib_high = true;
-        } else {
+        }
+        else
+        {
             nib = (uint8_t)(c->nib_byte >> 4);
             c->nib_high = false;
         }
         raw = adpcm_step(&c->sig, &c->idx, nib);
-    } else if (c->mode == 5u) {
+    }
+    else if (c->mode == 5u)
+    {
         int hi = next_byte(c);
-        if (hi < 0) {
+        if (hi < 0)
+        {
             return false;
         }
         int lo = next_byte(c);
-        if (lo < 0) {
+        if (lo < 0)
+        {
             return false;
         }
         raw = (int32_t)(int16_t)(uint16_t)(((uint32_t)hi << 8) | (uint32_t)lo);
-    } else {
+    }
+    else
+    {
         int b = next_byte(c);
-        if (b < 0) {
+        if (b < 0)
+        {
             return false;
         }
         raw = (int32_t)(int8_t)(uint8_t)b << 8;
@@ -301,21 +346,27 @@ static bool next_sample(pcm8_ch_t *c) {
 
 /* ---- レンダリング ------------------------------------------------------ */
 
-static void mix_channel(pcm8_ch_t *c, int32_t *acc, uint32_t n) {
+static void mix_channel(pcm8_ch_t *c, int32_t *acc, uint32_t n)
+{
     uint32_t i = 0;
-    while (i < n) {
-        if (c->hold_cnt == 0u) {
-            if (!next_sample(c)) {
+    while (i < n)
+    {
+        if (c->hold_cnt == 0u)
+        {
+            if (!next_sample(c))
+            {
                 c->active = false;
                 return;
             }
         }
         uint32_t run = c->hold_cnt;
-        if (run > n - i) {
+        if (run > n - i)
+        {
             run = n - i;
         }
         int32_t v = c->cur;
-        for (uint32_t k = 0; k < run; k++) {
+        for (uint32_t k = 0; k < run; k++)
+        {
             acc[i + k] += v;
         }
         c->hold_cnt = (uint8_t)(c->hold_cnt - run);
@@ -323,31 +374,39 @@ static void mix_channel(pcm8_ch_t *c, int32_t *acc, uint32_t n) {
     }
 }
 
-static bool render_block(uint32_t widx, uint32_t n) {
+static bool render_block(uint32_t widx, uint32_t n)
+{
     uint32_t active = 0;
 
     memset(s_acc, 0, (size_t)n * sizeof(s_acc[0]));
 
-    for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
+    for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
+    {
         pcm8_ch_t *c = &s_ch[i];
-        if (!c->active) {
+        if (!c->active)
+        {
             continue;
         }
         active++;
         mix_channel(c, s_acc, n);
     }
 
-    if (active == 0u) {
-        if (s_quiet_frames >= PCM8_MIX_FRAMES) {
+    if (active == 0u)
+    {
+        if (s_quiet_frames >= PCM8_MIX_FRAMES)
+        {
             /* リング全体が既に無音。ゼロで上書きし直す必要はない。 */
             return false;
         }
         s_quiet_frames += n;
-        if (s_quiet_frames > PCM8_MIX_FRAMES) {
+        if (s_quiet_frames > PCM8_MIX_FRAMES)
+        {
             s_quiet_frames = PCM8_MIX_FRAMES;
         }
         /* 無音になった直後のぶんは、古い内容を消すためにゼロを書く */
-    } else {
+    }
+    else
+    {
         s_quiet_frames = 0;
     }
 
@@ -357,12 +416,16 @@ static bool render_block(uint32_t widx, uint32_t n) {
      */
     uint32_t pan = s_pan;
     uint32_t clip = 0;
-    for (uint32_t i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++)
+    {
         int32_t v = s_acc[i];
-        if (v > 32767) {
+        if (v > 32767)
+        {
             v = 32767;
             clip++;
-        } else if (v < -32768) {
+        }
+        else if (v < -32768)
+        {
             v = -32768;
             clip++;
         }
@@ -371,7 +434,8 @@ static bool render_block(uint32_t widx, uint32_t n) {
         uint16_t r = ((pan & 2u) != 0u) ? w : 0u;
         s_mix[widx + i] = ((uint32_t)r << 16) | (uint32_t)l;
     }
-    if (clip != 0u) {
+    if (clip != 0u)
+    {
         stats_count_pcm_clip(clip);
     }
 
@@ -380,12 +444,15 @@ static bool render_block(uint32_t widx, uint32_t n) {
 
 /* ---- ミキサフック ------------------------------------------------------ */
 
-static inline int16_t sat16(int32_t v, uint32_t *clip) {
-    if (v > 32767) {
+static inline int16_t sat16(int32_t v, uint32_t *clip)
+{
+    if (v > 32767)
+    {
         (*clip)++;
         return 32767;
     }
-    if (v < -32768) {
+    if (v < -32768)
+    {
         (*clip)++;
         return -32768;
     }
@@ -397,26 +464,32 @@ static inline int16_t sat16(int32_t v, uint32_t *clip) {
  * 絶対フレーム番号なので、カーソルが 2 本あってもここは冪等でよい。
  */
 static void __not_in_flash_func(pcm8_mix)(uint64_t first_frame, uint32_t frames,
-                                          int16_t *inout) {
-    if (!s_enabled || s_quiet_frames >= PCM8_MIX_FRAMES) {
+                                          int16_t *inout)
+{
+    if (!s_enabled || s_quiet_frames >= PCM8_MIX_FRAMES)
+    {
         return;
     }
 
     uint64_t start = first_frame;
     uint64_t end = first_frame + frames;
 
-    if (start >= s_rendered_total) {
+    if (start >= s_rendered_total)
+    {
         return; /* まだ描いていない */
     }
-    if (end > s_rendered_total) {
+    if (end > s_rendered_total)
+    {
         end = s_rendered_total;
     }
     uint64_t oldest =
         (s_rendered_total > PCM8_MIX_FRAMES) ? (s_rendered_total - PCM8_MIX_FRAMES) : 0u;
-    if (start < oldest) {
+    if (start < oldest)
+    {
         start = oldest; /* すでに上書きされている */
     }
-    if (start >= end) {
+    if (start >= end)
+    {
         return;
     }
 
@@ -427,13 +500,15 @@ static void __not_in_flash_func(pcm8_mix)(uint64_t first_frame, uint32_t frames,
 
     /* 飽和は絶対フレーム番号で 1 回だけ数える（カーソル 2 本で二重計上しない） */
     uint32_t skip = (start < s_clip_scanned) ? (uint32_t)(s_clip_scanned - start) : 0u;
-    if (skip > n) {
+    if (skip > n)
+    {
         skip = n;
     }
     uint32_t clip = 0;
     uint32_t discard = 0;
 
-    for (uint32_t i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++)
+    {
         uint32_t m = s_mix[ridx];
         ridx = (ridx + 1u) & (PCM8_MIX_FRAMES - 1u);
 
@@ -447,19 +522,23 @@ static void __not_in_flash_func(pcm8_mix)(uint64_t first_frame, uint32_t frames,
         out += 2;
     }
 
-    if (end > s_clip_scanned) {
+    if (end > s_clip_scanned)
+    {
         s_clip_scanned = end;
     }
-    if (clip != 0u) {
+    if (clip != 0u)
+    {
         stats_count_pcm_clip(clip);
     }
 }
 
 /* ---- 初期化とサービス -------------------------------------------------- */
 
-void pcm8_init(void) {
+void pcm8_init(void)
+{
     memset(s_ch, 0, sizeof(s_ch));
-    for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
+    for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
+    {
         s_ch[i].mode = 4u; /* 15.6kHz。MXDRV のチャンネル初期値 (pan = 0x10) と同じ */
         s_ch[i].vol = 8u;  /* 原音量 */
         s_ch[i].hold = HOLD_FOR_MODE[4];
@@ -485,14 +564,17 @@ void pcm8_init(void) {
     ym3012_set_mix_ready(s_rendered_total);
 }
 
-bool __not_in_flash_func(pcm8_service)(void) {
+bool __not_in_flash_func(pcm8_service)(void)
+{
     uint64_t w = ym3012_write_total();
-    if (s_rendered_total >= w) {
+    if (s_rendered_total >= w)
+    {
         return false;
     }
 
     uint64_t behind = w - s_rendered_total;
-    if (behind > PCM8_MIX_FRAMES) {
+    if (behind > PCM8_MIX_FRAMES)
+    {
         /*
          * リング 1 周ぶんより遅れた（フラッシュ書き込みなどでメインループが
          * 止まった）。追いつこうとしても読まれない領域を描くだけなので、
@@ -506,19 +588,23 @@ bool __not_in_flash_func(pcm8_service)(void) {
      * 鳴っているあいだはある程度まとめて描く。無音のときはブロックの支度そのものを
      * しないので（リング全体が既に 0）、束ねずに毎回進めてよい。
      */
-    if (s_sounding && behind < PCM8_BATCH_FRAMES) {
+    if (s_sounding && behind < PCM8_BATCH_FRAMES)
+    {
         return false;
     }
 
     bool sounded = false;
-    while (s_rendered_total < w) {
+    while (s_rendered_total < w)
+    {
         uint32_t widx = (uint32_t)(s_rendered_total & (PCM8_MIX_FRAMES - 1u));
         uint32_t n = PCM8_MIX_FRAMES - widx; /* リング末尾はまたがない */
         uint64_t remain = w - s_rendered_total;
-        if ((uint64_t)n > remain) {
+        if ((uint64_t)n > remain)
+        {
             n = (uint32_t)remain;
         }
-        if (n > PCM8_BLOCK_FRAMES) {
+        if (n > PCM8_BLOCK_FRAMES)
+        {
             n = PCM8_BLOCK_FRAMES;
         }
         sounded |= render_block(widx, n);
@@ -529,13 +615,15 @@ bool __not_in_flash_func(pcm8_service)(void) {
     ym3012_set_mix_ready(s_rendered_total);
 
     if (s_rendered_total > PCM8_MIX_FRAMES &&
-        s_clip_scanned < s_rendered_total - PCM8_MIX_FRAMES) {
+        s_clip_scanned < s_rendered_total - PCM8_MIX_FRAMES)
+    {
         s_clip_scanned = s_rendered_total - PCM8_MIX_FRAMES;
     }
     return sounded;
 }
 
-void pcm8_resync(void) {
+void pcm8_resync(void)
+{
     memset(s_mix, 0, sizeof(s_mix));
     s_quiet_frames = PCM8_MIX_FRAMES;
     s_sounding = false;
@@ -546,23 +634,28 @@ void pcm8_resync(void) {
 
 /* ---- PDX --------------------------------------------------------------- */
 
-const char *pcm8_open_pdx(const char *path) {
+const char *pcm8_open_pdx(const char *path)
+{
     pcm8_close_pdx();
 
-    if (!storage_fatfs_may_access() || storage_fs_state() != STORAGE_FS_MOUNTED) {
+    if (!storage_fatfs_may_access() || storage_fs_state() != STORAGE_FS_MOUNTED)
+    {
         return "wrong state";
     }
 
     FRESULT fr = f_open(&s_pdx_fp, path, FA_READ);
-    if (fr == FR_NO_FILE || fr == FR_NO_PATH) {
+    if (fr == FR_NO_FILE || fr == FR_NO_PATH)
+    {
         return "not found";
     }
-    if (fr != FR_OK) {
+    if (fr != FR_OK)
+    {
         return "io error";
     }
 
     FSIZE_t size = f_size(&s_pdx_fp);
-    if (size < PDX_BANK_BYTES) {
+    if (size < PDX_BANK_BYTES)
+    {
         f_close(&s_pdx_fp);
         return "bad file";
     }
@@ -575,9 +668,11 @@ const char *pcm8_open_pdx(const char *path) {
     return NULL;
 }
 
-void pcm8_close_pdx(void) {
+void pcm8_close_pdx(void)
+{
     pcm8_abort_all();
-    if (s_pdx_open) {
+    if (s_pdx_open)
+    {
         f_close(&s_pdx_fp);
         s_pdx_open = false;
     }
@@ -586,31 +681,39 @@ void pcm8_close_pdx(void) {
     s_pdx_path[0] = '\0';
 }
 
-bool pcm8_pdx_ready(void) {
+bool pcm8_pdx_ready(void)
+{
     return s_pdx_open;
 }
 
-const char *pcm8_pdx_path(void) {
+const char *pcm8_pdx_path(void)
+{
     return s_pdx_path;
 }
 
 /* ---- 発音 -------------------------------------------------------------- */
 
 /* 音量/周波数/定位の適用。負値は据え置き。pan == 0 はそのチャネルの停止。 */
-static bool apply_params(pcm8_ch_t *c, int mode, int vol, int pan) {
-    if (mode >= 0) {
+static bool apply_params(pcm8_ch_t *c, int mode, int vol, int pan)
+{
+    if (mode >= 0)
+    {
         uint32_t m = (uint32_t)mode;
-        if (m > 6u) {
+        if (m > 6u)
+        {
             m = 6u;
         }
         c->mode = (uint8_t)m;
         c->hold = HOLD_FOR_MODE[m];
     }
-    if (vol >= 0) {
+    if (vol >= 0)
+    {
         c->vol = (uint8_t)((uint32_t)vol & 0x0fu);
     }
-    if (pan >= 0) {
-        if (pan == 0) {
+    if (pan >= 0)
+    {
+        if (pan == 0)
+        {
             return false; /* 停止。定位は変更しない */
         }
         s_pan = (uint32_t)pan & 0x03u;
@@ -620,8 +723,10 @@ static bool apply_params(pcm8_ch_t *c, int mode, int vol, int pan) {
 
 /* 発音の共通部。定位 0（停止）と波形なしはどちらも miss として数える。 */
 static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, int mode,
-                   int vol, int pan) {
-    if (!apply_params(c, mode, vol, pan)) {
+                   int vol, int pan)
+{
+    if (!apply_params(c, mode, vol, pan))
+    {
         s_miss++;
         c->active = false;
         return;
@@ -629,7 +734,8 @@ static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, in
 
     uint32_t off = 0;
     uint32_t len = 0;
-    if (!pdx_entry(bank, note, word_len, &off, &len)) {
+    if (!pdx_entry(bank, note, word_len, &off, &len))
+    {
         s_miss++;
         c->active = false;
         return;
@@ -648,33 +754,41 @@ static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, in
     s_keyon++;
 }
 
-void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan) {
-    if (ch >= PCM8_CH_MAX) {
+void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan)
+{
+    if (ch >= PCM8_CH_MAX)
+    {
         return;
     }
     key_on(&s_ch[ch], bank, note, false, mode, vol, pan);
 }
 
-void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan) {
-    if (ch >= PCM8_CH_MAX) {
+void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan)
+{
+    if (ch >= PCM8_CH_MAX)
+    {
         return;
     }
     pcm8_ch_t *c = &s_ch[ch];
-    if (!apply_params(c, mode, vol, pan)) {
+    if (!apply_params(c, mode, vol, pan))
+    {
         c->active = false;
         return;
     }
     /* 発音中なら次のソースサンプルから新しい音量とレートが効く */
 }
 
-void pcm8_stop(uint32_t ch) {
-    if (ch >= PCM8_CH_MAX) {
+void pcm8_stop(uint32_t ch)
+{
+    if (ch >= PCM8_CH_MAX)
+    {
         return;
     }
     s_ch[ch].active = false;
 }
 
-void pcm8_end_all(void) {
+void pcm8_end_all(void)
+{
     /*
      * $0100 は「チェイン動作を解除し、出力中のデータブロックの出力が完了次第停止」。
      * チェインは使っていないので、鳴っているぶんは最後まで鳴らして終わる
@@ -682,8 +796,10 @@ void pcm8_end_all(void) {
      */
 }
 
-void pcm8_abort_all(void) {
-    for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
+void pcm8_abort_all(void)
+{
+    for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
+    {
         s_ch[i].active = false;
     }
 }
@@ -693,12 +809,15 @@ void pcm8_abort_all(void) {
 /* IOCS の原音量。PCM8 の音量 0-15 のうち 8 が原音（PCM8TECH.DOC）。 */
 #define PCM8_IOCS_VOLUME 8
 
-void pcm8_iocs_out(uint32_t note, int mode, int pan) {
+void pcm8_iocs_out(uint32_t note, int mode, int pan)
+{
     key_on(&s_ch[0], 0u, note, true, mode, PCM8_IOCS_VOLUME, pan);
 }
 
-void pcm8_iocs_mod(bool abort) {
-    if (abort) {
+void pcm8_iocs_mod(bool abort)
+{
+    if (abort)
+    {
         s_ch[0].active = false; /* d1=1 中止 */
     }
     /* d1=0 終了 = チェイン動作の終了。チェインを使っていないので何もしない。 */
@@ -706,53 +825,66 @@ void pcm8_iocs_mod(bool abort) {
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 
-uint32_t pcm8_active_mask(void) {
+uint32_t pcm8_active_mask(void)
+{
     uint32_t m = 0;
-    for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
-        if (s_ch[i].active) {
+    for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
+    {
+        if (s_ch[i].active)
+        {
             m |= 1u << i;
         }
     }
     return m;
 }
 
-uint32_t pcm8_active_count(void) {
+uint32_t pcm8_active_count(void)
+{
     uint32_t n = 0;
-    for (uint32_t i = 0; i < PCM8_CH_MAX; i++) {
-        if (s_ch[i].active) {
+    for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
+    {
+        if (s_ch[i].active)
+        {
             n++;
         }
     }
     return n;
 }
 
-uint32_t pcm8_pan(void) {
+uint32_t pcm8_pan(void)
+{
     return s_pan;
 }
 
-uint32_t pcm8_read_count(void) {
+uint32_t pcm8_read_count(void)
+{
     return s_reads;
 }
 
-uint32_t pcm8_keyon_count(void) {
+uint32_t pcm8_keyon_count(void)
+{
     return s_keyon;
 }
 
-uint32_t pcm8_miss_count(void) {
+uint32_t pcm8_miss_count(void)
+{
     return s_miss;
 }
 
-void pcm8_reset_counters(void) {
+void pcm8_reset_counters(void)
+{
     s_keyon = 0;
     s_miss = 0;
     s_reads = 0;
 }
 
-void pcm8_set_enabled(bool on) {
+void pcm8_set_enabled(bool on)
+{
     s_enabled = on;
 }
 
-bool pcm8_enabled(void) {
+bool pcm8_enabled(void)
+{
     return s_enabled;
 }
 
@@ -762,10 +894,12 @@ bool pcm8_enabled(void) {
  * デコーダの既知ベクタ。sig と idx を初期値 0 から進め、既定の値になるか見る。
  * 表の値と delta の式、飽和の効き方をまとめて押さえられる。
  */
-bool pcm8_selftest(const char **detail) {
+bool pcm8_selftest(const char **detail)
+{
     static char msg[80];
 
-    typedef struct {
+    typedef struct
+    {
         const char *nibs;
         int32_t sig;
         int32_t idx;
@@ -778,10 +912,10 @@ bool pcm8_selftest(const char **detail) {
         {"777", 229, 24},
         {"7777", 522, 32},
         {"77777", 1153, 40},
-        {"777777", 2047, 48},   /* 12bit で頭打ち */
-        {"7777777", 2047, 48},  /* ステップ番号も 48 で頭打ち */
-        {"00000000", 16, 0},    /* 最小ステップ。番号は 0 で頭打ち */
-        {"ffff", -522, 32},     /* bit3 は符号 */
+        {"777777", 2047, 48},  /* 12bit で頭打ち */
+        {"7777777", 2047, 48}, /* ステップ番号も 48 で頭打ち */
+        {"00000000", 16, 0},   /* 最小ステップ。番号は 0 で頭打ち */
+        {"ffff", -522, 32},    /* bit3 は符号 */
         {"ffff7", 109, 40},
         {"ffffffffffffffffffffffffffffffffffffffff", -2048, 48},
     };
@@ -789,37 +923,46 @@ bool pcm8_selftest(const char **detail) {
     uint32_t fail = 0;
     uint32_t total = 0;
 
-    for (uint32_t v = 0; v < sizeof(VEC) / sizeof(VEC[0]); v++) {
+    for (uint32_t v = 0; v < sizeof(VEC) / sizeof(VEC[0]); v++)
+    {
         int32_t sig = 0;
         int32_t idx = 0;
-        for (const char *p = VEC[v].nibs; *p != '\0'; p++) {
+        for (const char *p = VEC[v].nibs; *p != '\0'; p++)
+        {
             uint8_t n = (uint8_t)((*p <= '9') ? (*p - '0') : (*p - 'a' + 10));
             (void)adpcm_step(&sig, &idx, n);
         }
         total++;
-        if (sig != VEC[v].sig || idx != VEC[v].idx) {
+        if (sig != VEC[v].sig || idx != VEC[v].idx)
+        {
             fail++;
         }
     }
 
     /* レート比。全部整数でなければ補間なしの前提が崩れる。 */
     static const uint8_t EXPECT_HOLD[7] = {16u, 12u, 8u, 6u, 4u, 4u, 4u};
-    for (uint32_t m = 0; m < 7u; m++) {
+    for (uint32_t m = 0; m < 7u; m++)
+    {
         total++;
-        if (HOLD_FOR_MODE[m] != EXPECT_HOLD[m]) {
+        if (HOLD_FOR_MODE[m] != EXPECT_HOLD[m])
+        {
             fail++;
         }
     }
 
     /* 音量 8 は原音（ゲイン 1.0）でなければならない */
     total++;
-    if (GAIN_Q16[8] != 65536) {
+    if (GAIN_Q16[8] != 65536)
+    {
         fail++;
     }
 
-    if (fail == 0u) {
+    if (fail == 0u)
+    {
         snprintf(msg, sizeof(msg), "PASS (%u cases)", (unsigned)total);
-    } else {
+    }
+    else
+    {
         snprintf(msg, sizeof(msg), "FAIL %u/%u", (unsigned)fail, (unsigned)total);
     }
     *detail = msg;
@@ -832,7 +975,8 @@ void pcm8_init(void) {}
 bool pcm8_service(void) { return false; }
 void pcm8_resync(void) {}
 
-const char *pcm8_open_pdx(const char *path) {
+const char *pcm8_open_pdx(const char *path)
+{
     (void)path;
     return "disabled";
 }
@@ -840,7 +984,8 @@ void pcm8_close_pdx(void) {}
 bool pcm8_pdx_ready(void) { return false; }
 const char *pcm8_pdx_path(void) { return ""; }
 
-void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan) {
+void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, int pan)
+{
     (void)ch;
     (void)bank;
     (void)note;
@@ -848,7 +993,8 @@ void pcm8_key_on(uint32_t ch, uint32_t bank, uint32_t note, int mode, int vol, i
     (void)vol;
     (void)pan;
 }
-void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan) {
+void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan)
+{
     (void)ch;
     (void)vol;
     (void)mode;
@@ -858,7 +1004,8 @@ void pcm8_stop(uint32_t ch) { (void)ch; }
 void pcm8_end_all(void) {}
 void pcm8_abort_all(void) {}
 
-void pcm8_iocs_out(uint32_t note, int mode, int pan) {
+void pcm8_iocs_out(uint32_t note, int mode, int pan)
+{
     (void)note;
     (void)mode;
     (void)pan;
@@ -875,7 +1022,8 @@ void pcm8_reset_counters(void) {}
 void pcm8_set_enabled(bool on) { (void)on; }
 bool pcm8_enabled(void) { return false; }
 
-bool pcm8_selftest(const char **detail) {
+bool pcm8_selftest(const char **detail)
+{
     *detail = "SKIP (disabled)";
     return true;
 }

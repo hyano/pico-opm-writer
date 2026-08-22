@@ -45,14 +45,15 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
  * こちらは 1 回の走査で名前をバッファへ詰める。任意の位置の名前を後から引ける必要が
  * ある用途（autoplay のプレイリスト）向け。
  */
-typedef struct {
-    char *pool;          /* 名前を '\0' 区切りで詰めるバッファ */
-    uint32_t pool_bytes; /* pool の大きさ */
-    uint32_t pool_used;  /* 詰まったバイト数 */
-    uint16_t *offs;      /* 名前の昇順に並んだ pool へのオフセット */
-    uint32_t max_entries;/* offs の要素数 */
-    uint32_t count;      /* 詰まった件数 */
-    bool truncated;      /* 上限に当たって打ち切ったか */
+typedef struct
+{
+    char *pool;           /* 名前を '\0' 区切りで詰めるバッファ */
+    uint32_t pool_bytes;  /* pool の大きさ */
+    uint32_t pool_used;   /* 詰まったバイト数 */
+    uint16_t *offs;       /* 名前の昇順に並んだ pool へのオフセット */
+    uint32_t max_entries; /* offs の要素数 */
+    uint32_t count;       /* 詰まった件数 */
+    bool truncated;       /* 上限に当たって打ち切ったか */
 } filelist_buf_t;
 
 /* buf を空にする。pool / pool_bytes / offs / max_entries は呼び出し側が先に埋めておく。 */

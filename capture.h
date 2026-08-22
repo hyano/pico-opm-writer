@@ -20,7 +20,8 @@
  * PIO と DMA はこの状態に関係なく常時動いている。ここで切り替えているのは
  * 「リングから読み出して CDC #1 へ流すかどうか」だけ。
  */
-typedef enum {
+typedef enum
+{
     CAPTURE_STATE_IDLE,      /* 送信していない */
     CAPTURE_STATE_CAPTURING, /* 送信中 */
     CAPTURE_STATE_DRAINING,  /* p 0 時点までの残りを送り切っている最中 */

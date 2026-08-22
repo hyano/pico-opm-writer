@@ -17,7 +17,8 @@
 #include <stdint.h>
 
 /* φM と sys_clk のペア。値は opm.h の OPM_CLOCK_MODE_* と一致させてある。 */
-typedef enum {
+typedef enum
+{
     CLOCK_PRESET_4MHZ = 0, /* φM 4.000000MHz / sys 144MHz   / clkdiv 18 */
     CLOCK_PRESET_NTSC = 1, /* φM 3.579545MHz / sys 157.5MHz / clkdiv 22 */
 } clock_preset_t;

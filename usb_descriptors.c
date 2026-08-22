@@ -32,7 +32,7 @@
 #endif
 
 #define USBD_MANUFACTURER "Raspberry Pi"
-#define USBD_PRODUCT "Pico"
+#define USBD_PRODUCT      "Pico"
 
 /* IAD（Interface Association Descriptor）構成であることを示すクラス/サブクラス/プロトコル */
 static const tusb_desc_device_t s_usbd_desc_device = {
@@ -52,14 +52,16 @@ static const tusb_desc_device_t s_usbd_desc_device = {
     .bNumConfigurations = 1,
 };
 
-const uint8_t *tud_descriptor_device_cb(void) {
+const uint8_t *tud_descriptor_device_cb(void)
+{
     return (const uint8_t *)&s_usbd_desc_device;
 }
 
 /* ---- コンフィグレーションディスクリプタ ------------------------------------ */
 
 /* インタフェース番号（CDC は control/data の 2 つを消費する） */
-enum {
+enum
+{
     USBD_ITF_CDC0 = 0, /* コマンド用 CDC の control インタフェース */
     USBD_ITF_CDC0_DATA,
     USBD_ITF_CDC1, /* PCM 用 CDC の control インタフェース */
@@ -70,20 +72,21 @@ enum {
 
 /* エンドポイントアドレス（notification は IN 割り込み、data は OUT/IN バルク） */
 #define USBD_CDC0_EP_NOTIF (0x81)
-#define USBD_CDC0_EP_OUT (0x02)
-#define USBD_CDC0_EP_IN (0x82)
+#define USBD_CDC0_EP_OUT   (0x02)
+#define USBD_CDC0_EP_IN    (0x82)
 #define USBD_CDC1_EP_NOTIF (0x83)
-#define USBD_CDC1_EP_OUT (0x04)
-#define USBD_CDC1_EP_IN (0x84)
-#define USBD_MSC_EP_OUT (0x05)
-#define USBD_MSC_EP_IN (0x85)
+#define USBD_CDC1_EP_OUT   (0x04)
+#define USBD_CDC1_EP_IN    (0x84)
+#define USBD_MSC_EP_OUT    (0x05)
+#define USBD_MSC_EP_IN     (0x85)
 
 /* notification エンドポイントの最大パケットサイズ / data エンドポイントはフルスピードの 64 バイト */
 #define USBD_CDC_NOTIF_MAX_SIZE (8)
-#define USBD_CDC_DATA_MAX_SIZE (64)
+#define USBD_CDC_DATA_MAX_SIZE  (64)
 
 /* 文字列ディスクリプタのインデックス（0 は言語 ID 用に予約） */
-enum {
+enum
+{
     USBD_STR_MANUF = 1,
     USBD_STR_PRODUCT,
     USBD_STR_SERIAL,
@@ -105,10 +108,10 @@ static const uint8_t s_usbd_desc_cfg[USBD_DESC_LEN] = {
      * data インタフェース番号は control の直後（control + 1）に自動的に割り当てられる。
      */
     TUD_CDC_DESCRIPTOR(USBD_ITF_CDC0, USBD_STR_CDC0, USBD_CDC0_EP_NOTIF,
-        USBD_CDC_NOTIF_MAX_SIZE, USBD_CDC0_EP_OUT, USBD_CDC0_EP_IN, USBD_CDC_DATA_MAX_SIZE),
+                       USBD_CDC_NOTIF_MAX_SIZE, USBD_CDC0_EP_OUT, USBD_CDC0_EP_IN, USBD_CDC_DATA_MAX_SIZE),
 
     TUD_CDC_DESCRIPTOR(USBD_ITF_CDC1, USBD_STR_CDC1, USBD_CDC1_EP_NOTIF,
-        USBD_CDC_NOTIF_MAX_SIZE, USBD_CDC1_EP_OUT, USBD_CDC1_EP_IN, USBD_CDC_DATA_MAX_SIZE),
+                       USBD_CDC_NOTIF_MAX_SIZE, USBD_CDC1_EP_OUT, USBD_CDC1_EP_IN, USBD_CDC_DATA_MAX_SIZE),
 
     /*
      * MSC は CDC の後ろに置く。CDC #0 をインタフェース 0 に固定したままにするためで、
@@ -118,10 +121,11 @@ static const uint8_t s_usbd_desc_cfg[USBD_DESC_LEN] = {
      *                    data OUT EP, data IN EP, data EP サイズ)
      */
     TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN,
-        USBD_CDC_DATA_MAX_SIZE),
+                       USBD_CDC_DATA_MAX_SIZE),
 };
 
-const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
+const uint8_t *tud_descriptor_configuration_cb(uint8_t index)
+{
     (void)index; /* コンフィグは 1 つしか無いので無視する */
     return s_usbd_desc_cfg;
 }
@@ -144,27 +148,34 @@ static const char *const s_usbd_desc_str[] = {
 /* UTF-16 変換後の文字列バッファ（終端の長さ+種別ワードを含む）の最大ワード数 */
 #define USBD_DESC_STR_MAX (32)
 
-const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
+{
     (void)langid;
 
     static uint16_t s_desc_str[USBD_DESC_STR_MAX];
 
     /* フラッシュのユニーク ID からシリアル番号を初回だけ生成する */
-    if (!s_usbd_serial_str[0]) {
+    if (!s_usbd_serial_str[0])
+    {
         pico_get_unique_board_id_string(s_usbd_serial_str, sizeof(s_usbd_serial_str));
     }
 
     uint8_t len;
-    if (index == 0) {
+    if (index == 0)
+    {
         /* インデックス 0 は対応言語一覧（英語のみ） */
         s_desc_str[1] = 0x0409;
         len = 1;
-    } else {
-        if (index >= sizeof(s_usbd_desc_str) / sizeof(s_usbd_desc_str[0])) {
+    }
+    else
+    {
+        if (index >= sizeof(s_usbd_desc_str) / sizeof(s_usbd_desc_str[0]))
+        {
             return NULL;
         }
         const char *str = s_usbd_desc_str[index];
-        for (len = 0; len < USBD_DESC_STR_MAX - 1 && str[len]; ++len) {
+        for (len = 0; len < USBD_DESC_STR_MAX - 1 && str[len]; ++len)
+        {
             s_desc_str[1 + len] = (uint16_t)str[len];
         }
     }

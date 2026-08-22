@@ -54,7 +54,8 @@
 /* vgm list が並べられるファイル数の上限 */
 #define VGM_LIST_MAX 256u
 
-typedef enum {
+typedef enum
+{
     VGM_STATE_STOPPED = 0,
     VGM_STATE_PLAYING,
     VGM_STATE_ERROR, /* ストリームの途中で壊れていた */
@@ -108,7 +109,7 @@ vgm_state_t vgm_state(void);
 const char *vgm_state_name(void);
 bool vgm_is_playing(void);
 
-const char *vgm_current_name(void); /* 再生中のファイル名。無ければ空文字列 */
+const char *vgm_current_name(void);  /* 再生中のファイル名。無ければ空文字列 */
 uint64_t vgm_position_samples(void); /* 発行済みのサンプル位置 */
 uint32_t vgm_total_samples(void);    /* ヘッダの総サンプル数。不明なら 0 */
 uint32_t vgm_loop_count(void);

@@ -65,11 +65,13 @@
  * 値域は -32768 (m=0, E=7) 〜 +32704 (m=1023, E=7 = 511<<6)。
  * 正側が +32767 に届かないのは仕様どおりで、正規化してはいけない。
  */
-static inline int16_t ym3012_word_to_pcm(uint16_t w) {
+static inline int16_t ym3012_word_to_pcm(uint16_t w)
+{
     uint32_t m = ((uint32_t)w >> 3) & 0x3ffu;
     uint32_t e = ((uint32_t)w >> 13) & 0x7u;
 
-    if (e == 0u) {
+    if (e == 0u)
+    {
         return 0;
     }
 
@@ -82,7 +84,8 @@ static inline int16_t ym3012_word_to_pcm(uint16_t w) {
 }
 
 /* 1 フレーム (32bit) を L / R へ分解する。下位 16bit が L、上位 16bit が R。 */
-static inline void ym3012_frame_to_pcm(uint32_t frame, int16_t *l, int16_t *r) {
+static inline void ym3012_frame_to_pcm(uint32_t frame, int16_t *l, int16_t *r)
+{
     *l = ym3012_word_to_pcm((uint16_t)frame);
     *r = ym3012_word_to_pcm((uint16_t)(frame >> 16));
 }
@@ -95,7 +98,7 @@ static inline void ym3012_frame_to_pcm(uint32_t frame, int16_t *l, int16_t *r) {
  */
 void ym3012_init(void);
 
-bool ym3012_selftest_passed(void);       /* ループバック自己診断の結果 */
+bool ym3012_selftest_passed(void);        /* ループバック自己診断の結果 */
 const char *ym3012_selftest_detail(void); /* 失敗時の内訳。成功なら "PASS" */
 
 /* ---- リング操作 -------------------------------------------------------- */
@@ -126,7 +129,8 @@ uint64_t ym3012_write_total(void);
  * count_forbidden は禁止コード E=0 を統計へ数えるかどうか。これは
  * 「キャプチャしたデータの品質」の指標なので、数えるのは既定カーソルだけにする。
  */
-typedef struct {
+typedef struct
+{
     uint64_t read_total;
     bool count_forbidden;
 } ym3012_reader_t;

@@ -33,7 +33,7 @@ static storage_fs_state_t s_fs_state;
 static FATFS s_fs;
 static uint32_t s_fw_end;
 
-static bool s_host_dirty; /* PC が書いたが eject が来ていない */
+static bool s_host_dirty;   /* PC が書いたが eject が来ていない */
 static bool s_media_change; /* HOST へ入った直後の 1 回だけ立てる */
 static bool s_host_used;    /* PC がメディアを読んだか */
 static absolute_time_t s_flush_deadline;
@@ -45,10 +45,12 @@ static uint8_t s_mkfs_work[FLASH_DISK_ES];
 
 /* ---- マウント ---------------------------------------------------------- */
 
-static void mount_now(void) {
+static void mount_now(void)
+{
     FRESULT fr = f_mount(&s_fs, "", 1);
 
-    switch (fr) {
+    switch (fr)
+    {
     case FR_OK:
         s_fs_state = STORAGE_FS_MOUNTED;
         break;
@@ -61,8 +63,10 @@ static void mount_now(void) {
     }
 
     s_label[0] = '\0';
-    if (fr == FR_OK) {
-        if (f_getlabel("", s_label, NULL) != FR_OK) {
+    if (fr == FR_OK)
+    {
+        if (f_getlabel("", s_label, NULL) != FR_OK)
+        {
             s_label[0] = '\0';
         }
     }
@@ -70,7 +74,8 @@ static void mount_now(void) {
 
 /* ---- 初期化 ------------------------------------------------------------ */
 
-void storage_init(void) {
+void storage_init(void)
+{
     flash_disk_init();
 
     s_mode = STORAGE_MODE_PLAYER;
@@ -85,7 +90,8 @@ void storage_init(void) {
      * hard_assert で止めると基板が起動しなくなって復旧しづらいので、
      * 状態として持ち回り i / storage status から見えるようにする。
      */
-    if (s_fw_end > FLASH_FATFS_OFFSET) {
+    if (s_fw_end > FLASH_FATFS_OFFSET)
+    {
         s_fs_state = STORAGE_FS_REGION_OVERLAP;
         printf("# ERR storage region overlaps firmware (end 0x%08x, region 0x%08x)\n",
                (unsigned)(XIP_BASE + s_fw_end), (unsigned)(XIP_BASE + FLASH_FATFS_OFFSET));
@@ -97,13 +103,16 @@ void storage_init(void) {
 
 /* ---- 毎周回の処理 ------------------------------------------------------ */
 
-bool storage_service(void) {
-    if (s_mode != STORAGE_MODE_HOST) {
+bool storage_service(void)
+{
+    if (s_mode != STORAGE_MODE_HOST)
+    {
         return false;
     }
 
     uint32_t dirty = flash_disk_dirty_lines();
-    if (dirty == 0u) {
+    if (dirty == 0u)
+    {
         return false;
     }
 
@@ -122,11 +131,13 @@ bool storage_service(void) {
      * これを頻繁に投げてくるため。確実に書き切るのは eject と storage player の
      * ときで、そこでは全部書き出す。
      */
-    if (!time_reached(s_flush_deadline)) {
+    if (!time_reached(s_flush_deadline))
+    {
         return false;
     }
 
-    if (!flash_disk_flush_one()) {
+    if (!flash_disk_flush_one())
+    {
         s_fs_state = STORAGE_FS_IO_ERROR;
         printf("# ERR storage io error\n");
         return true;
@@ -143,11 +154,14 @@ bool storage_service(void) {
 
 /* ---- モードの切り替え -------------------------------------------------- */
 
-const char *storage_set_host(void) {
-    if (s_fs_state == STORAGE_FS_REGION_OVERLAP) {
+const char *storage_set_host(void)
+{
+    if (s_fs_state == STORAGE_FS_REGION_OVERLAP)
+    {
         return "no filesystem";
     }
-    if (s_mode == STORAGE_MODE_HOST) {
+    if (s_mode == STORAGE_MODE_HOST)
+    {
         return NULL; /* 冪等 */
     }
 
@@ -162,25 +176,30 @@ const char *storage_set_host(void) {
      * autoplay は曲間（GAP）だと VGM も MDX も鳴っていないので、下の 2 つでは
      * 素通りしてしまう。通したところで次の曲で必ず失敗するので、先に止めさせる。
      */
-    if (autoplay_is_running()) {
+    if (autoplay_is_running())
+    {
         printf("# hint    : cannot switch while autoplay is running; run autoplay stop first\n");
         return "wrong state";
     }
-    if (vgm_is_playing()) {
+    if (vgm_is_playing())
+    {
         printf("# hint    : cannot switch while VGM is playing; run vgm stop first\n");
         return "wrong state";
     }
-    if (mdx_is_playing()) {
+    if (mdx_is_playing())
+    {
         printf("# hint    : cannot switch while MDX is playing; run mdx stop first\n");
         return "wrong state";
     }
-    if (capture_state() != CAPTURE_STATE_IDLE) {
+    if (capture_state() != CAPTURE_STATE_IDLE)
+    {
         printf("# hint    : cannot switch while capturing PCM; run p 0 first\n");
         return "wrong state";
     }
 
     /* format 直後などで dirty が残っていれば先に片付ける */
-    if (!flash_disk_flush_all()) {
+    if (!flash_disk_flush_all())
+    {
         s_fs_state = STORAGE_FS_IO_ERROR;
         return "io error";
     }
@@ -207,11 +226,14 @@ const char *storage_set_host(void) {
     return NULL;
 }
 
-const char *storage_set_player(void) {
-    if (s_fs_state == STORAGE_FS_REGION_OVERLAP) {
+const char *storage_set_player(void)
+{
+    if (s_fs_state == STORAGE_FS_REGION_OVERLAP)
+    {
         return "no filesystem";
     }
-    if (s_mode == STORAGE_MODE_PLAYER) {
+    if (s_mode == STORAGE_MODE_PLAYER)
+    {
         return NULL; /* 冪等 */
     }
 
@@ -221,7 +243,8 @@ const char *storage_set_player(void) {
     s_mode = STORAGE_MODE_PLAYER;
     flash_disk_invalidate();
 
-    if (!flushed) {
+    if (!flushed)
+    {
         s_fs_state = STORAGE_FS_IO_ERROR;
         i2s_set_enabled(true);
         capture_resync_after_blackout();
@@ -237,7 +260,8 @@ const char *storage_set_player(void) {
     i2s_set_enabled(true);
     capture_resync_after_blackout();
 
-    if (s_host_dirty) {
+    if (s_host_dirty)
+    {
         printf("# warn    : host did not eject; files may be incomplete\n");
     }
     s_host_dirty = false;
@@ -245,8 +269,10 @@ const char *storage_set_player(void) {
     return NULL;
 }
 
-void storage_host_ejected(void) {
-    if (s_mode != STORAGE_MODE_HOST) {
+void storage_host_ejected(void)
+{
+    if (s_mode != STORAGE_MODE_HOST)
+    {
         return;
     }
 
@@ -256,7 +282,8 @@ void storage_host_ejected(void) {
      * 一度 eject したあと storage host に戻せなくなるので無視する。
      * 本物の eject は必ずマウント（= 読み出し）のあとに来る。
      */
-    if (!s_host_used) {
+    if (!s_host_used)
+    {
         return;
     }
 
@@ -267,25 +294,30 @@ void storage_host_ejected(void) {
 
 /* ---- MSC からの通知 ---------------------------------------------------- */
 
-bool storage_take_media_change(void) {
-    if (!s_media_change) {
+bool storage_take_media_change(void)
+{
+    if (!s_media_change)
+    {
         return false;
     }
     s_media_change = false;
     return true;
 }
 
-void storage_note_host_read(void) {
+void storage_note_host_read(void)
+{
     s_host_used = true;
 }
 
-void storage_note_host_write(void) {
+void storage_note_host_write(void)
+{
     s_host_used = true;
     s_host_dirty = true;
     s_flush_deadline = make_timeout_time_ms(STORAGE_FLUSH_IDLE_MS);
 }
 
-bool storage_sync_now(void) {
+bool storage_sync_now(void)
+{
     /*
      * ここで全部書き出さないのは意図的。macOS はコピー中に何度もこれを投げるので、
      * 素直に従うと消去回数が 1 桁増える（storage_service() のコメント参照）。
@@ -302,20 +334,25 @@ bool storage_sync_now(void) {
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 
-storage_mode_t storage_mode(void) {
+storage_mode_t storage_mode(void)
+{
     return s_mode;
 }
 
-const char *storage_mode_name(void) {
+const char *storage_mode_name(void)
+{
     return (s_mode == STORAGE_MODE_HOST) ? "HOST" : "PLAYER";
 }
 
-storage_fs_state_t storage_fs_state(void) {
+storage_fs_state_t storage_fs_state(void)
+{
     return s_fs_state;
 }
 
-const char *storage_fs_state_name(void) {
-    switch (s_fs_state) {
+const char *storage_fs_state_name(void)
+{
+    switch (s_fs_state)
+    {
     case STORAGE_FS_MOUNTED:
         return "mounted";
     case STORAGE_FS_NO_FILESYSTEM:
@@ -330,37 +367,46 @@ const char *storage_fs_state_name(void) {
     }
 }
 
-bool storage_medium_present(void) {
+bool storage_medium_present(void)
+{
     return s_mode == STORAGE_MODE_HOST && s_fs_state != STORAGE_FS_REGION_OVERLAP;
 }
 
-bool storage_fatfs_may_access(void) {
+bool storage_fatfs_may_access(void)
+{
     return s_mode == STORAGE_MODE_PLAYER && s_fs_state != STORAGE_FS_REGION_OVERLAP;
 }
 
-bool storage_host_dirty(void) {
+bool storage_host_dirty(void)
+{
     return s_host_dirty;
 }
 
 /* ---- 情報 -------------------------------------------------------------- */
 
-uint32_t storage_region_offset(void) {
+uint32_t storage_region_offset(void)
+{
     return FLASH_FATFS_OFFSET;
 }
 
-uint32_t storage_region_size(void) {
+uint32_t storage_region_size(void)
+{
     return FLASH_FATFS_SIZE;
 }
 
-uint32_t storage_firmware_end(void) {
+uint32_t storage_firmware_end(void)
+{
     return s_fw_end;
 }
 
-const char *storage_fs_type_name(void) {
-    if (s_fs_state != STORAGE_FS_MOUNTED) {
+const char *storage_fs_type_name(void)
+{
+    if (s_fs_state != STORAGE_FS_MOUNTED)
+    {
         return "-";
     }
-    switch (s_fs.fs_type) {
+    switch (s_fs.fs_type)
+    {
     case FS_FAT12:
         return "FAT12";
     case FS_FAT16:
@@ -372,24 +418,29 @@ const char *storage_fs_type_name(void) {
     }
 }
 
-uint32_t storage_cluster_bytes(void) {
-    if (s_fs_state != STORAGE_FS_MOUNTED) {
+uint32_t storage_cluster_bytes(void)
+{
+    if (s_fs_state != STORAGE_FS_MOUNTED)
+    {
         return 0u;
     }
     return (uint32_t)s_fs.csize * FLASH_DISK_SS;
 }
 
-bool storage_space_kib(uint32_t *free_kib, uint32_t *total_kib) {
+bool storage_space_kib(uint32_t *free_kib, uint32_t *total_kib)
+{
     *free_kib = 0u;
     *total_kib = 0u;
 
-    if (s_fs_state != STORAGE_FS_MOUNTED) {
+    if (s_fs_state != STORAGE_FS_MOUNTED)
+    {
         return false;
     }
 
     FATFS *fs = NULL;
     DWORD free_clusters = 0;
-    if (f_getfree("", &free_clusters, &fs) != FR_OK || fs == NULL) {
+    if (f_getfree("", &free_clusters, &fs) != FR_OK || fs == NULL)
+    {
         return false;
     }
 
@@ -400,17 +451,21 @@ bool storage_space_kib(uint32_t *free_kib, uint32_t *total_kib) {
     return true;
 }
 
-const char *storage_label(void) {
+const char *storage_label(void)
+{
     return s_label;
 }
 
 /* ---- フォーマット ------------------------------------------------------ */
 
-const char *storage_format(void) {
-    if (s_fs_state == STORAGE_FS_REGION_OVERLAP) {
+const char *storage_format(void)
+{
+    if (s_fs_state == STORAGE_FS_REGION_OVERLAP)
+    {
         return "no filesystem";
     }
-    if (s_mode != STORAGE_MODE_PLAYER) {
+    if (s_mode != STORAGE_MODE_PLAYER)
+    {
         return "wrong state";
     }
 
@@ -423,9 +478,9 @@ const char *storage_format(void) {
      */
     static const MKFS_PARM opt = {
         .fmt = FM_FAT | FM_SFD,
-        .n_fat = 1,      /* 2MiB では冗長性より容量と消去回数を取る */
-        .align = 0,      /* disk_ioctl(GET_BLOCK_SIZE) から自動で決める */
-        .n_root = 512,   /* 16KiB。LFN は 1 名で複数スロット使うので余裕を持たせる */
+        .n_fat = 1,    /* 2MiB では冗長性より容量と消去回数を取る */
+        .align = 0,    /* disk_ioctl(GET_BLOCK_SIZE) から自動で決める */
+        .n_root = 512, /* 16KiB。LFN は 1 名で複数スロット使うので余裕を持たせる */
         .au_size = FLASH_DISK_ES,
     };
 
@@ -434,31 +489,37 @@ const char *storage_format(void) {
     s_fs_state = STORAGE_FS_UNMOUNTED;
 
     FRESULT fr = f_mkfs("", &opt, s_mkfs_work, sizeof(s_mkfs_work));
-    if (fr != FR_OK) {
+    if (fr != FR_OK)
+    {
         flash_disk_invalidate();
         mount_now();
         return "io error";
     }
 
-    if (!flash_disk_flush_all()) {
+    if (!flash_disk_flush_all())
+    {
         s_fs_state = STORAGE_FS_IO_ERROR;
         return "io error";
     }
 
     mount_now();
-    if (s_fs_state != STORAGE_FS_MOUNTED) {
+    if (s_fs_state != STORAGE_FS_MOUNTED)
+    {
         return "io error";
     }
 
-    if (f_setlabel("OPMVGM") != FR_OK) {
+    if (f_setlabel("OPMVGM") != FR_OK)
+    {
         return "io error";
     }
 
-    if (f_mkdir("/VGM") != FR_OK) {
+    if (f_mkdir("/VGM") != FR_OK)
+    {
         return "io error";
     }
 
-    if (f_mkdir(MDX_DIR) != FR_OK) {
+    if (f_mkdir(MDX_DIR) != FR_OK)
+    {
         return "io error";
     }
 
@@ -467,11 +528,13 @@ const char *storage_format(void) {
      * .Spotlight-V100 や .fseventsd で食われるのを防ぐ。
      */
     FIL fp;
-    if (f_open(&fp, "/.metadata_never_index", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
+    if (f_open(&fp, "/.metadata_never_index", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK)
+    {
         f_close(&fp);
     }
 
-    if (!flash_disk_flush_all()) {
+    if (!flash_disk_flush_all())
+    {
         s_fs_state = STORAGE_FS_IO_ERROR;
         return "io error";
     }

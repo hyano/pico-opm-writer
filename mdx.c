@@ -133,7 +133,8 @@ static uint8_t s_opm_1b;
 
 /* ---- チャンネル -------------------------------------------------------- */
 
-typedef struct {
+typedef struct
+{
     uint8_t wave; /* S0026。0 = 停止、1-4 = 波形 */
     uint32_t offset_start;
     uint32_t delta_start;
@@ -144,7 +145,8 @@ typedef struct {
     uint16_t len_cnt;
 } mdx_plfo_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t wave; /* S0040 */
     uint16_t delta_start;
     uint16_t delta_cooked;
@@ -154,7 +156,8 @@ typedef struct {
     uint16_t len_cnt;
 } mdx_vlfo_t;
 
-typedef struct {
+typedef struct
+{
     uint32_t p;
     uint32_t voice;
     uint8_t pcm_bank;
@@ -217,12 +220,13 @@ static uint64_t s_due_us;
 static uint64_t s_ticks;
 static uint32_t s_loops;
 static uint32_t s_reslips;
-static uint32_t s_cursor;  /* tick を中断したときの次のチャンネル */
+static uint32_t s_cursor; /* tick を中断したときの次のチャンネル */
 static bool s_in_tick;
 
 /* ---- 表 ---------------------------------------------------------------- */
 
 /* 音程（1/64 半音 >> 6 = 音符番号 0-95）-> KC。OPM は下位 4bit で 3/7/11/15 を飛ばす。 */
+/* clang-format off */
 static const uint8_t KEY_CODE[96] = {
     0x00, 0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0a, 0x0c, 0x0d, 0x0e,
     0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1a, 0x1c, 0x1d, 0x1e,
@@ -233,52 +237,63 @@ static const uint8_t KEY_CODE[96] = {
     0x60, 0x61, 0x62, 0x64, 0x65, 0x66, 0x68, 0x69, 0x6a, 0x6c, 0x6d, 0x6e,
     0x70, 0x71, 0x72, 0x74, 0x75, 0x76, 0x78, 0x79, 0x7a, 0x7c, 0x7d, 0x7e,
 };
+/* clang-format on */
 
 /* CON -> キャリアのスロットマスク（bit0=M1 / bit1=M2 / bit2=C1 / bit3=C2） */
 static const uint8_t CARRIER_SLOT[8] = {0x08, 0x08, 0x08, 0x08, 0x0c, 0x0e, 0x0e, 0x0f};
 
 /* v0-v15 -> TL */
+/* clang-format off */
 static const uint8_t VOLUME_TBL[16] = {
     0x2a, 0x28, 0x25, 0x22, 0x20, 0x1d, 0x1a, 0x18,
     0x15, 0x12, 0x10, 0x0d, 0x0a, 0x08, 0x05, 0x02,
 };
+/* clang-format on */
 
 /* TL 相当の 0-42 -> PCM8 の音量 0-15（参照実装 L000C6E） */
+/* clang-format off */
 static const uint8_t PCM_VOLUME_TBL[43] = {
     15, 15, 15, 14, 14, 14, 13, 13, 13, 12, 12, 11, 11, 11, 10, 10,
     10,  9,  9,  8,  8,  8,  7,  7,  7,  6,  6,  5,  5,  5,  4,  4,
      4,  3,  3,  2,  2,  2,  1,  1,  1,  0,  0,
 };
+/* clang-format on */
 
 /* ---- 小物 -------------------------------------------------------------- */
 
 /* MDX のオフセット・ワードはビッグエンディアン（68000） */
-static uint16_t rd16(uint32_t at) {
+static uint16_t rd16(uint32_t at)
+{
     return (uint16_t)(((uint16_t)s_file[at] << 8) | s_file[at + 1u]);
 }
 
-static bool is_adpcm(const mdx_ch_t *c) {
+static bool is_adpcm(const mdx_ch_t *c)
+{
     return (c->ch & 0x80u) != 0u;
 }
 
 /* OPM への書き込み。参照実装の L_WRITEOPM と同じくシャドウを更新する。 */
-static void opm_put(uint8_t addr, uint8_t data) {
+static void opm_put(uint8_t addr, uint8_t data)
+{
     opm_write(addr, data);
     s_opm[addr] = data;
-    if (addr == 0x1bu) {
+    if (addr == 0x1bu)
+    {
         s_opm_1b = data;
     }
 }
 
 /* 再生中に見つかった異常は非同期通知（vgm_fail() と同じ流儀） */
-static void mdx_fail(const char *why, uint32_t at) {
+static void mdx_fail(const char *why, uint32_t at)
+{
     printf("# ERR mdx bad file (%s at 0x%08x)\n", why, (unsigned)at);
     s_state = MDX_STATE_ERROR;
 }
 
 /* 参照実装 L00117a の擬似乱数（LFO の波形 4 が使う） */
 static uint16_t s_rnd_seed = 0x1234u;
-static uint8_t rnd8(void) {
+static uint8_t rnd8(void)
+{
     s_rnd_seed = (uint16_t)(s_rnd_seed * 0xc549u + 0x0cu);
     return (uint8_t)(s_rnd_seed >> 8);
 }
@@ -292,17 +307,21 @@ static uint8_t rnd8(void) {
  *   base: +0      Word  音色データのオフセット（base 相対）
  *         +2      Word * N  各チャンネルの MML のオフセット（base 相対）
  */
-static const char *parse_header(void) {
+static const char *parse_header(void)
+{
     uint32_t at = 0;
     bool found = false;
-    while (at + 3u <= s_size) {
-        if (s_file[at] == 0x0Du && s_file[at + 1u] == 0x0Au && s_file[at + 2u] == 0x1Au) {
+    while (at + 3u <= s_size)
+    {
+        if (s_file[at] == 0x0Du && s_file[at + 1u] == 0x0Au && s_file[at + 2u] == 0x1Au)
+        {
             found = true;
             break;
         }
         at++;
     }
-    if (!found) {
+    if (!found)
+    {
         return "bad file";
     }
 
@@ -312,21 +331,25 @@ static const char *parse_header(void) {
 
     uint32_t pat = at + 3u;
     uint32_t pend = pat;
-    while (pend < s_size && s_file[pend] != 0x00u) {
+    while (pend < s_size && s_file[pend] != 0x00u)
+    {
         pend++;
     }
-    if (pend >= s_size) {
+    if (pend >= s_size)
+    {
         return "bad file";
     }
     uint32_t plen = pend - pat;
-    if (plen > sizeof(s_pdx) - 1u) {
+    if (plen > sizeof(s_pdx) - 1u)
+    {
         plen = (uint32_t)(sizeof(s_pdx) - 1u);
     }
     memcpy(s_pdx, &s_file[pat], plen);
     s_pdx[plen] = '\0';
 
     s_base = pend + 1u;
-    if (s_base + 4u > s_size) {
+    if (s_base + 4u > s_size)
+    {
         return "bad file";
     }
 
@@ -336,28 +359,34 @@ static const char *parse_header(void) {
      * 9 = FM 8 + ADPCM 1、16 = FM 8 + ADPCM 8 (PCM8 拡張)。
      */
     uint16_t first = rd16(s_base + 2u);
-    if (first < 4u || (first & 1u) != 0u) {
+    if (first < 4u || (first & 1u) != 0u)
+    {
         return "bad file";
     }
     uint32_t nch = ((uint32_t)first - 2u) / 2u;
-    if (nch != 9u && nch != 16u) {
+    if (nch != 9u && nch != 16u)
+    {
         return "bad file";
     }
     s_nch = nch;
 
-    if (s_base + 2u + 2u * nch > s_size) {
+    if (s_base + 2u + 2u * nch > s_size)
+    {
         return "bad file";
     }
 
     uint16_t voice_off = rd16(s_base);
     s_voice_top = s_base + voice_off;
-    if (voice_off < first || s_voice_top > s_size) {
+    if (voice_off < first || s_voice_top > s_size)
+    {
         return "bad file";
     }
 
-    for (uint32_t i = 0; i < nch; i++) {
+    for (uint32_t i = 0; i < nch; i++)
+    {
         uint32_t off = s_base + rd16(s_base + 2u + 2u * i);
-        if (off >= s_size) {
+        if (off >= s_size)
+        {
             return "bad file";
         }
         s_mml_top[i] = off;
@@ -368,9 +397,11 @@ static const char *parse_header(void) {
      * 参照実装は線形探索して最初の一致を採るので、索引も最初の一致を残す。
      */
     memset(s_voice, 0, sizeof(s_voice));
-    for (uint32_t v = s_voice_top; v + 27u <= s_size; v += 27u) {
+    for (uint32_t v = s_voice_top; v + 27u <= s_size; v += 27u)
+    {
         uint8_t no = s_file[v];
-        if (s_voice[no] == 0u) {
+        if (s_voice[no] == 0u)
+        {
             s_voice[no] = (uint16_t)(v + 1u);
         }
     }
@@ -378,10 +409,13 @@ static const char *parse_header(void) {
     return NULL;
 }
 
-static uint32_t voice_count(void) {
+static uint32_t voice_count(void)
+{
     uint32_t n = 0;
-    for (uint32_t i = 0; i < 256u; i++) {
-        if (s_voice[i] != 0u) {
+    for (uint32_t i = 0; i < 256u; i++)
+    {
+        if (s_voice[i] != 0u)
+        {
             n++;
         }
     }
@@ -396,16 +430,20 @@ static uint32_t voice_count(void) {
  */
 
 /* 音色をレジスタへ展開する（参照実装 L000d84） */
-static void snd_voice(mdx_ch_t *c) {
-    if ((c->f17 & F17_VOICE_REQ) == 0u) {
+static void snd_voice(mdx_ch_t *c)
+{
+    if ((c->f17 & F17_VOICE_REQ) == 0u)
+    {
         return;
     }
     c->f17 &= (uint8_t)~F17_VOICE_REQ;
 
-    if (c->voice == 0u) {
+    if (c->voice == 0u)
+    {
         return; /* 未定義の音色番号。参照実装はダミーを使うが、ここでは触らない */
     }
-    if (is_adpcm(c)) {
+    if (is_adpcm(c))
+    {
         return;
     }
 
@@ -423,15 +461,18 @@ static void snd_voice(mdx_ch_t *c) {
     uint8_t reg = (uint8_t)(0x40u + c->ch);
 
     /* DT1/MUL */
-    for (uint32_t i = 0; i < 4u; i++) {
+    for (uint32_t i = 0; i < 4u; i++)
+    {
         opm_put(reg, s_file[a++]);
         reg = (uint8_t)(reg + 8u);
     }
     /* TL。キャリアはいったん最小音量にして、直後の音量計算で入れ直す。 */
     uint8_t m = carrier;
-    for (uint32_t i = 0; i < 4u; i++) {
+    for (uint32_t i = 0; i < 4u; i++)
+    {
         uint8_t d = s_file[a++];
-        if ((m & 1u) != 0u) {
+        if ((m & 1u) != 0u)
+        {
             d = 0x7fu;
         }
         m >>= 1;
@@ -439,7 +480,8 @@ static void snd_voice(mdx_ch_t *c) {
         reg = (uint8_t)(reg + 8u);
     }
     /* KS/AR, AME/D1R, DT2/D2R, D1L/RR */
-    for (uint32_t i = 0; i < 16u; i++) {
+    for (uint32_t i = 0; i < 16u; i++)
+    {
         opm_put(reg, s_file[a++]);
         reg = (uint8_t)(reg + 8u);
     }
@@ -449,29 +491,36 @@ static void snd_voice(mdx_ch_t *c) {
 }
 
 /* パンと FL/CON（参照実装 L000e66） */
-static void snd_pan(mdx_ch_t *c) {
-    if ((c->f17 & F17_PAN_DIRTY) == 0u) {
+static void snd_pan(mdx_ch_t *c)
+{
+    if ((c->f17 & F17_PAN_DIRTY) == 0u)
+    {
         return;
     }
     c->f17 &= (uint8_t)~F17_PAN_DIRTY;
-    if (is_adpcm(c)) {
+    if (is_adpcm(c))
+    {
         return;
     }
     opm_put((uint8_t)(0x20u + c->ch), c->pan);
 }
 
 /* キャリアの TL を書く（参照実装 L000e28） */
-static void snd_tl(mdx_ch_t *c, uint8_t add) {
+static void snd_tl(mdx_ch_t *c, uint8_t add)
+{
     c->vol_last = add;
-    if (c->voice == 0u || is_adpcm(c)) {
+    if (c->voice == 0u || is_adpcm(c))
+    {
         return;
     }
     uint32_t a = c->voice + 6u; /* FL/CON + スロットマスク + DT1/MUL 4 個を飛ばす */
     uint8_t m = c->carrier;
     uint8_t reg = (uint8_t)(0x60u + c->ch);
-    for (uint32_t i = 0; i < 4u; i++) {
+    for (uint32_t i = 0; i < 4u; i++)
+    {
         uint8_t d = s_file[a++];
-        if ((m & 1u) != 0u) {
+        if ((m & 1u) != 0u)
+        {
             uint32_t t = (uint32_t)d + (uint32_t)add;
             d = (t < 0x80u) ? (uint8_t)t : 0x7fu;
             opm_put(reg, d);
@@ -482,24 +531,31 @@ static void snd_tl(mdx_ch_t *c, uint8_t add) {
 }
 
 /* 音量（参照実装 L000dfe） */
-static void snd_volume(mdx_ch_t *c) {
+static void snd_volume(mdx_ch_t *c)
+{
     uint32_t v = c->vol;
-    if ((v & 0x80u) != 0u) {
+    if ((v & 0x80u) != 0u)
+    {
         v &= 0x7fu; /* @v。TL 直接指定 */
-    } else {
+    }
+    else
+    {
         v = VOLUME_TBL[v & 0x0fu];
     }
 
     v += s_fade_off;
-    if (v >= 0x80u) {
+    if (v >= 0x80u)
+    {
         v = 0x7fu; /* 桁溢れは無音扱い */
     }
     v += (uint32_t)(c->vlfo.offset >> 8);
-    if (v >= 0x80u) {
+    if (v >= 0x80u)
+    {
         v = 0x7fu;
     }
 
-    if (c->vol_last == (uint8_t)v) {
+    if (c->vol_last == (uint8_t)v)
+    {
         return;
     }
     snd_tl(c, (uint8_t)v);
@@ -510,9 +566,11 @@ static void snd_volume(mdx_ch_t *c) {
  * 参照実装 L000cdc と同じく 0x17FF で頭打ちにし、4 倍して上位バイトを
  * 音符番号、下位バイトを KF レジスタの値として使う。
  */
-static void pitch_to_kc_kf(uint16_t pitch, uint8_t *kc, uint8_t *kf) {
+static void pitch_to_kc_kf(uint16_t pitch, uint8_t *kc, uint8_t *kf)
+{
     uint16_t v = pitch;
-    if (v > 0x17ffu) {
+    if (v > 0x17ffu)
+    {
         /* 上に溢れたら最高音、下に回り込んでいたら最低音 */
         v = ((int16_t)v >= 0) ? 0x17ffu : 0u;
     }
@@ -522,21 +580,25 @@ static void pitch_to_kc_kf(uint16_t pitch, uint8_t *kc, uint8_t *kf) {
 }
 
 /* Timer-B 値と φM から 1 clock の長さ [us] を出す */
-static uint32_t tick_us_for(uint8_t tempo, uint32_t phim_hz) {
+static uint32_t tick_us_for(uint8_t tempo, uint32_t phim_hz)
+{
     uint32_t period_cycles = 1024u * (256u - (uint32_t)tempo);
     return (uint32_t)(((uint64_t)period_cycles * 1000000ull) / (uint64_t)phim_hz);
 }
 
 /* 音程を KC / KF へ落とす（参照実装 L000cdc） */
-static void snd_pitch(mdx_ch_t *c) {
+static void snd_pitch(mdx_ch_t *c)
+{
     uint16_t d = (uint16_t)(c->pitch + (uint16_t)(c->bend >> 16) +
                             (uint16_t)(c->plfo.offset >> 16));
-    if (d == c->pitch_out) {
+    if (d == c->pitch_out)
+    {
         return;
     }
     c->pitch_out = d;
 
-    if (is_adpcm(c)) {
+    if (is_adpcm(c))
+    {
         return;
     }
 
@@ -550,17 +612,22 @@ static void snd_pitch(mdx_ch_t *c) {
  * ADPCM チャンネルの音量を PCM8 の 0-15 へ落とす（参照実装 L000BE4 の前半）。
  * 範囲を外れたときは音量 0 を返し、呼び出し側は定位 0（= 停止）で発行する。
  */
-static uint32_t pcm_volume(const mdx_ch_t *c, bool *audible) {
+static uint32_t pcm_volume(const mdx_ch_t *c, bool *audible)
+{
     uint32_t v = c->vol;
-    if ((v & 0x80u) != 0u) {
+    if ((v & 0x80u) != 0u)
+    {
         v &= 0x7fu; /* @v。TL 直接指定 */
-    } else {
+    }
+    else
+    {
         v = VOLUME_TBL[v & 0x0fu];
     }
 
     /* 参照実装は add.b + bmi なので 8bit で丸めてから符号を見る */
     uint8_t t = (uint8_t)(v + s_fade_off);
-    if ((t & 0x80u) != 0u || t >= 0x2bu) {
+    if ((t & 0x80u) != 0u || t >= 0x2bu)
+    {
         *audible = false;
         return 0u;
     }
@@ -573,9 +640,11 @@ static uint32_t pcm_volume(const mdx_ch_t *c, bool *audible) {
  * 0xFC の側で 0 と 3 を入れ替えて格納してあり、ここでもう一度入れ替えるので
  * MML の p0 = 停止 / p3 = 左右に戻る。初期値 0 は左右になる。
  */
-static int pcm_pan(const mdx_ch_t *c) {
+static int pcm_pan(const mdx_ch_t *c)
+{
     uint8_t p = (uint8_t)(c->pan & 0x03u);
-    if (p == 0x00u || p == 0x03u) {
+    if (p == 0x00u || p == 0x03u)
+    {
         p ^= 0x03u;
     }
     return (int)p;
@@ -585,7 +654,8 @@ static int pcm_pan(const mdx_ch_t *c) {
  * 非 PCM8 モードの ADPCM 停止（参照実装 L000CEC）。
  * IOCS の「中止」は 0xE7 0x06 で抑止できる。「終了」は常に発行する。
  */
-static void snd_pcm_iocs_off(const mdx_ch_t *c) {
+static void snd_pcm_iocs_off(const mdx_ch_t *c)
+{
     pcm8_iocs_mod((c->f17 & F17_PCM_KEEP) == 0u);
     pcm8_iocs_mod(false);
 }
@@ -597,14 +667,18 @@ static void snd_pcm_iocs_off(const mdx_ch_t *c) {
  * PCM8 のファンクションコールにしかない音量・バンク・24bit 長は、
  * IOCS 経路（= 非 PCM8）では指定できない。
  */
-static void snd_key_on(mdx_ch_t *c) {
-    if (is_adpcm(c)) {
+static void snd_key_on(mdx_ch_t *c)
+{
+    if (is_adpcm(c))
+    {
         int mode = (int)((c->pan >> 2) & 0x1fu);
         int pan = pcm_pan(c);
 
-        if (!s_pcm8_mode) {
+        if (!s_pcm8_mode)
+        {
             /* 参照実装 L000B94。IOCS _ADPCMOUT なので音量もバンクも効かない。 */
-            if (s_fade_flag != 0u) {
+            if (s_fade_flag != 0u)
+            {
                 pan = 0; /* PCM_CUT。フェードアウトが進んだら鳴らさない */
             }
             snd_pcm_iocs_off(c);
@@ -615,7 +689,8 @@ static void snd_key_on(mdx_ch_t *c) {
         /* 参照実装 L000BE4 */
         bool audible = false;
         uint32_t vol = pcm_volume(c, &audible);
-        if (!audible) {
+        if (!audible)
+        {
             pan = 0; /* 定位 0 は PCM8 では停止 */
         }
         uint32_t ch = (uint32_t)(c->ch & 0x07u);
@@ -629,11 +704,16 @@ static void snd_key_on(mdx_ch_t *c) {
 }
 
 /* キーオフ（参照実装 L000CAA / ADPCM は L000CC6） */
-static void snd_key_off(mdx_ch_t *c) {
-    if (is_adpcm(c)) {
-        if (!s_pcm8_mode) {
+static void snd_key_off(mdx_ch_t *c)
+{
+    if (is_adpcm(c))
+    {
+        if (!s_pcm8_mode)
+        {
             snd_pcm_iocs_off(c); /* 参照実装 L000CEC */
-        } else {
+        }
+        else
+        {
             pcm8_stop((uint32_t)(c->ch & 0x07u)); /* データ長 0 のチャネル停止 */
         }
         return;
@@ -644,46 +724,54 @@ static void snd_key_off(mdx_ch_t *c) {
 /* ---- LFO --------------------------------------------------------------- */
 
 /* 参照実装 L001562 相当。ピッチ LFO を頭から掛け直す。 */
-static void plfo_reload(mdx_ch_t *c) {
+static void plfo_reload(mdx_ch_t *c)
+{
     c->plfo.len_cnt = c->plfo.len_cooked;
     c->plfo.delta = c->plfo.delta_start;
     c->plfo.offset = c->plfo.offset_start;
 }
 
 /* 参照実装 L0015d0 相当 */
-static void vlfo_reload(mdx_ch_t *c) {
+static void vlfo_reload(mdx_ch_t *c)
+{
     c->vlfo.len_cnt = c->vlfo.len;
     c->vlfo.delta = c->vlfo.delta_start;
     c->vlfo.offset = c->vlfo.delta_cooked;
 }
 
 /* 1 clock 分進める（参照実装 L0010b4 の 4 波形） */
-static void plfo_step(mdx_ch_t *c) {
+static void plfo_step(mdx_ch_t *c)
+{
     uint32_t d = c->plfo.delta;
-    switch (c->plfo.wave) {
+    switch (c->plfo.wave)
+    {
     case 1:
         c->plfo.offset += d;
-        if (--c->plfo.len_cnt == 0u) {
+        if (--c->plfo.len_cnt == 0u)
+        {
             c->plfo.len_cnt = c->plfo.len;
             c->plfo.offset = (uint32_t)(-(int32_t)c->plfo.offset);
         }
         break;
     case 2:
         c->plfo.offset = d;
-        if (--c->plfo.len_cnt == 0u) {
+        if (--c->plfo.len_cnt == 0u)
+        {
             c->plfo.len_cnt = c->plfo.len;
             c->plfo.delta = (uint32_t)(-(int32_t)c->plfo.delta);
         }
         break;
     case 3:
         c->plfo.offset += d;
-        if (--c->plfo.len_cnt == 0u) {
+        if (--c->plfo.len_cnt == 0u)
+        {
             c->plfo.len_cnt = c->plfo.len;
             c->plfo.delta = (uint32_t)(-(int32_t)c->plfo.delta);
         }
         break;
     case 4:
-        if (--c->plfo.len_cnt == 0u) {
+        if (--c->plfo.len_cnt == 0u)
+        {
             int16_t r = (int16_t)(uint16_t)rnd8();
             c->plfo.offset = (uint32_t)((int32_t)r * (int32_t)(int16_t)(uint16_t)d);
             c->plfo.len_cnt = c->plfo.len;
@@ -695,18 +783,22 @@ static void plfo_step(mdx_ch_t *c) {
 }
 
 /* 参照実装 L001116 の 4 波形 */
-static void vlfo_step(mdx_ch_t *c) {
+static void vlfo_step(mdx_ch_t *c)
+{
     uint16_t d = c->vlfo.delta;
-    switch (c->vlfo.wave) {
+    switch (c->vlfo.wave)
+    {
     case 1:
         c->vlfo.offset = (uint16_t)(c->vlfo.offset + d);
-        if (--c->vlfo.len_cnt == 0u) {
+        if (--c->vlfo.len_cnt == 0u)
+        {
             c->vlfo.len_cnt = c->vlfo.len;
             c->vlfo.offset = c->vlfo.delta_cooked;
         }
         break;
     case 2:
-        if (--c->vlfo.len_cnt == 0u) {
+        if (--c->vlfo.len_cnt == 0u)
+        {
             c->vlfo.len_cnt = c->vlfo.len;
             c->vlfo.offset = (uint16_t)(c->vlfo.offset + d);
             c->vlfo.delta = (uint16_t)(-(int16_t)c->vlfo.delta);
@@ -714,13 +806,15 @@ static void vlfo_step(mdx_ch_t *c) {
         break;
     case 3:
         c->vlfo.offset = (uint16_t)(c->vlfo.offset + d);
-        if (--c->vlfo.len_cnt == 0u) {
+        if (--c->vlfo.len_cnt == 0u)
+        {
             c->vlfo.len_cnt = c->vlfo.len;
             c->vlfo.delta = (uint16_t)(-(int16_t)c->vlfo.delta);
         }
         break;
     case 4:
-        if (--c->vlfo.len_cnt == 0u) {
+        if (--c->vlfo.len_cnt == 0u)
+        {
             int16_t r = (int16_t)(uint16_t)rnd8();
             c->vlfo.offset = (uint16_t)((int32_t)(int16_t)d * (int32_t)r);
             c->vlfo.len_cnt = c->vlfo.len;
@@ -732,14 +826,18 @@ static void vlfo_step(mdx_ch_t *c) {
 }
 
 /* LFO ディレイの消化（参照実装 L001094） */
-static void lfo_delay_step(mdx_ch_t *c) {
-    if (--c->lfo_cnt != 0u) {
+static void lfo_delay_step(mdx_ch_t *c)
+{
+    if (--c->lfo_cnt != 0u)
+    {
         return;
     }
-    if ((c->f16 & F16_PLFO) != 0u) {
+    if ((c->f16 & F16_PLFO) != 0u)
+    {
         plfo_reload(c);
     }
-    if ((c->f16 & F16_VLFO) != 0u) {
+    if ((c->f16 & F16_VLFO) != 0u)
+    {
         vlfo_reload(c);
     }
 }
@@ -749,7 +847,8 @@ static void lfo_delay_step(mdx_ch_t *c) {
 static void ch_fetch(mdx_ch_t *c, uint32_t idx);
 
 /* 音符・休符の長さを確定させる（参照実装 L001216） */
-static void set_len(mdx_ch_t *c, uint32_t gate, uint32_t len, uint32_t p) {
+static void set_len(mdx_ch_t *c, uint32_t gate, uint32_t len, uint32_t p)
+{
     c->gate = (uint8_t)(gate + 1u);
     c->len = (uint8_t)(len + 1u);
     c->p = p;
@@ -765,60 +864,76 @@ static void set_len(mdx_ch_t *c, uint32_t gate, uint32_t len, uint32_t p) {
  * ここでは同じ効果を、いま読んだ 0xF1 / 0xE7 の位置へ戻すことで作る。
  * こうしないと、この先にある別チャンネルの MML や音色データを読んでしまう。
  */
-static void end_channel(mdx_ch_t *c, uint32_t idx, uint32_t op_at) {
+static void end_channel(mdx_ch_t *c, uint32_t idx, uint32_t op_at)
+{
     s_enable &= (uint16_t)~(1u << idx);
     s_loop_mask &= (uint16_t)~(1u << idx);
     set_len(c, 0x7fu, 0x7fu, op_at);
 }
 
-static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
+static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp)
+{
     uint32_t p = *pp;
     uint32_t op_at = p - 1u; /* いま読んだオペコードの位置 */
 
-    switch (op) {
-    case 0xFFu: { /* @t テンポ */
-        uint8_t t = s_file[p++];
-        s_tempo = t;
-        opm_put(0x12u, t);
-        break;
-    }
-    case 0xFEu: { /* OPM レジスタ直書き */
-        uint8_t r = s_file[p++];
-        uint8_t d = s_file[p++];
-        if (r == 0x12u) {
-            s_tempo = d; /* テンポもこちらで変えられる */
+    switch (op)
+    {
+    case 0xFFu:
+        { /* @t テンポ */
+            uint8_t t = s_file[p++];
+            s_tempo = t;
+            opm_put(0x12u, t);
+            break;
         }
-        opm_put(r, d);
-        break;
-    }
-    case 0xFDu: { /* @ 音色。実際のレジスタ書き込みはキーオン時まで遅延する。 */
-        uint8_t no = s_file[p++];
-        if (is_adpcm(c)) {
-            c->pcm_bank = no;
-        } else {
-            c->voice = s_voice[no];
-            c->f17 |= F17_VOICE_REQ;
-        }
-        break;
-    }
-    case 0xFCu: { /* p パン */
-        uint8_t v = s_file[p++];
-        if (is_adpcm(c)) {
-            /* 参照実装は 0 と 3 を入れ替える */
-            if (v == 0x00u || v == 0x03u) {
-                v ^= 0x03u;
+    case 0xFEu:
+        { /* OPM レジスタ直書き */
+            uint8_t r = s_file[p++];
+            uint8_t d = s_file[p++];
+            if (r == 0x12u)
+            {
+                s_tempo = d; /* テンポもこちらで変えられる */
             }
-            c->pan = (uint8_t)((c->pan & 0xfcu) | (v & 0x03u));
-        } else {
-            c->pan = (uint8_t)((c->pan & 0x3fu) | (uint8_t)(v << 6));
-            c->f17 |= F17_PAN_DIRTY;
+            opm_put(r, d);
+            break;
         }
-        break;
-    }
+    case 0xFDu:
+        { /* @ 音色。実際のレジスタ書き込みはキーオン時まで遅延する。 */
+            uint8_t no = s_file[p++];
+            if (is_adpcm(c))
+            {
+                c->pcm_bank = no;
+            }
+            else
+            {
+                c->voice = s_voice[no];
+                c->f17 |= F17_VOICE_REQ;
+            }
+            break;
+        }
+    case 0xFCu:
+        { /* p パン */
+            uint8_t v = s_file[p++];
+            if (is_adpcm(c))
+            {
+                /* 参照実装は 0 と 3 を入れ替える */
+                if (v == 0x00u || v == 0x03u)
+                {
+                    v ^= 0x03u;
+                }
+                c->pan = (uint8_t)((c->pan & 0xfcu) | (v & 0x03u));
+            }
+            else
+            {
+                c->pan = (uint8_t)((c->pan & 0x3fu) | (uint8_t)(v << 6));
+                c->f17 |= F17_PAN_DIRTY;
+            }
+            break;
+        }
     case 0xFBu: /* v 音量 */
         c->vol = s_file[p++];
         c->f17 |= F17_VOL_DIRTY;
-        if (is_adpcm(c) && s_tie_flag && s_pcm8_mode) {
+        if (is_adpcm(c) && s_tie_flag && s_pcm8_mode)
+        {
             /*
              * 参照実装 PCM_Vol。タイでつながっている間だけ、発音中の ADPCM の
              * 音量を差し替える（周波数と定位は -1 で据え置き）。音量は PCM8 の
@@ -831,23 +946,31 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
         }
         break;
     case 0xFAu: /* v- */
-        if ((c->vol & 0x80u) == 0u) {
-            if (c->vol != 0u) {
+        if ((c->vol & 0x80u) == 0u)
+        {
+            if (c->vol != 0u)
+            {
                 c->vol--;
                 c->f17 |= F17_VOL_DIRTY;
             }
-        } else if (c->vol != 0xffu) {
+        }
+        else if (c->vol != 0xffu)
+        {
             c->vol++; /* @v は値が大きいほど TL が大きい = 小さい音 */
             c->f17 |= F17_VOL_DIRTY;
         }
         break;
     case 0xF9u: /* v+ */
-        if ((c->vol & 0x80u) == 0u) {
-            if (c->vol != 0x0fu) {
+        if ((c->vol & 0x80u) == 0u)
+        {
+            if (c->vol != 0x0fu)
+            {
                 c->vol++;
                 c->f17 |= F17_VOL_DIRTY;
             }
-        } else if (c->vol != 0x80u) {
+        }
+        else if (c->vol != 0x80u)
+        {
             c->vol--;
             c->f17 |= F17_VOL_DIRTY;
         }
@@ -858,199 +981,239 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
     case 0xF7u: /* & レガート */
         c->f16 |= F16_LEGATO;
         break;
-    case 0xF6u: { /* リピート開始。回数を次のバイト（カウンタ）へ書き込む。 */
-        uint8_t n = s_file[p];
-        s_file[p + 1u] = n;
-        p += 2u;
-        break;
-    }
-    case 0xF5u: { /* リピート終了 */
-        uint16_t w = rd16(p);
-        p += 2u;
-        uint32_t back = (uint32_t)((uint16_t)(~w + 1u)); /* 2 の補数で戻る距離 */
-        if (back == 0u || back + 1u > p) {
-            mdx_fail("repeat", p);
-            return true;
+    case 0xF6u:
+        { /* リピート開始。回数を次のバイト（カウンタ）へ書き込む。 */
+            uint8_t n = s_file[p];
+            s_file[p + 1u] = n;
+            p += 2u;
+            break;
         }
-        uint32_t cnt_at = p - back - 1u;
-        s_file[cnt_at] = (uint8_t)(s_file[cnt_at] - 1u);
-        if (s_file[cnt_at] != 0u) {
-            p -= back;
+    case 0xF5u:
+        { /* リピート終了 */
+            uint16_t w = rd16(p);
+            p += 2u;
+            uint32_t back = (uint32_t)((uint16_t)(~w + 1u)); /* 2 の補数で戻る距離 */
+            if (back == 0u || back + 1u > p)
+            {
+                mdx_fail("repeat", p);
+                return true;
+            }
+            uint32_t cnt_at = p - back - 1u;
+            s_file[cnt_at] = (uint8_t)(s_file[cnt_at] - 1u);
+            if (s_file[cnt_at] != 0u)
+            {
+                p -= back;
+            }
+            break;
         }
-        break;
-    }
-    case 0xF4u: { /* リピート脱出。最終回だけ飛ぶ。 */
-        uint16_t w = rd16(p);
-        p += 2u;
-        uint32_t to = p + w;
-        if (to + 2u > s_size) {
-            mdx_fail("repeat escape", p);
-            return true;
+    case 0xF4u:
+        { /* リピート脱出。最終回だけ飛ぶ。 */
+            uint16_t w = rd16(p);
+            p += 2u;
+            uint32_t to = p + w;
+            if (to + 2u > s_size)
+            {
+                mdx_fail("repeat escape", p);
+                return true;
+            }
+            uint16_t w2 = rd16(to);
+            uint32_t back = (uint32_t)((uint16_t)(~w2 + 1u));
+            uint32_t at = to + 2u;
+            if (back == 0u || back + 1u > at)
+            {
+                mdx_fail("repeat escape", p);
+                return true;
+            }
+            if (s_file[at - back - 1u] == 0x01u)
+            {
+                p = at;
+            }
+            break;
         }
-        uint16_t w2 = rd16(to);
-        uint32_t back = (uint32_t)((uint16_t)(~w2 + 1u));
-        uint32_t at = to + 2u;
-        if (back == 0u || back + 1u > at) {
-            mdx_fail("repeat escape", p);
-            return true;
-        }
-        if (s_file[at - back - 1u] == 0x01u) {
-            p = at;
-        }
-        break;
-    }
     case 0xF3u: /* D ディチューン */
         c->detune = rd16(p);
         p += 2u;
         break;
-    case 0xF2u: { /* ポルタメント */
-        int32_t v = (int32_t)(int16_t)rd16(p);
-        p += 2u;
-        c->bend_delta = (uint32_t)(v << 8);
-        c->f16 |= F16_PORTA;
-        break;
-    }
-    case 0xF1u: { /* 演奏終了 / ループ */
-        if (s_file[p] == 0x00u) {
-            end_channel(c, idx, op_at);
-            return true;
+    case 0xF2u:
+        { /* ポルタメント */
+            int32_t v = (int32_t)(int16_t)rd16(p);
+            p += 2u;
+            c->bend_delta = (uint32_t)(v << 8);
+            c->f16 |= F16_PORTA;
+            break;
         }
-        uint16_t w = rd16(p);
-        p += 2u;
-        uint32_t back = (uint32_t)((uint16_t)(~w + 1u));
-        if (back == 0u || back > p) {
-            mdx_fail("loop", p);
-            return true;
-        }
-        p -= back;
-
-        /*
-         * 参照実装 COM_F1。END_FLG から自分のビットを落とし、まだ終わっていない
-         * チャンネル（LOOP_FLG）が全部ループ点に来たところで 1 ループと数える。
-         */
-        s_loop_mask &= (uint16_t)~(1u << idx);
-        if ((s_loop_mask & s_enable) == 0u) {
-            s_loop_mask = 0x01ffu;
-            if (s_pcm8_mode && s_nch > 9u) {
-                s_loop_mask |= 0xfe00u;
+    case 0xF1u:
+        { /* 演奏終了 / ループ */
+            if (s_file[p] == 0x00u)
+            {
+                end_channel(c, idx, op_at);
+                return true;
             }
-            s_loops++;
+            uint16_t w = rd16(p);
+            p += 2u;
+            uint32_t back = (uint32_t)((uint16_t)(~w + 1u));
+            if (back == 0u || back > p)
+            {
+                mdx_fail("loop", p);
+                return true;
+            }
+            p -= back;
+
+            /*
+             * 参照実装 COM_F1。END_FLG から自分のビットを落とし、まだ終わっていない
+             * チャンネル（LOOP_FLG）が全部ループ点に来たところで 1 ループと数える。
+             */
+            s_loop_mask &= (uint16_t)~(1u << idx);
+            if ((s_loop_mask & s_enable) == 0u)
+            {
+                s_loop_mask = 0x01ffu;
+                if (s_pcm8_mode && s_nch > 9u)
+                {
+                    s_loop_mask |= 0xfe00u;
+                }
+                s_loops++;
+            }
+            break;
         }
-        break;
-    }
     case 0xF0u: /* キーオン遅延 */
         c->keyon_delay = s_file[p++];
         break;
-    case 0xEFu: { /* 同期送出 */
-        uint8_t n = s_file[p++];
-        if (n < MDX_CH_MAX) {
-            s_sync[n] = 0xffu;
+    case 0xEFu:
+        { /* 同期送出 */
+            uint8_t n = s_file[p++];
+            if (n < MDX_CH_MAX)
+            {
+                s_sync[n] = 0xffu;
+            }
+            break;
         }
-        break;
-    }
     case 0xEEu: /* 同期待ち */
         c->f17 |= F17_SYNC_WAIT;
         c->p = p;
         return true;
-    case 0xEDu: { /* ADPCM のサンプリング周波数 / FM のノイズ周波数 */
-        uint8_t v = s_file[p++];
-        if (is_adpcm(c)) {
-            c->pan = (uint8_t)((c->pan & 0x03u) | (uint8_t)(v << 2));
-        } else {
-            opm_put(0x0fu, v);
-        }
-        break;
-    }
-    case 0xECu: { /* ピッチ LFO */
-        c->f16 |= F16_PLFO;
-        uint8_t b = s_file[p++];
-        if ((b & 0x80u) != 0u) {
-            if ((b & 0x01u) != 0u) {
-                plfo_reload(c);
-            } else {
-                c->f16 &= (uint8_t)~F16_PLFO;
-                c->plfo.offset = 0;
+    case 0xEDu:
+        { /* ADPCM のサンプリング周波数 / FM のノイズ周波数 */
+            uint8_t v = s_file[p++];
+            if (is_adpcm(c))
+            {
+                c->pan = (uint8_t)((c->pan & 0x03u) | (uint8_t)(v << 2));
+            }
+            else
+            {
+                opm_put(0x0fu, v);
             }
             break;
         }
-        uint8_t sel = (uint8_t)(b & 0x03u);
-        c->plfo.wave = (uint8_t)(sel + 1u);
-        uint16_t len = rd16(p);
-        p += 2u;
-        c->plfo.len = len;
-        uint16_t cooked = len;
-        if (sel != 1u) {
-            cooked = (uint16_t)(cooked >> 1);
-            if (sel == 3u) {
-                cooked = 1u;
+    case 0xECu:
+        { /* ピッチ LFO */
+            c->f16 |= F16_PLFO;
+            uint8_t b = s_file[p++];
+            if ((b & 0x80u) != 0u)
+            {
+                if ((b & 0x01u) != 0u)
+                {
+                    plfo_reload(c);
+                }
+                else
+                {
+                    c->f16 &= (uint8_t)~F16_PLFO;
+                    c->plfo.offset = 0;
+                }
+                break;
             }
-        }
-        c->plfo.len_cooked = cooked;
-        int32_t d = (int32_t)(int16_t)rd16(p);
-        p += 2u;
-        d <<= 8;
-        if (b >= 0x04u) {
+            uint8_t sel = (uint8_t)(b & 0x03u);
+            c->plfo.wave = (uint8_t)(sel + 1u);
+            uint16_t len = rd16(p);
+            p += 2u;
+            c->plfo.len = len;
+            uint16_t cooked = len;
+            if (sel != 1u)
+            {
+                cooked = (uint16_t)(cooked >> 1);
+                if (sel == 3u)
+                {
+                    cooked = 1u;
+                }
+            }
+            c->plfo.len_cooked = cooked;
+            int32_t d = (int32_t)(int16_t)rd16(p);
+            p += 2u;
             d <<= 8;
-        }
-        c->plfo.delta_start = (uint32_t)d;
-        c->plfo.offset_start = (sel == 2u) ? (uint32_t)d : 0u;
-        plfo_reload(c);
-        break;
-    }
-    case 0xEBu: { /* 音量 LFO */
-        c->f16 |= F16_VLFO;
-        uint8_t b = s_file[p++];
-        if ((b & 0x80u) != 0u) {
-            if ((b & 0x01u) != 0u) {
-                vlfo_reload(c);
-            } else {
-                c->f16 &= (uint8_t)~F16_VLFO;
-                c->vlfo.offset = 0;
+            if (b >= 0x04u)
+            {
+                d <<= 8;
             }
+            c->plfo.delta_start = (uint32_t)d;
+            c->plfo.offset_start = (sel == 2u) ? (uint32_t)d : 0u;
+            plfo_reload(c);
             break;
         }
-        c->vlfo.wave = (uint8_t)(b + 1u);
-        uint16_t len = rd16(p);
-        p += 2u;
-        c->vlfo.len = len;
-        uint16_t dv = rd16(p);
-        p += 2u;
-        c->vlfo.delta_start = dv;
-        int32_t t;
-        if ((b & 0x01u) != 0u) {
-            t = (int32_t)(int16_t)dv;
-        } else {
-            t = (int32_t)(int16_t)dv * (int32_t)(int16_t)len;
-        }
-        t = -(int16_t)t;
-        if ((int16_t)t >= 0) {
-            t = 0;
-        }
-        c->vlfo.delta_cooked = (uint16_t)t;
-        vlfo_reload(c);
-        break;
-    }
-    case 0xEAu: { /* OPM のハードウェア LFO */
-        uint8_t b = s_file[p++];
-        if ((b & 0x80u) != 0u) {
-            /* bit0 が 0 ならこのチャンネルの LFO を切り、1 なら元の深さへ戻す */
-            opm_put((uint8_t)(0x38u + c->ch), ((b & 0x01u) != 0u) ? c->pms_ams : 0x00u);
+    case 0xEBu:
+        { /* 音量 LFO */
+            c->f16 |= F16_VLFO;
+            uint8_t b = s_file[p++];
+            if ((b & 0x80u) != 0u)
+            {
+                if ((b & 0x01u) != 0u)
+                {
+                    vlfo_reload(c);
+                }
+                else
+                {
+                    c->f16 &= (uint8_t)~F16_VLFO;
+                    c->vlfo.offset = 0;
+                }
+                break;
+            }
+            c->vlfo.wave = (uint8_t)(b + 1u);
+            uint16_t len = rd16(p);
+            p += 2u;
+            c->vlfo.len = len;
+            uint16_t dv = rd16(p);
+            p += 2u;
+            c->vlfo.delta_start = dv;
+            int32_t t;
+            if ((b & 0x01u) != 0u)
+            {
+                t = (int32_t)(int16_t)dv;
+            }
+            else
+            {
+                t = (int32_t)(int16_t)dv * (int32_t)(int16_t)len;
+            }
+            t = -(int16_t)t;
+            if ((int16_t)t >= 0)
+            {
+                t = 0;
+            }
+            c->vlfo.delta_cooked = (uint16_t)t;
+            vlfo_reload(c);
             break;
         }
-        c->f16 &= (uint8_t)~F16_LFO_SYNC;
-        if ((b & 0x40u) != 0u) {
-            c->f16 |= F16_LFO_SYNC;
-            b = (uint8_t)(b & ~0x40u);
+    case 0xEAu:
+        { /* OPM のハードウェア LFO */
+            uint8_t b = s_file[p++];
+            if ((b & 0x80u) != 0u)
+            {
+                /* bit0 が 0 ならこのチャンネルの LFO を切り、1 なら元の深さへ戻す */
+                opm_put((uint8_t)(0x38u + c->ch), ((b & 0x01u) != 0u) ? c->pms_ams : 0x00u);
+                break;
+            }
+            c->f16 &= (uint8_t)~F16_LFO_SYNC;
+            if ((b & 0x40u) != 0u)
+            {
+                c->f16 |= F16_LFO_SYNC;
+                b = (uint8_t)(b & ~0x40u);
+            }
+            /* 0x1B は上位 2bit が CT1/CT2 なので残す（参照実装が控えている理由） */
+            opm_put(0x1bu, (uint8_t)(b | (s_opm_1b & 0xc0u)));
+            opm_put(0x18u, s_file[p++]); /* LFRQ */
+            opm_put(0x19u, s_file[p++]); /* PMD / AMD */
+            opm_put(0x19u, s_file[p++]);
+            c->pms_ams = s_file[p++];
+            opm_put((uint8_t)(0x38u + c->ch), c->pms_ams);
+            break;
         }
-        /* 0x1B は上位 2bit が CT1/CT2 なので残す（参照実装が控えている理由） */
-        opm_put(0x1bu, (uint8_t)(b | (s_opm_1b & 0xc0u)));
-        opm_put(0x18u, s_file[p++]); /* LFRQ */
-        opm_put(0x19u, s_file[p++]); /* PMD / AMD */
-        opm_put(0x19u, s_file[p++]);
-        c->pms_ams = s_file[p++];
-        opm_put((uint8_t)(0x38u + c->ch), c->pms_ams);
-        break;
-    }
     case 0xE9u: /* LFO ディレイ */
         c->lfo_delay = s_file[p++];
         break;
@@ -1061,70 +1224,87 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
          * 回さない（MML の位置がヘッダに無い）。ビットだけ立てると永久に落ちず、
          * 曲の終わりを検出できなくなるので、16ch のファイルに限る。
          */
-        if (s_nch > 9u) {
+        if (s_nch > 9u)
+        {
             s_enable |= 0xfe00u;
             s_loop_mask |= 0xfe00u;
         }
         break;
-    case 0xE7u: { /* 拡張 */
-        uint8_t sub = s_file[p++];
-        switch (sub) {
-        case 0x01u: /* フェードアウト */
-            s_fade_speed = s_file[p++];
-            s_fade_on = 0xffu;
-            break;
-        case 0x02u: { /* PCM8 へのコマンド。d0.w + d1.l がビッグエンディアンで並ぶ。 */
-            uint16_t fn = rd16(p);
-            uint32_t d1 = ((uint32_t)s_file[p + 2u] << 24) |
-                          ((uint32_t)s_file[p + 3u] << 16) |
-                          ((uint32_t)s_file[p + 4u] << 8) | (uint32_t)s_file[p + 5u];
-            p += 6u;
-            if (!s_pcm8_mode) {
-                /* 参照実装 PCM8Ctrl。PCM8 モードでなければ 6 バイト読み飛ばすだけ。 */
+    case 0xE7u:
+        { /* 拡張 */
+            uint8_t sub = s_file[p++];
+            switch (sub)
+            {
+            case 0x01u: /* フェードアウト */
+                s_fade_speed = s_file[p++];
+                s_fade_on = 0xffu;
                 break;
+            case 0x02u:
+                { /* PCM8 へのコマンド。d0.w + d1.l がビッグエンディアンで並ぶ。 */
+                    uint16_t fn = rd16(p);
+                    uint32_t d1 = ((uint32_t)s_file[p + 2u] << 24) |
+                                  ((uint32_t)s_file[p + 3u] << 16) |
+                                  ((uint32_t)s_file[p + 4u] << 8) | (uint32_t)s_file[p + 5u];
+                    p += 6u;
+                    if (!s_pcm8_mode)
+                    {
+                        /* 参照実装 PCM8Ctrl。PCM8 モードでなければ 6 バイト読み飛ばすだけ。 */
+                        break;
+                    }
+                    if ((fn & 0xfff0u) == 0x0070u)
+                    { /* 動作モード変更 */
+                        int vol = (int)(int8_t)(uint8_t)(d1 >> 16);
+                        int mode = (int)(int8_t)(uint8_t)(d1 >> 8);
+                        int pan = (int)(int8_t)(uint8_t)d1;
+                        pcm8_set_mode((uint32_t)(fn & 0x07u), vol, mode, pan);
+                    }
+                    else if (fn == 0x0100u)
+                    { /* 終了。鳴っている分は鳴らし切る。 */
+                        pcm8_end_all();
+                    }
+                    else if (fn == 0x0101u)
+                    { /* 一時停止 = 即時打ち切り */
+                        pcm8_abort_all();
+                    }
+                    /* $01FC（多重/単音モード）などは本機に効く設定が無いので無視する */
+                    break;
+                }
+            case 0x03u: /* キーオフ抑止 */
+                if (s_file[p++] != 0u)
+                {
+                    c->f16 |= F16_NO_KEYOFF;
+                }
+                else
+                {
+                    c->f16 &= (uint8_t)~F16_NO_KEYOFF;
+                }
+                break;
+            case 0x05u:
+                { /* 休符を置いて即キーオン */
+                    uint8_t n = s_file[p++];
+                    set_len(c, n, n, p);
+                    c->f16 &= (uint8_t)~F16_KEYON_REQ;
+                    c->f16 |= F16_KEYED;
+                    snd_key_on(c);
+                    return true;
+                }
+            case 0x06u: /* ADPCM 多重再生 mode（参照実装 F2_bit7） */
+                /* 非 PCM8 のキーオフで IOCS の「中止」を抑止する。FM には効かない。 */
+                if (s_file[p++] != 0u)
+                {
+                    c->f17 |= F17_PCM_KEEP;
+                }
+                else
+                {
+                    c->f17 &= (uint8_t)~F17_PCM_KEEP;
+                }
+                break;
+            default: /* 0x00 と 0x04 以上は演奏終了扱い */
+                end_channel(c, idx, op_at);
+                return true;
             }
-            if ((fn & 0xfff0u) == 0x0070u) { /* 動作モード変更 */
-                int vol = (int)(int8_t)(uint8_t)(d1 >> 16);
-                int mode = (int)(int8_t)(uint8_t)(d1 >> 8);
-                int pan = (int)(int8_t)(uint8_t)d1;
-                pcm8_set_mode((uint32_t)(fn & 0x07u), vol, mode, pan);
-            } else if (fn == 0x0100u) { /* 終了。鳴っている分は鳴らし切る。 */
-                pcm8_end_all();
-            } else if (fn == 0x0101u) { /* 一時停止 = 即時打ち切り */
-                pcm8_abort_all();
-            }
-            /* $01FC（多重/単音モード）などは本機に効く設定が無いので無視する */
             break;
         }
-        case 0x03u: /* キーオフ抑止 */
-            if (s_file[p++] != 0u) {
-                c->f16 |= F16_NO_KEYOFF;
-            } else {
-                c->f16 &= (uint8_t)~F16_NO_KEYOFF;
-            }
-            break;
-        case 0x05u: { /* 休符を置いて即キーオン */
-            uint8_t n = s_file[p++];
-            set_len(c, n, n, p);
-            c->f16 &= (uint8_t)~F16_KEYON_REQ;
-            c->f16 |= F16_KEYED;
-            snd_key_on(c);
-            return true;
-        }
-        case 0x06u: /* ADPCM 多重再生 mode（参照実装 F2_bit7） */
-            /* 非 PCM8 のキーオフで IOCS の「中止」を抑止する。FM には効かない。 */
-            if (s_file[p++] != 0u) {
-                c->f17 |= F17_PCM_KEEP;
-            } else {
-                c->f17 &= (uint8_t)~F17_PCM_KEEP;
-            }
-            break;
-        default: /* 0x00 と 0x04 以上は演奏終了扱い */
-            end_channel(c, idx, op_at);
-            return true;
-        }
-        break;
-    }
     default: /* 0xE1-0xE6 は参照実装でも演奏終了と同じハンドラ */
         end_channel(c, idx, op_at);
         return true;
@@ -1135,33 +1315,41 @@ static bool cmd_exec(mdx_ch_t *c, uint32_t idx, uint8_t op, uint32_t *pp) {
 }
 
 /* 次の音符・休符まで MML を読む（参照実装 L0011d4） */
-static void ch_fetch(mdx_ch_t *c, uint32_t idx) {
+static void ch_fetch(mdx_ch_t *c, uint32_t idx)
+{
     uint32_t p = c->p;
     c->f16 &= 0x7bu; /* ポルタメントとレガートを落とす */
 
-    for (uint32_t guard = 0; guard < 4096u; guard++) {
-        if (p >= s_size) {
+    for (uint32_t guard = 0; guard < 4096u; guard++)
+    {
+        if (p >= s_size)
+        {
             mdx_fail("truncated", p);
             return;
         }
         uint8_t op = s_file[p++];
 
-        if (op < 0x80u) { /* 休符 */
+        if (op < 0x80u)
+        { /* 休符 */
             set_len(c, op, op, p);
             return;
         }
-        if (op >= 0xE0u) { /* コマンド */
-            if (cmd_exec(c, idx, op, &p)) {
+        if (op >= 0xE0u)
+        { /* コマンド */
+            if (cmd_exec(c, idx, op, &p))
+            {
                 return;
             }
-            if (s_state != MDX_STATE_PLAYING) {
+            if (s_state != MDX_STATE_PLAYING)
+            {
                 return;
             }
             continue;
         }
 
         /* 音符 */
-        if (p >= s_size) {
+        if (p >= s_size)
+        {
             mdx_fail("truncated", p);
             return;
         }
@@ -1174,11 +1362,14 @@ static void ch_fetch(mdx_ch_t *c, uint32_t idx) {
 
         uint32_t l = s_file[p++];
         uint32_t g;
-        if ((c->q & 0x80u) != 0u) {
+        if ((c->q & 0x80u) != 0u)
+        {
             /* @q は負のオフセット。バイトの桁が上がらなければ 0 まで詰める。 */
             uint32_t t = (uint32_t)c->q + l;
             g = (t >= 0x100u) ? (t & 0xffu) : 0u;
-        } else {
+        }
+        else
+        {
             g = ((uint32_t)c->q * l) >> 3;
         }
         set_len(c, g, l, p);
@@ -1191,51 +1382,65 @@ static void ch_fetch(mdx_ch_t *c, uint32_t idx) {
 /* ---- 1 clock 分の処理 -------------------------------------------------- */
 
 /* ポルタメントと LFO（参照実装 L001050） */
-static void ch_pre(mdx_ch_t *c) {
-    if (is_adpcm(c)) {
+static void ch_pre(mdx_ch_t *c)
+{
+    if (is_adpcm(c))
+    {
         return;
     }
-    if ((c->f16 & F16_PORTA) != 0u && c->keyon_cnt == 0u) {
+    if ((c->f16 & F16_PORTA) != 0u && c->keyon_cnt == 0u)
+    {
         c->bend += c->bend_delta;
     }
-    if (c->lfo_delay != 0u) {
-        if (c->keyon_cnt != 0u) {
+    if (c->lfo_delay != 0u)
+    {
+        if (c->keyon_cnt != 0u)
+        {
             return;
         }
-        if (c->lfo_cnt != 0u) {
+        if (c->lfo_cnt != 0u)
+        {
             lfo_delay_step(c);
             return;
         }
     }
-    if ((c->f16 & F16_PLFO) != 0u) {
+    if ((c->f16 & F16_PLFO) != 0u)
+    {
         plfo_step(c);
     }
-    if ((c->f16 & F16_VLFO) != 0u) {
+    if ((c->f16 & F16_VLFO) != 0u)
+    {
         vlfo_step(c);
     }
 }
 
 /* キーオフ（参照実装 L000fe6） */
-static void ch_key_off(mdx_ch_t *c) {
+static void ch_key_off(mdx_ch_t *c)
+{
     bool was = (c->f16 & F16_KEYED) != 0u;
     c->f16 &= (uint8_t)~F16_KEYED;
-    if (!was) {
+    if (!was)
+    {
         return;
     }
-    if ((c->f16 & F16_NO_KEYOFF) != 0u) {
+    if ((c->f16 & F16_NO_KEYOFF) != 0u)
+    {
         return;
     }
     snd_key_off(c);
 }
 
 /* 長さの消化と次の読み出し（参照実装 L0011b4 + L0011ce） */
-static void ch_len(mdx_ch_t *c, uint32_t idx) {
+static void ch_len(mdx_ch_t *c, uint32_t idx)
+{
     /* 参照実装 L000EA2 の sne.b TieFlag。次の読み出しへ渡る前に写しておく。 */
     s_tie_flag = (c->f16 & F16_LEGATO) != 0u;
 
-    if ((c->f17 & F17_SYNC_WAIT) != 0u) {
+    if ((c->f17 & F17_SYNC_WAIT) != 0u)
+    {
         /* 同期待ち。信号が来ていたら降ろして読み進める。 */
-        if (s_sync[idx] == 0u) {
+        if (s_sync[idx] == 0u)
+        {
             return;
         }
         s_sync[idx] = 0u;
@@ -1244,49 +1449,61 @@ static void ch_len(mdx_ch_t *c, uint32_t idx) {
         return;
     }
 
-    if ((c->f16 & F16_LEGATO) == 0u) {
-        if (--c->gate == 0u) {
+    if ((c->f16 & F16_LEGATO) == 0u)
+    {
+        if (--c->gate == 0u)
+        {
             ch_key_off(c);
         }
     }
 
-    if (--c->len != 0u) {
+    if (--c->len != 0u)
+    {
         return;
     }
     ch_fetch(c, idx);
 }
 
 /* キーオンとレジスタへの反映（参照実装 L000c66） */
-static void ch_post(mdx_ch_t *c) {
-    if ((c->f16 & F16_KEYON_REQ) == 0u) {
-        if (!is_adpcm(c)) {
+static void ch_post(mdx_ch_t *c)
+{
+    if ((c->f16 & F16_KEYON_REQ) == 0u)
+    {
+        if (!is_adpcm(c))
+        {
             snd_pitch(c);
             snd_volume(c);
         }
         return;
     }
 
-    if (c->keyon_cnt != 0u) {
+    if (c->keyon_cnt != 0u)
+    {
         c->keyon_cnt--;
-        if (!is_adpcm(c)) {
+        if (!is_adpcm(c))
+        {
             snd_pitch(c);
             snd_volume(c);
         }
         return;
     }
 
-    if (!is_adpcm(c)) {
+    if (!is_adpcm(c))
+    {
         snd_voice(c);
         snd_pan(c);
 
-        if ((c->f16 & F16_KEYED) == 0u) {
+        if ((c->f16 & F16_KEYED) == 0u)
+        {
             c->lfo_cnt = c->lfo_delay;
-            if (c->lfo_cnt != 0u) {
+            if (c->lfo_cnt != 0u)
+            {
                 c->plfo.offset = 0;
                 c->vlfo.offset = 0;
                 lfo_delay_step(c);
             }
-            if ((c->f16 & F16_LFO_SYNC) != 0u) {
+            if ((c->f16 & F16_LFO_SYNC) != 0u)
+            {
                 /* OPM の LFO 位相をリセットする */
                 opm_put(0x01u, 0x02u);
                 opm_put(0x01u, 0x00u);
@@ -1301,12 +1518,14 @@ static void ch_post(mdx_ch_t *c) {
     /* キーオン（参照実装 L000e7e） */
     bool was = (c->f16 & F16_KEYED) != 0u;
     c->f16 |= F16_KEYED;
-    if (!was) {
+    if (!was)
+    {
         /*
          * キーオフを抑止していると鳴りっぱなしなので、鳴らし直す直前に
          * 一度だけキーオフを入れる（参照実装 L000e7e）。
          */
-        if ((c->f16 & F16_NO_KEYOFF) != 0u) {
+        if ((c->f16 & F16_NO_KEYOFF) != 0u)
+        {
             snd_key_off(c);
         }
         snd_key_on(c);
@@ -1316,21 +1535,26 @@ static void ch_post(mdx_ch_t *c) {
 }
 
 /* フェードアウト（参照実装 L0009be）。終わったら true。 */
-static bool fade_step(void) {
-    if (s_fade_on == 0u) {
+static bool fade_step(void)
+{
+    if (s_fade_on == 0u)
+    {
         return false;
     }
-    if ((int8_t)s_fade_on < 0) {
+    if ((int8_t)s_fade_on < 0)
+    {
         s_fade_on = 0x7fu;
         s_fade_cnt = s_fade_speed;
     }
-    if ((int16_t)s_fade_cnt >= 0) {
+    if ((int16_t)s_fade_cnt >= 0)
+    {
         s_fade_cnt = (uint16_t)(s_fade_cnt - 2u);
         return false;
     }
     /* 参照実装は sge なので、条件が偽になれば降りる（フェードインで戻る） */
     s_fade_flag = ((int8_t)s_fade_off >= 0x0a) ? 0xffu : 0u;
-    if ((int8_t)s_fade_off >= 0x3e) {
+    if ((int8_t)s_fade_off >= 0x3e)
+    {
         return true;
     }
     s_fade_off++;
@@ -1340,15 +1564,18 @@ static bool fade_step(void) {
 
 /* ---- 停止 -------------------------------------------------------------- */
 
-static void key_off_all(void) {
+static void key_off_all(void)
+{
     /*
      * 全 8 チャンネルをキーオフする。キーオフだけでは音色の RR 次第で音が長く
      * 残るので、直前に 4 スロットの RR を 15（最速）にしてから落とす。
      * 8ch x (RR 4 回 + キーオフ 1 回) x 32us = 約 1.3ms。
      * opm_reset() は 20ms ブロックして I2S アンダーランが確定するので使わない。
      */
-    for (uint8_t ch = 0; ch < 8u; ch++) {
-        for (uint8_t slot = 0; slot < 4u; slot++) {
+    for (uint8_t ch = 0; ch < 8u; ch++)
+    {
+        for (uint8_t slot = 0; slot < 4u; slot++)
+        {
             /* D1L/RR。リリース中は D1L を見ないので D1L=0 / RR=15 でよい。 */
             opm_put((uint8_t)(0xe0u + slot * 8u + ch), 0x0fu);
         }
@@ -1362,13 +1589,15 @@ static void key_off_all(void) {
 /* 一覧に出す拡張子。 */
 static const char *const MDX_EXTS[] = {".mdx"};
 
-const char *mdx_list(void (*tick)(void)) {
+const char *mdx_list(void (*tick)(void))
+{
     return filelist_print(MDX_DIR, MDX_EXTS,
                           (uint32_t)(sizeof(MDX_EXTS) / sizeof(MDX_EXTS[0])),
                           MDX_LIST_MAX, tick);
 }
 
-const char *mdx_collect(filelist_buf_t *buf) {
+const char *mdx_collect(filelist_buf_t *buf)
+{
     /* 名前の上限は s_name に収まる長さ。長い名前は mdx_play() が弾く。 */
     return filelist_collect(MDX_DIR, MDX_EXTS,
                             (uint32_t)(sizeof(MDX_EXTS) / sizeof(MDX_EXTS[0])),
@@ -1383,11 +1612,13 @@ const char *mdx_collect(filelist_buf_t *buf) {
  *   ADPCM: pan = 0x10 / v = 8 / ch に bit7 と PCM ch 番号
  * FM は加えて PMS/AMS (0x38+ch) に 0 を書く。
  */
-static void init_channels(void) {
+static void init_channels(void)
+{
     memset(s_ch, 0, sizeof(s_ch));
     memset(s_sync, 0, sizeof(s_sync));
 
-    for (uint32_t i = 0; i < s_nch; i++) {
+    for (uint32_t i = 0; i < s_nch; i++)
+    {
         mdx_ch_t *c = &s_ch[i];
 
         c->p = s_mml_top[i];
@@ -1398,11 +1629,14 @@ static void init_channels(void) {
         c->vol = 0x08u;
         c->q = 0x08u;
 
-        if (i < MDX_FM_CH) {
+        if (i < MDX_FM_CH)
+        {
             c->ch = (uint8_t)i;
             c->pan = 0xc0u;
             opm_put((uint8_t)(0x38u + i), 0x00u);
-        } else {
+        }
+        else
+        {
             c->ch = (uint8_t)(0x80u | ((i - MDX_FM_CH) & 0x07u));
             c->pan = 0x10u;
         }
@@ -1421,7 +1655,8 @@ static void init_channels(void) {
 
 /* ---- 操作 -------------------------------------------------------------- */
 
-void mdx_init(void) {
+void mdx_init(void)
+{
     s_state = MDX_STATE_STOPPED;
     s_name[0] = '\0';
     s_title[0] = '\0';
@@ -1443,30 +1678,37 @@ void mdx_init(void) {
  * 拡張子は付いていないのが普通だが、付いていたら重ねない。
  * FatFs の LFN 照合は大小を無視するので、実体が小文字でも当たる。
  */
-static bool pdx_path(char *out, size_t out_len) {
+static bool pdx_path(char *out, size_t out_len)
+{
     char base[MDX_PDX_MAX];
     size_t n = 0;
 
-    for (const char *q = s_pdx; *q != '\0' && n < sizeof(base) - 1u; q++) {
+    for (const char *q = s_pdx; *q != '\0' && n < sizeof(base) - 1u; q++)
+    {
         unsigned char ch = (unsigned char)*q;
-        if (ch < 0x20u || ch == '/' || ch == '\\' || ch == ':') {
+        if (ch < 0x20u || ch == '/' || ch == '\\' || ch == ':')
+        {
             return false;
         }
         base[n++] = (char)ch;
     }
-    while (n > 0u && base[n - 1u] == ' ') {
+    while (n > 0u && base[n - 1u] == ' ')
+    {
         n--; /* 末尾の空白は落とす */
     }
     base[n] = '\0';
-    if (n == 0u || strcmp(base, ".") == 0 || strcmp(base, "..") == 0) {
+    if (n == 0u || strcmp(base, ".") == 0 || strcmp(base, "..") == 0)
+    {
         return false;
     }
 
     /* すでに .PDX が付いていたら重ねない */
-    if (n > 4u) {
+    if (n > 4u)
+    {
         const char *ext = &base[n - 4u];
         if ((ext[0] == '.') && (ext[1] == 'p' || ext[1] == 'P') &&
-            (ext[2] == 'd' || ext[2] == 'D') && (ext[3] == 'x' || ext[3] == 'X')) {
+            (ext[2] == 'd' || ext[2] == 'D') && (ext[3] == 'x' || ext[3] == 'X'))
+        {
             base[n - 4u] = '\0';
         }
     }
@@ -1476,48 +1718,59 @@ static bool pdx_path(char *out, size_t out_len) {
 }
 
 /* PDX を開く。曲が PDX を要求していなければ何もしない。 */
-static void open_pdx(void) {
-    if (s_pdx[0] == '\0') {
+static void open_pdx(void)
+{
+    if (s_pdx[0] == '\0')
+    {
         return;
     }
     printf("# pdx     : %s\n", s_pdx);
 
     char path[16 + MDX_PDX_MAX];
-    if (!pdx_path(path, sizeof(path))) {
+    if (!pdx_path(path, sizeof(path)))
+    {
         printf("# hint    : bad PDX name; the ADPCM part will not sound\n");
         return;
     }
 
     const char *err = pcm8_open_pdx(path);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         printf("# hint    : cannot open %s (%s); the ADPCM part will not sound\n", path, err);
         return;
     }
     printf("# pdxpath : %s\n", path);
-    if (!pcm8_enabled()) {
+    if (!pcm8_enabled())
+    {
         /* mdx pcm off は起動まで残るので、鳴らない理由をここで必ず出す */
         printf("# hint    : ADPCM mixing is off; run mdx pcm on to restore it\n");
     }
 }
 
-const char *mdx_play(const char *name) {
-    if (!storage_fatfs_may_access()) {
+const char *mdx_play(const char *name)
+{
+    if (!storage_fatfs_may_access())
+    {
         printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
-    if (storage_fs_state() != STORAGE_FS_MOUNTED) {
+    if (storage_fs_state() != STORAGE_FS_MOUNTED)
+    {
         return "no filesystem";
     }
 
     /* 名前の検査。ディレクトリを跨がせない。 */
     size_t len = strlen(name);
-    if (len == 0u || len > sizeof(s_name) - 1u) {
+    if (len == 0u || len > sizeof(s_name) - 1u)
+    {
         return "bad argument";
     }
-    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL) {
+    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL)
+    {
         return "bad argument";
     }
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    {
         return "bad argument";
     }
 
@@ -1529,11 +1782,13 @@ const char *mdx_play(const char *name) {
      *
      * vgm.c と違って条件で囲む必要はない（VGM に無効化ビルドは無い）。
      */
-    if (vgm_state() != VGM_STATE_STOPPED) {
+    if (vgm_state() != VGM_STATE_STOPPED)
+    {
         printf("# vgm     : stopped %s\n", vgm_current_name());
         vgm_stop();
     }
-    if (s_state != MDX_STATE_STOPPED) {
+    if (s_state != MDX_STATE_STOPPED)
+    {
         printf("# mdx     : stopped %s\n", s_name);
         mdx_stop();
     }
@@ -1552,15 +1807,18 @@ const char *mdx_play(const char *name) {
 
     FIL fp;
     FRESULT fr = f_open(&fp, path, FA_READ);
-    if (fr == FR_NO_FILE || fr == FR_NO_PATH) {
+    if (fr == FR_NO_FILE || fr == FR_NO_PATH)
+    {
         return "not found";
     }
-    if (fr != FR_OK) {
+    if (fr != FR_OK)
+    {
         return "io error";
     }
 
     FSIZE_t fsize = f_size(&fp);
-    if (fsize == 0u || fsize > MDX_MAX_BYTES) {
+    if (fsize == 0u || fsize > MDX_MAX_BYTES)
+    {
         f_close(&fp);
         printf("# hint    : MDX must be %u bytes or less\n", (unsigned)MDX_MAX_BYTES);
         return "bad file";
@@ -1569,13 +1827,15 @@ const char *mdx_play(const char *name) {
     UINT got = 0;
     fr = f_read(&fp, s_file, (UINT)fsize, &got);
     f_close(&fp);
-    if (fr != FR_OK || got != (UINT)fsize) {
+    if (fr != FR_OK || got != (UINT)fsize)
+    {
         return "io error";
     }
     s_size = (uint32_t)got;
 
     const char *err = parse_header();
-    if (err != NULL) {
+    if (err != NULL)
+    {
         /* 途中まで書かれた識別情報を消す（mdx status に曲名なしのタイトルを残さない） */
         s_title[0] = '\0';
         s_pdx[0] = '\0';
@@ -1587,11 +1847,13 @@ const char *mdx_play(const char *name) {
      * 時計を打つ前に済ませる（切り替えの数百 us を再生の起点に乗せない）。
      */
     err = clockmode_follow_file(4000000u);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         return err;
     }
     uint32_t actual = opm_clock_hz_actual();
-    if (actual != 4000000u) {
+    if (actual != 4000000u)
+    {
         printf("# clock   : mdx 4000000 Hz / phiM %u Hz (pitch and tempo both off)\n",
                (unsigned)actual);
     }
@@ -1632,8 +1894,10 @@ const char *mdx_play(const char *name) {
  * vgm_stop() と同じく「確実に止める」コマンドなので、止まっている状態から
  * 呼んでも成功にする。
  */
-const char *mdx_stop(void) {
-    if (s_state != MDX_STATE_PLAYING && s_state != MDX_STATE_ERROR) {
+const char *mdx_stop(void)
+{
+    if (s_state != MDX_STATE_PLAYING && s_state != MDX_STATE_ERROR)
+    {
         return NULL;
     }
 
@@ -1650,7 +1914,8 @@ const char *mdx_stop(void) {
 /* ---- サービス ---------------------------------------------------------- */
 
 /* 次の tick の予定時刻を進める。Timer-B の周期は φM サイクルでちょうど整数。 */
-static void advance_tick(void) {
+static void advance_tick(void)
+{
     uint32_t period_cycles = 1024u * (256u - (uint32_t)s_tempo);
     uint32_t phim = opm_clock_hz_actual();
     s_due_q += ((uint64_t)period_cycles * 65536ull * 1000000ull) / (uint64_t)phim;
@@ -1659,34 +1924,42 @@ static void advance_tick(void) {
 }
 
 /* この tick で回すチャンネル数。9-15 は 0xE8 が出てから。 */
-static uint32_t active_channels(void) {
-    if (s_pcm8_mode && s_nch > 9u) {
+static uint32_t active_channels(void)
+{
+    if (s_pcm8_mode && s_nch > 9u)
+    {
         return s_nch;
     }
     return (s_nch < 9u) ? s_nch : 9u;
 }
 
-bool mdx_service(void) {
-    if (s_state != MDX_STATE_PLAYING) {
+bool mdx_service(void)
+{
+    if (s_state != MDX_STATE_PLAYING)
+    {
         return false;
     }
 
-    if (!s_in_tick) {
+    if (!s_in_tick)
+    {
         uint64_t now = time_us_64();
-        if (now < s_due_us) {
+        if (now < s_due_us)
+        {
             return false;
         }
 
         uint32_t lag = (uint32_t)(now - s_due_us);
         stats_seq_lag_update(lag);
-        if (lag > MDX_RESYNC_LAG_US) {
+        if (lag > MDX_RESYNC_LAG_US)
+        {
             /* 長く止まっていた。早送りせず時計を張り直す。 */
             s_due_us = now;
             s_due_q = now << 16;
             s_reslips++;
         }
 
-        if (fade_step()) {
+        if (fade_step())
+        {
             key_off_all();
             pcm8_close_pdx();
             s_pcm8_mode = false;
@@ -1705,13 +1978,15 @@ bool mdx_service(void) {
     uint32_t nch = active_channels();
     uint32_t t0 = time_us_32();
 
-    while (s_cursor < nch) {
+    while (s_cursor < nch)
+    {
         mdx_ch_t *c = &s_ch[s_cursor];
         uint32_t idx = s_cursor;
 
         ch_pre(c);
         ch_len(c, idx);
-        if (s_state != MDX_STATE_PLAYING) {
+        if (s_state != MDX_STATE_PLAYING)
+        {
             /*
              * mdx_fail() が ERROR に落とした。vgm_service() の ERROR 後始末と
              * 対称に、音を止めて PDX を返す（そうしないとキーオンと FIL が
@@ -1726,7 +2001,8 @@ bool mdx_service(void) {
 
         s_cursor++;
 
-        if (time_us_32() - t0 >= MDX_BUDGET_US) {
+        if (time_us_32() - t0 >= MDX_BUDGET_US)
+        {
             return true; /* 続きは次の周回。tick はまだ進めない。 */
         }
     }
@@ -1737,7 +2013,8 @@ bool mdx_service(void) {
     s_in_tick = false;
     advance_tick();
 
-    if (s_enable == 0u) {
+    if (s_enable == 0u)
+    {
         key_off_all();
         pcm8_close_pdx();
         s_pcm8_mode = false; /* 参照実装 L001290 の clr.b PCM8_FLG */
@@ -1750,12 +2027,15 @@ bool mdx_service(void) {
 
 /* ---- 問い合わせ -------------------------------------------------------- */
 
-mdx_state_t mdx_state(void) {
+mdx_state_t mdx_state(void)
+{
     return s_state;
 }
 
-const char *mdx_state_name(void) {
-    switch (s_state) {
+const char *mdx_state_name(void)
+{
+    switch (s_state)
+    {
     case MDX_STATE_PLAYING:
         return "PLAYING";
     case MDX_STATE_ERROR:
@@ -1765,27 +2045,33 @@ const char *mdx_state_name(void) {
     }
 }
 
-bool mdx_is_playing(void) {
+bool mdx_is_playing(void)
+{
     return s_state == MDX_STATE_PLAYING;
 }
 
-const char *mdx_current_name(void) {
+const char *mdx_current_name(void)
+{
     return s_name;
 }
 
-const char *mdx_title(void) {
+const char *mdx_title(void)
+{
     return s_title;
 }
 
-const char *mdx_pdx_name(void) {
+const char *mdx_pdx_name(void)
+{
     return s_pdx;
 }
 
-uint32_t mdx_channels(void) {
+uint32_t mdx_channels(void)
+{
     return s_nch;
 }
 
-uint64_t mdx_tick_count(void) {
+uint64_t mdx_tick_count(void)
+{
     return s_ticks;
 }
 
@@ -1793,19 +2079,23 @@ uint64_t mdx_tick_count(void) {
  * 曲が何周したか。まだ終わっていないチャンネルが全部ループ点 (0xF1 nn) に
  * 到達したところで 1 増える（参照実装 COM_F1 と同じ。cmd_exec() の 0xF1）。
  */
-uint32_t mdx_loop_count(void) {
+uint32_t mdx_loop_count(void)
+{
     return s_loops;
 }
 
-uint32_t mdx_reslip_count(void) {
+uint32_t mdx_reslip_count(void)
+{
     return s_reslips;
 }
 
-uint32_t mdx_tempo(void) {
+uint32_t mdx_tempo(void)
+{
     return s_tempo;
 }
 
-uint32_t mdx_tick_us(void) {
+uint32_t mdx_tick_us(void)
+{
     return tick_us_for(s_tempo, opm_clock_hz_actual());
 }
 
@@ -1816,26 +2106,30 @@ uint32_t mdx_tick_us(void) {
  *  - 音程 -> KC/KF。KC の下位 4bit が 3/7/11/15 を飛ばす境界とオクターブ跨ぎ
  *  - Timer-B 値 -> 1 clock の長さ
  */
-bool mdx_selftest(const char **detail) {
+bool mdx_selftest(const char **detail)
+{
     static char msg[64];
 
-    static const struct {
+    static const struct
+    {
         uint16_t pitch;
         uint8_t kc;
         uint8_t kf;
     } PV[] = {
-        {0u, 0x00u, 0x00u},          /* o0 d+ = KC 0 */
-        {11u * 64u, 0x0eu, 0x00u},   /* オクターブの最後 */
-        {12u * 64u, 0x10u, 0x00u},   /* 桁上がりで下位 4bit が 0 に戻る */
+        {0u, 0x00u, 0x00u},             /* o0 d+ = KC 0 */
+        {11u * 64u, 0x0eu, 0x00u},      /* オクターブの最後 */
+        {12u * 64u, 0x10u, 0x00u},      /* 桁上がりで下位 4bit が 0 に戻る */
         {54u * 64u + 5u, 0x48u, 0x14u}, /* 調律ぶん +5/64 が KF に出る */
-        {95u * 64u, 0x7eu, 0x00u},   /* 最高音 */
-        {0x17ffu, 0x7eu, 0xfcu},     /* 上限 */
-        {0x1800u, 0x7eu, 0xfcu},     /* 上限で頭打ち */
+        {95u * 64u, 0x7eu, 0x00u},      /* 最高音 */
+        {0x17ffu, 0x7eu, 0xfcu},        /* 上限 */
+        {0x1800u, 0x7eu, 0xfcu},        /* 上限で頭打ち */
     };
-    for (uint32_t i = 0; i < sizeof(PV) / sizeof(PV[0]); i++) {
+    for (uint32_t i = 0; i < sizeof(PV) / sizeof(PV[0]); i++)
+    {
         uint8_t kc, kf;
         pitch_to_kc_kf(PV[i].pitch, &kc, &kf);
-        if (kc != PV[i].kc || kf != PV[i].kf) {
+        if (kc != PV[i].kc || kf != PV[i].kf)
+        {
             snprintf(msg, sizeof(msg), "FAIL pitch %u -> %02x/%02x want %02x/%02x",
                      (unsigned)PV[i].pitch, kc, kf, PV[i].kc, PV[i].kf);
             *detail = msg;
@@ -1843,20 +2137,23 @@ bool mdx_selftest(const char **detail) {
         }
     }
 
-    static const struct {
+    static const struct
+    {
         uint8_t tempo;
         uint32_t phim;
         uint32_t us;
     } TV[] = {
-        {200u, 4000000u, 14336u},  /* よく使うテンポ */
-        {255u, 4000000u, 256u},    /* いちばん速い */
-        {0u, 4000000u, 65536u},    /* いちばん遅い */
+        {200u, 4000000u, 14336u}, /* よく使うテンポ */
+        {255u, 4000000u, 256u},   /* いちばん速い */
+        {0u, 4000000u, 65536u},   /* いちばん遅い */
         {190u, 4000000u, 16896u},
-        {200u, 3579545u, 16019u},  /* φM を落とすと遅くなる */
+        {200u, 3579545u, 16019u}, /* φM を落とすと遅くなる */
     };
-    for (uint32_t i = 0; i < sizeof(TV) / sizeof(TV[0]); i++) {
+    for (uint32_t i = 0; i < sizeof(TV) / sizeof(TV[0]); i++)
+    {
         uint32_t us = tick_us_for(TV[i].tempo, TV[i].phim);
-        if (us != TV[i].us) {
+        if (us != TV[i].us)
+        {
             snprintf(msg, sizeof(msg), "FAIL @t %u -> %u us want %u",
                      (unsigned)TV[i].tempo, (unsigned)us, (unsigned)TV[i].us);
             *detail = msg;
@@ -1871,17 +2168,30 @@ bool mdx_selftest(const char **detail) {
 #else /* !MDX_ENABLED */
 
 /* 無効ビルドであることを応答から判別できるように、理由を出して unsupported を返す。 */
-static const char *mdx_disabled(void) {
+static const char *mdx_disabled(void)
+{
     printf("# hint    : MDX playback is disabled at build time (MDX_ENABLED=0)\n");
     return "unsupported";
 }
 
 void mdx_init(void) {}
 bool mdx_service(void) { return false; }
-const char *mdx_play(const char *name) { (void)name; return mdx_disabled(); }
+const char *mdx_play(const char *name)
+{
+    (void)name;
+    return mdx_disabled();
+}
 const char *mdx_stop(void) { return mdx_disabled(); }
-const char *mdx_list(void (*tick)(void)) { (void)tick; return mdx_disabled(); }
-const char *mdx_collect(filelist_buf_t *buf) { (void)buf; return mdx_disabled(); }
+const char *mdx_list(void (*tick)(void))
+{
+    (void)tick;
+    return mdx_disabled();
+}
+const char *mdx_collect(filelist_buf_t *buf)
+{
+    (void)buf;
+    return mdx_disabled();
+}
 mdx_state_t mdx_state(void) { return MDX_STATE_STOPPED; }
 const char *mdx_state_name(void) { return "DISABLED"; }
 bool mdx_is_playing(void) { return false; }
@@ -1894,6 +2204,10 @@ uint32_t mdx_loop_count(void) { return 0; }
 uint32_t mdx_reslip_count(void) { return 0; }
 uint32_t mdx_tempo(void) { return 0; }
 uint32_t mdx_tick_us(void) { return 0; }
-bool mdx_selftest(const char **detail) { *detail = "SKIP (disabled)"; return true; }
+bool mdx_selftest(const char **detail)
+{
+    *detail = "SKIP (disabled)";
+    return true;
+}
 
 #endif /* MDX_ENABLED */

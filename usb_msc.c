@@ -29,7 +29,8 @@
  */
 #define MSC_TRACE_MAX 320u
 
-typedef struct {
+typedef struct
+{
     uint8_t ev;
     uint8_t a;
     uint8_t b;
@@ -39,7 +40,8 @@ typedef struct {
 static msc_trace_t s_trace[MSC_TRACE_MAX];
 static uint32_t s_trace_n; /* 総数。MSC_TRACE_MAX を超えたら古いものから捨てる */
 
-static void trace(uint8_t ev, uint8_t a, uint8_t b, uint8_t c) {
+static void trace(uint8_t ev, uint8_t a, uint8_t b, uint8_t c)
+{
     msc_trace_t *t = &s_trace[s_trace_n % MSC_TRACE_MAX];
     t->ev = ev;
     t->a = a;
@@ -48,11 +50,13 @@ static void trace(uint8_t ev, uint8_t a, uint8_t b, uint8_t c) {
     s_trace_n++;
 }
 
-void usb_msc_trace_reset(void) {
+void usb_msc_trace_reset(void)
+{
     s_trace_n = 0;
 }
 
-void usb_msc_trace_dump(void) {
+void usb_msc_trace_dump(void)
+{
     uint32_t total = s_trace_n;
     uint32_t shown = (total < MSC_TRACE_MAX) ? total : MSC_TRACE_MAX;
     uint32_t first = total - shown;
@@ -60,11 +64,14 @@ void usb_msc_trace_dump(void) {
 
     /* R が連続するところは 1 行にまとめる（ホストの読み込みで埋まるため） */
     uint32_t i = 0;
-    while (i < shown) {
+    while (i < shown)
+    {
         const msc_trace_t *t = &s_trace[(first + i) % MSC_TRACE_MAX];
-        if (t->ev == 'R') {
+        if (t->ev == 'R')
+        {
             uint32_t j = i;
-            while (j < shown && s_trace[(first + j) % MSC_TRACE_MAX].ev == 'R') {
+            while (j < shown && s_trace[(first + j) % MSC_TRACE_MAX].ev == 'R')
+            {
                 j++;
             }
             printf("# msc %03u : R x%u\n", (unsigned)(first + i), (unsigned)(j - i));
@@ -86,7 +93,8 @@ void usb_msc_trace_dump(void) {
 /* ---- 問い合わせ -------------------------------------------------------- */
 
 void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16],
-                        uint8_t product_rev[4]) {
+                        uint8_t product_rev[4])
+{
     (void)lun;
 
     /* SCSI の規定どおり空白詰めの固定長。終端は入れない。 */
@@ -102,8 +110,10 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
  * PLAYER モードでは非挿入にすることで、PC からの SCSI コマンドが
  * read10 / write10 に到達する前にすべて失敗する。
  */
-bool tud_msc_test_unit_ready_cb(uint8_t lun) {
-    if (!storage_medium_present()) {
+bool tud_msc_test_unit_ready_cb(uint8_t lun)
+{
+    if (!storage_medium_present())
+    {
         trace('T', 0, 0, 0);
         return false;
     }
@@ -117,7 +127,8 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun) {
      * これが無いと、一度 eject した PC は「取り外し済み」の状態を保持し、
      * storage host に戻してもディスクとして現れない。
      */
-    if (storage_take_media_change()) {
+    if (storage_take_media_change())
+    {
         tud_msc_set_sense(lun, SCSI_SENSE_UNIT_ATTENTION, 0x28, 0x00);
         trace('T', 1, 1, 0);
         return false;
@@ -127,7 +138,8 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun) {
     return true;
 }
 
-void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size) {
+void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size)
+{
     (void)lun;
     *block_count = FLASH_DISK_LBA_COUNT;
     *block_size = (uint16_t)FLASH_DISK_SS;
@@ -135,7 +147,8 @@ void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_siz
 }
 
 /* PLAYER モードでは書き込み禁止として見せる */
-bool tud_msc_is_writable_cb(uint8_t lun) {
+bool tud_msc_is_writable_cb(uint8_t lun)
+{
     (void)lun;
     bool w = storage_medium_present();
     trace('W', w ? 1u : 0u, 0, 0);
@@ -145,14 +158,17 @@ bool tud_msc_is_writable_cb(uint8_t lun) {
 /* ---- 読み書き ---------------------------------------------------------- */
 
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer,
-                          uint32_t bufsize) {
+                          uint32_t bufsize)
+{
     (void)lun;
 
-    if (!storage_medium_present()) {
+    if (!storage_medium_present())
+    {
         return -1;
     }
     /* CFG_TUD_MSC_EP_BUFSIZE == 論理セクタ長なので offset は常に 0 になる */
-    if (offset != 0u || (bufsize % FLASH_DISK_SS) != 0u) {
+    if (offset != 0u || (bufsize % FLASH_DISK_SS) != 0u)
+    {
         return -1;
     }
 
@@ -161,7 +177,8 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
      * ブロックしないしキャッシュも汚さないので、PC からの読み出し（マウント・
      * ディレクトリ閲覧・コピーアウト）では消去が 1 度も起きない。
      */
-    if (!flash_disk_read(lba, buffer, bufsize / FLASH_DISK_SS)) {
+    if (!flash_disk_read(lba, buffer, bufsize / FLASH_DISK_SS))
+    {
         return -1;
     }
 
@@ -171,13 +188,16 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer,
-                           uint32_t bufsize) {
+                           uint32_t bufsize)
+{
     (void)lun;
 
-    if (!storage_medium_present()) {
+    if (!storage_medium_present())
+    {
         return -1;
     }
-    if (offset != 0u || (bufsize % FLASH_DISK_SS) != 0u) {
+    if (offset != 0u || (bufsize % FLASH_DISK_SS) != 0u)
+    {
         return -1;
     }
 
@@ -193,17 +213,21 @@ int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *
      * 止めてあるので巻き込む相手がいない。flash_disk_flush_one() が書き出しの
      * 直後にリング位置を張り直すので、キャプチャ側の総フレーム数もずれない。
      */
-    for (uint32_t retry = 0; retry < MSC_BUSY_RETRY_MAX; retry++) {
+    for (uint32_t retry = 0; retry < MSC_BUSY_RETRY_MAX; retry++)
+    {
         int rc = flash_disk_write(lba, buffer, bufsize / FLASH_DISK_SS);
 
-        if (rc == FLASH_DISK_OK) {
+        if (rc == FLASH_DISK_OK)
+        {
             storage_note_host_write();
             return (int32_t)bufsize;
         }
-        if (rc != FLASH_DISK_BUSY) {
+        if (rc != FLASH_DISK_BUSY)
+        {
             return -1;
         }
-        if (!flash_disk_flush_one()) {
+        if (!flash_disk_flush_one())
+        {
             return -1;
         }
     }
@@ -211,7 +235,8 @@ int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *
     return -1;
 }
 
-void tud_msc_write10_complete_cb(uint8_t lun) {
+void tud_msc_write10_complete_cb(uint8_t lun)
+{
     (void)lun;
     storage_note_host_write(); /* アイドル期限を張り直す */
 }
@@ -219,16 +244,19 @@ void tud_msc_write10_complete_cb(uint8_t lun) {
 /* ---- その他の SCSI ----------------------------------------------------- */
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer,
-                        uint16_t bufsize) {
+                        uint16_t bufsize)
+{
     (void)buffer;
     (void)bufsize;
 
     trace('X', scsi_cmd[0], scsi_cmd[1], (uint8_t)bufsize);
 
-    switch (scsi_cmd[0]) {
+    switch (scsi_cmd[0])
+    {
     case SCSI_CMD_SYNCHRONIZE_CACHE_10:
         /* 実際の書き出しは storage_sync_now() の中の判断に任せる */
-        if (!storage_sync_now()) {
+        if (!storage_sync_now())
+        {
             return -1;
         }
         return 0;
@@ -244,13 +272,15 @@ int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer,
  * storage player の代わりになる。
  */
 bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start,
-                           bool load_eject) {
+                           bool load_eject)
+{
     (void)lun;
     (void)power_condition;
 
     trace('S', power_condition, start ? 1u : 0u, load_eject ? 1u : 0u);
 
-    if (load_eject && !start) {
+    if (load_eject && !start)
+    {
         storage_host_ejected();
     }
     return true;
@@ -258,7 +288,8 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start,
 
 /* macOS の eject を通すために許可しておく */
 bool tud_msc_prevent_allow_medium_removal_cb(uint8_t lun, uint8_t prohibit_removal,
-                                             uint8_t control) {
+                                             uint8_t control)
+{
     (void)lun;
     (void)control;
     trace('P', prohibit_removal, 0, 0);

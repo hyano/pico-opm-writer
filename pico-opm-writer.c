@@ -144,18 +144,22 @@ static uint32_t s_storage_last_us;
  * 「最短でもこの間隔を空ける」であって「この周期ちょうどで回す」ではない。
  * メインループが長く止まったあとは 1 回だけ真になり、取りこぼしを溜めない。
  */
-static bool due(uint32_t *last_us, uint32_t now_us, uint32_t interval_us) {
-    if ((uint32_t)(now_us - *last_us) < interval_us) {
+static bool due(uint32_t *last_us, uint32_t now_us, uint32_t interval_us)
+{
+    if ((uint32_t)(now_us - *last_us) < interval_us)
+    {
         return false;
     }
     *last_us = now_us;
     return true;
 }
 
-static void service_all(void) {
+static void service_all(void)
+{
     uint32_t t0 = time_us_32();
 
-    if (due(&s_usb_last_us, t0, USB_TASK_INTERVAL_US)) {
+    if (due(&s_usb_last_us, t0, USB_TASK_INTERVAL_US))
+    {
         tud_task();
     }
 
@@ -169,7 +173,8 @@ static void service_all(void) {
      * PCM を受け取るので、そこまでに描き終わっていなければならない。
      * 間隔を空けても**この順序は変えない**。
      */
-    if (due(&s_audio_last_us, t1, AUDIO_SERVICE_INTERVAL_US)) {
+    if (due(&s_audio_last_us, t1, AUDIO_SERVICE_INTERVAL_US))
+    {
         ym3012_ring_poll();
         STATS_SVC(STATS_SVC_PCM8, pcm8_service());
 
@@ -181,7 +186,8 @@ static void service_all(void) {
      * シーケンサは音声チェーンより短い間隔で見る。予定時刻の判定そのものは軽いが、
      * 毎周回だと周回数ぶんの固定費がそのまま乗る。
      */
-    if (due(&s_seq_last_us, t1, SEQ_SERVICE_INTERVAL_US)) {
+    if (due(&s_seq_last_us, t1, SEQ_SERVICE_INTERVAL_US))
+    {
         STATS_SVC(STATS_SVC_VGM, vgm_service());
         STATS_SVC(STATS_SVC_MDX, mdx_service());
         /*
@@ -191,7 +197,8 @@ static void service_all(void) {
         autoplay_service();
     }
 
-    if (due(&s_storage_last_us, t1, STORAGE_SERVICE_INTERVAL_US)) {
+    if (due(&s_storage_last_us, t1, STORAGE_SERVICE_INTERVAL_US))
+    {
         STATS_SVC(STATS_SVC_STORAGE, storage_service());
     }
 
@@ -204,15 +211,18 @@ static void service_all(void) {
 
 /* ---- 応答 -------------------------------------------------------------- */
 
-static void reply_ok(void) {
+static void reply_ok(void)
+{
     puts("OK");
 }
 
-static void reply_err(const char *reason) {
+static void reply_err(const char *reason)
+{
     printf("ERR %s\n", reason);
 }
 
-static void print_info(void) {
+static void print_info(void)
+{
     printf("# pico-opm-writer %s\n", OPM_WRITER_VERSION);
     /* phiM を先に出す。`clock` の出力と並びを揃えるため。 */
     printf("# phiM    : %u Hz (clkdiv %u + %u/256)\n",
@@ -267,16 +277,19 @@ static void print_info(void) {
  * どのサービスが空振りしているかは CPU 使用率からは読めないので、ここで分ける。
  * STATS_PROFILE=1 で焼いた場合だけ滞在時間の行が続く。
  */
-static void print_svc(void) {
+static void print_svc(void)
+{
     char line[192];
     size_t n = 0;
 
-    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++)
+    {
         stats_svc_t svc = (stats_svc_t)i;
         int w = snprintf(line + n, sizeof(line) - n, "%s%s %u/%u",
                          (i == 0u) ? "" : "  ", stats_svc_name(svc),
                          (unsigned)stats_svc_worked(svc), (unsigned)stats_svc_calls(svc));
-        if (w < 0 || (size_t)w >= sizeof(line) - n) {
+        if (w < 0 || (size_t)w >= sizeof(line) - n)
+        {
             break; /* 収まらない分は落とす（行を壊さない） */
         }
         n += (size_t)w;
@@ -285,12 +298,14 @@ static void print_svc(void) {
 
 #if STATS_PROFILE
     n = 0;
-    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++) {
+    for (uint32_t i = 0; i < (uint32_t)STATS_SVC_COUNT; i++)
+    {
         stats_svc_t svc = (stats_svc_t)i;
         int w = snprintf(line + n, sizeof(line) - n, "%s%s %u",
                          (i == 0u) ? "" : "  ", stats_svc_name(svc),
                          (unsigned)stats_svc_busy_us(svc));
-        if (w < 0 || (size_t)w >= sizeof(line) - n) {
+        if (w < 0 || (size_t)w >= sizeof(line) - n)
+        {
             break;
         }
         n += (size_t)w;
@@ -300,7 +315,8 @@ static void print_svc(void) {
 }
 
 /* `s` の出力。単位はすべてバイト。 */
-static void print_stats(void) {
+static void print_stats(void)
+{
     uint32_t ring = stats_ring_frames() * 4u;
     uint32_t ring_max = stats_ring_frames_max() * 4u;
     uint32_t tx_cap = usb_pcm_capacity();
@@ -360,7 +376,8 @@ static void print_stats(void) {
     reply_ok();
 }
 
-static void print_help(void) {
+static void print_help(void)
+{
     puts("# w <addr> <data> [<addr> <data> ...] : write register(s), hex 00-ff");
     puts("# r                                   : hardware reset (/IC)");
     puts("# c                                   : clear all registers (software)");
@@ -400,22 +417,27 @@ static void print_help(void) {
 /* ---- トークン分割 ------------------------------------------------------ */
 
 /* 空白 / タブ区切りで次のトークンを切り出す。無ければ NULL。 */
-static char *next_token(char **cursor) {
+static char *next_token(char **cursor)
+{
     char *p = *cursor;
 
-    while (*p == ' ' || *p == '\t') {
+    while (*p == ' ' || *p == '\t')
+    {
         p++;
     }
-    if (*p == '\0') {
+    if (*p == '\0')
+    {
         *cursor = p;
         return NULL;
     }
 
     char *start = p;
-    while (*p != '\0' && *p != ' ' && *p != '\t') {
+    while (*p != '\0' && *p != ' ' && *p != '\t')
+    {
         p++;
     }
-    if (*p != '\0') {
+    if (*p != '\0')
+    {
         *p = '\0';
         p++;
     }
@@ -428,20 +450,24 @@ static char *next_token(char **cursor) {
  * 残りの行をまるごと 1 引数として返す。前後の空白は落とす。空なら NULL。
  * next_token() と違って区切らないので、空白を含むファイル名をそのまま扱える。
  */
-static char *rest_of_line(char **cursor) {
+static char *rest_of_line(char **cursor)
+{
     char *p = *cursor;
 
-    while (*p == ' ' || *p == '\t') {
+    while (*p == ' ' || *p == '\t')
+    {
         p++;
     }
-    if (*p == '\0') {
+    if (*p == '\0')
+    {
         *cursor = p;
         return NULL;
     }
 
     char *start = p;
     char *end = p + strlen(p);
-    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+    {
         end--;
     }
     *end = '\0';
@@ -451,14 +477,18 @@ static char *rest_of_line(char **cursor) {
 }
 
 /* トークンの大小無視比較。strcasecmp に依存しない。 */
-static bool tok_is(const char *tok, const char *name) {
-    for (;;) {
+static bool tok_is(const char *tok, const char *name)
+{
+    for (;;)
+    {
         int a = tolower((unsigned char)*tok);
         int b = tolower((unsigned char)*name);
-        if (a != b) {
+        if (a != b)
+        {
             return false;
         }
-        if (a == '\0') {
+        if (a == '\0')
+        {
             return true;
         }
         tok++;
@@ -470,27 +500,36 @@ static bool tok_is(const char *tok, const char *name) {
 
 /* エラー時はエラー理由の文字列、成功時は NULL を返す。 */
 
-static const char *parse_hex_u8(const char *s, uint8_t *out) {
+static const char *parse_hex_u8(const char *s, uint8_t *out)
+{
     uint32_t v = 0;
     bool any = false;
 
-    for (const char *p = s; *p != '\0'; p++) {
+    for (const char *p = s; *p != '\0'; p++)
+    {
         int c = tolower((unsigned char)*p);
         int digit;
-        if (c >= '0' && c <= '9') {
+        if (c >= '0' && c <= '9')
+        {
             digit = c - '0';
-        } else if (c >= 'a' && c <= 'f') {
+        }
+        else if (c >= 'a' && c <= 'f')
+        {
             digit = c - 'a' + 10;
-        } else {
+        }
+        else
+        {
             return "bad argument";
         }
         v = v * 16u + (uint32_t)digit;
-        if (v > 0xffu) {
+        if (v > 0xffu)
+        {
             return "out of range";
         }
         any = true;
     }
-    if (!any) {
+    if (!any)
+    {
         return "bad argument";
     }
 
@@ -498,21 +537,26 @@ static const char *parse_hex_u8(const char *s, uint8_t *out) {
     return NULL;
 }
 
-static const char *parse_dec_u32(const char *s, uint32_t max, uint32_t *out) {
+static const char *parse_dec_u32(const char *s, uint32_t max, uint32_t *out)
+{
     uint32_t v = 0;
     bool any = false;
 
-    for (const char *p = s; *p != '\0'; p++) {
-        if (*p < '0' || *p > '9') {
+    for (const char *p = s; *p != '\0'; p++)
+    {
+        if (*p < '0' || *p > '9')
+        {
             return "bad argument";
         }
         v = v * 10u + (uint32_t)(*p - '0');
-        if (v > max) {
+        if (v > max)
+        {
             return "out of range";
         }
         any = true;
     }
-    if (!any) {
+    if (!any)
+    {
         return "bad argument";
     }
 
@@ -523,8 +567,10 @@ static const char *parse_dec_u32(const char *s, uint32_t max, uint32_t *out) {
 /* ---- コマンド ---------------------------------------------------------- */
 
 /* 引数を取らないコマンド用。余分なトークンがあれば ERR を返して false。 */
-static bool expect_no_args(char **cursor) {
-    if (next_token(cursor) != NULL) {
+static bool expect_no_args(char **cursor)
+{
+    if (next_token(cursor) != NULL)
+    {
         reply_err("wrong arity");
         return false;
     }
@@ -536,13 +582,16 @@ static bool expect_no_args(char **cursor) {
  * 何が鳴っているのか分からなくなるうえ、チップの状態は VGM 側が持っている。
  * 拒否したら true。
  */
-static bool reject_while_playing(void) {
-    if (vgm_is_playing()) {
+static bool reject_while_playing(void)
+{
+    if (vgm_is_playing())
+    {
         printf("# hint    : VGM is playing; run vgm stop first\n");
         reply_err("wrong state");
         return true;
     }
-    if (mdx_is_playing()) {
+    if (mdx_is_playing())
+    {
         printf("# hint    : MDX is playing; run mdx stop first\n");
         reply_err("wrong state");
         return true;
@@ -556,36 +605,46 @@ static bool reject_while_playing(void) {
  * ペアを読むそばから書き込むため、途中でエラーになってもそこまでの書き込みは
  * 実行済みのまま ERR を返す（仕様どおり）。
  */
-static void cmd_write(char **cursor) {
-    if (reject_while_playing()) {
+static void cmd_write(char **cursor)
+{
+    if (reject_while_playing())
+    {
         return;
     }
 
     int pairs = 0;
 
-    for (;;) {
+    for (;;)
+    {
         char *tok_addr = next_token(cursor);
-        if (tok_addr == NULL) {
-            if (pairs == 0) {
+        if (tok_addr == NULL)
+        {
+            if (pairs == 0)
+            {
                 reply_err("wrong arity");
-            } else {
+            }
+            else
+            {
                 reply_ok();
             }
             return;
         }
 
         char *tok_data = next_token(cursor);
-        if (tok_data == NULL) {
+        if (tok_data == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
 
         uint8_t addr, data;
         const char *err = parse_hex_u8(tok_addr, &addr);
-        if (err == NULL) {
+        if (err == NULL)
+        {
             err = parse_hex_u8(tok_data, &data);
         }
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
             return;
         }
@@ -595,19 +654,23 @@ static void cmd_write(char **cursor) {
     }
 }
 
-static void cmd_delay(char **cursor) {
+static void cmd_delay(char **cursor)
+{
     char *tok = next_token(cursor);
-    if (tok == NULL) {
+    if (tok == NULL)
+    {
         reply_err("wrong arity");
         return;
     }
-    if (!expect_no_args(cursor)) {
+    if (!expect_no_args(cursor))
+    {
         return;
     }
 
     uint32_t ms;
     const char *err = parse_dec_u32(tok, DELAY_MAX_MS, &ms);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         reply_err(err);
         return;
     }
@@ -617,7 +680,8 @@ static void cmd_delay(char **cursor) {
      * 待っている間もサービスを回す。
      */
     absolute_time_t deadline = make_timeout_time_ms(ms);
-    while (!time_reached(deadline)) {
+    while (!time_reached(deadline))
+    {
         service_all();
     }
     reply_ok();
@@ -629,45 +693,55 @@ static void cmd_delay(char **cursor) {
  * PIO と DMA は常時動いているので、ここで制御しているのは CDC #1 への送信だけ。
  */
 /* `p`（引数なし）の出力。キャプチャの可否をこれだけで判断できるようにする。 */
-static void print_capture_status(void) {
+static void print_capture_status(void)
+{
     printf("# capture : %s\n", capture_state_name());
     printf("# cdc1    : %s\n", usb_pcm_connected() ? "connected" : "not connected");
     printf("# rate    : %u Hz\n", (unsigned)(opm_clock_hz_actual() / 64u));
     reply_ok();
 }
 
-static void cmd_pcm(char **cursor) {
+static void cmd_pcm(char **cursor)
+{
     char *tok = next_token(cursor);
-    if (tok == NULL) {
+    if (tok == NULL)
+    {
         print_capture_status();
         return;
     }
-    if (!expect_no_args(cursor)) {
+    if (!expect_no_args(cursor))
+    {
         return;
     }
 
     uint32_t mode;
     const char *err = parse_dec_u32(tok, 1u, &mode);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         reply_err(err);
         return;
     }
 
-    if (mode == 1u) {
+    if (mode == 1u)
+    {
         /*
          * HOST モード中はフラッシュの消去でメインループが数十 ms 止まるので、
          * キャプチャを走らせない。判定はここに置き、capture.c に storage への
          * 依存を持ち込まない。
          */
-        if (storage_mode() == STORAGE_MODE_HOST) {
+        if (storage_mode() == STORAGE_MODE_HOST)
+        {
             printf("# hint    : cannot capture PCM in storage host; run storage player first\n");
             reply_err("wrong state");
             return;
         }
         err = capture_start();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             printf("# capture : %s\n", capture_state_name());
             reply_ok();
         }
@@ -675,7 +749,8 @@ static void cmd_pcm(char **cursor) {
     }
 
     err = capture_request_stop();
-    if (err != NULL) {
+    if (err != NULL)
+    {
         reply_err(err);
         return;
     }
@@ -685,9 +760,11 @@ static void cmd_pcm(char **cursor) {
      * DMA も USB も止まらない。ホストが CDC #1 を読まない場合に備えて上限を設ける。
      */
     absolute_time_t deadline = make_timeout_time_ms(DRAIN_TIMEOUT_MS);
-    while (capture_state() == CAPTURE_STATE_DRAINING) {
+    while (capture_state() == CAPTURE_STATE_DRAINING)
+    {
         service_all();
-        if (time_reached(deadline)) {
+        if (time_reached(deadline))
+        {
             capture_abort();
             reply_err("drain timeout");
             return;
@@ -698,19 +775,23 @@ static void cmd_pcm(char **cursor) {
 }
 
 /* s（統計表示） / s 0（統計リセット） */
-static void cmd_stats(char **cursor) {
+static void cmd_stats(char **cursor)
+{
     char *tok = next_token(cursor);
-    if (tok == NULL) {
+    if (tok == NULL)
+    {
         print_stats();
         return;
     }
-    if (!expect_no_args(cursor)) {
+    if (!expect_no_args(cursor))
+    {
         return;
     }
 
     uint32_t v;
     const char *err = parse_dec_u32(tok, 0u, &v);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         reply_err(err);
         return;
     }
@@ -722,7 +803,8 @@ static void cmd_stats(char **cursor) {
 
 /* ---- storage -------------------------------------------------------- */
 
-static void print_storage_status(void) {
+static void print_storage_status(void)
+{
     printf("# storage : %s\n", storage_mode_name());
     printf("# medium  : %s\n", storage_medium_present() ? "present" : "not present");
     printf("# audio   : %s\n",
@@ -738,11 +820,14 @@ static void print_storage_status(void) {
            (unsigned)(XIP_BASE + fw_end), (unsigned)fw_end, (unsigned)(gap / 1024u));
 
     uint32_t free_kib = 0, total_kib = 0;
-    if (storage_space_kib(&free_kib, &total_kib)) {
+    if (storage_space_kib(&free_kib, &total_kib))
+    {
         printf("# fs      : %s  cluster %u B  free %u/%u KiB\n",
                storage_fs_type_name(), (unsigned)storage_cluster_bytes(),
                (unsigned)free_kib, (unsigned)total_kib);
-    } else {
+    }
+    else
+    {
         printf("# fs      : %s\n", storage_fs_state_name());
     }
 
@@ -755,7 +840,8 @@ static void print_storage_status(void) {
 }
 
 /* `clock` の出力。切り替え後の確認にも使う。 */
-static void print_clock_status(void) {
+static void print_clock_status(void)
+{
     printf("# phiM    : %u Hz (clkdiv %u + %u/256)\n",
            (unsigned)opm_clock_hz_actual(),
            (unsigned)opm_clock_div_int(), (unsigned)opm_clock_div_frac());
@@ -778,40 +864,51 @@ static void print_clock_status(void) {
  * VGM 再生中でも許す。レジスタを叩くわけではないので reject_while_playing() は
  * 使わない（音程が変わるだけで、テンポは time_us_64() 基準なので狂わない）。
  */
-static void cmd_clock(char **cursor) {
+static void cmd_clock(char **cursor)
+{
     char *sub = next_token(cursor);
-    if (sub == NULL) {
+    if (sub == NULL)
+    {
         print_clock_status();
         return;
     }
-    if (!expect_no_args(cursor)) {
+    if (!expect_no_args(cursor))
+    {
         return;
     }
 
-    if (tok_is(sub, "status")) {
+    if (tok_is(sub, "status"))
+    {
         print_clock_status();
         return;
     }
 
-    if (tok_is(sub, "auto") || tok_is(sub, "fixed")) {
+    if (tok_is(sub, "auto") || tok_is(sub, "fixed"))
+    {
         clockmode_set_auto(tok_is(sub, "auto"));
         reply_ok();
         return;
     }
 
     clock_preset_t target;
-    if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_4MHZ))) {
+    if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_4MHZ)))
+    {
         target = CLOCK_PRESET_4MHZ;
-    } else if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_NTSC))) {
+    }
+    else if (tok_is(sub, clockmode_preset_name(CLOCK_PRESET_NTSC)))
+    {
         target = CLOCK_PRESET_NTSC;
-    } else {
+    }
+    else
+    {
         /* プリセット名は「未知のサブコマンド」であって解釈できない数値ではない */
         reply_err("unknown command");
         return;
     }
 
     const char *err = clockmode_set(target);
-    if (err != NULL) {
+    if (err != NULL)
+    {
         reply_err(err);
         return;
     }
@@ -824,15 +921,19 @@ static void cmd_clock(char **cursor) {
  * format は確認トークンを必須にする。すでにマウントできている領域を消すときは
  * format force yes を要求する。
  */
-static void cmd_storage(char **cursor) {
+static void cmd_storage(char **cursor)
+{
     char *sub = next_token(cursor);
-    if (sub == NULL) {
+    if (sub == NULL)
+    {
         print_storage_status();
         return;
     }
 
-    if (tok_is(sub, "trace")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "trace"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         usb_msc_trace_dump();
@@ -840,61 +941,79 @@ static void cmd_storage(char **cursor) {
         return;
     }
 
-    if (tok_is(sub, "status")) {
-        if (expect_no_args(cursor)) {
+    if (tok_is(sub, "status"))
+    {
+        if (expect_no_args(cursor))
+        {
             print_storage_status();
         }
         return;
     }
 
-    if (tok_is(sub, "host")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "host"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         const char *err = storage_set_host();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             printf("# storage : %s\n", storage_mode_name());
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "player")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "player"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         const char *err = storage_set_player();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             printf("# storage : %s\n", storage_mode_name());
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "format")) {
+    if (tok_is(sub, "format"))
+    {
         char *tok = next_token(cursor);
         bool force = false;
-        if (tok != NULL && tok_is(tok, "force")) {
+        if (tok != NULL && tok_is(tok, "force"))
+        {
             force = true;
             tok = next_token(cursor);
         }
-        if (tok == NULL || !tok_is(tok, "yes")) {
+        if (tok == NULL || !tok_is(tok, "yes"))
+        {
             reply_err("bad argument");
             return;
         }
-        if (!expect_no_args(cursor)) {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
-        if (storage_mode() != STORAGE_MODE_PLAYER) {
+        if (storage_mode() != STORAGE_MODE_PLAYER)
+        {
             printf("# hint    : return to storage player before formatting\n");
             reply_err("wrong state");
             return;
         }
-        if (!force && storage_fs_state() == STORAGE_FS_MOUNTED) {
+        if (!force && storage_fs_state() == STORAGE_FS_MOUNTED)
+        {
             printf("# hint    : a filesystem already exists; use storage format force yes to erase it\n");
             reply_err("wrong state");
             return;
@@ -903,9 +1022,12 @@ static void cmd_storage(char **cursor) {
         /* ガードを全部抜けてから進捗を出す */
         printf("# format  : takes tens of seconds; I2S will underrun meanwhile\n");
         const char *err = storage_format();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
@@ -922,7 +1044,8 @@ static void cmd_storage(char **cursor) {
  * ファイル名は行の残り全部を 1 引数として受けるので、空白を含む名前も扱える。
  */
 /* `vgm`（引数なし）と `vgm status` の出力。統計本体は `s` に置いたまま。 */
-static void print_vgm_status(void) {
+static void print_vgm_status(void)
+{
     const char *name = vgm_current_name();
     printf("# vgm     : %s%s%s%s\n", vgm_state_name(), name[0] ? " " : "", name,
            vgm_is_compressed() ? "  (gzip)" : "");
@@ -934,60 +1057,79 @@ static void print_vgm_status(void) {
     reply_ok();
 }
 
-static void cmd_vgm(char **cursor) {
+static void cmd_vgm(char **cursor)
+{
     char *sub = next_token(cursor);
-    if (sub == NULL) {
+    if (sub == NULL)
+    {
         print_vgm_status();
         return;
     }
 
-    if (tok_is(sub, "status")) {
-        if (expect_no_args(cursor)) {
+    if (tok_is(sub, "status"))
+    {
+        if (expect_no_args(cursor))
+        {
             print_vgm_status();
         }
         return;
     }
 
-    if (tok_is(sub, "list")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "list"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         /* 行数が多いと printf の待ちが積もるので、1 行ごとにサービスを回す。 */
         const char *err = vgm_list(service_all);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "play")) {
+    if (tok_is(sub, "play"))
+    {
         char *name = rest_of_line(cursor);
-        if (name == NULL) {
+        if (name == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
         /* 手で曲を選んだら自動再生は降りる（曲送りと食い違わせない） */
         autoplay_stop();
         const char *err = vgm_play(name);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "stop")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "stop"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_stop();
         const char *err = vgm_stop();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
@@ -1002,10 +1144,12 @@ static void cmd_vgm(char **cursor) {
  * vgm と同じく、ファイル名は行の残り全部を 1 引数として受ける。
  */
 /* `mdx`（引数なし）と `mdx status` の出力。ADPCM の詳細は `mdx pcm` の方に置く。 */
-static void print_mdx_status(void) {
+static void print_mdx_status(void)
+{
     const char *name = mdx_current_name();
     printf("# mdx     : %s%s%s\n", mdx_state_name(), name[0] ? " " : "", name);
-    if (mdx_title()[0] != '\0') {
+    if (mdx_title()[0] != '\0')
+    {
         printf("# title   : %s\n", mdx_title());
     }
     printf("# pos     : %llu clocks  loop %u  ch %u\n",
@@ -1016,83 +1160,111 @@ static void print_mdx_status(void) {
     reply_ok();
 }
 
-static void cmd_mdx(char **cursor) {
+static void cmd_mdx(char **cursor)
+{
     char *sub = next_token(cursor);
-    if (sub == NULL) {
+    if (sub == NULL)
+    {
         print_mdx_status();
         return;
     }
 
-    if (tok_is(sub, "status")) {
-        if (expect_no_args(cursor)) {
+    if (tok_is(sub, "status"))
+    {
+        if (expect_no_args(cursor))
+        {
             print_mdx_status();
         }
         return;
     }
 
-    if (tok_is(sub, "list")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "list"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         const char *err = mdx_list(service_all);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "play")) {
+    if (tok_is(sub, "play"))
+    {
         char *name = rest_of_line(cursor);
-        if (name == NULL) {
+        if (name == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
         autoplay_stop();
         const char *err = mdx_play(name);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "stop")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "stop"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_stop();
         const char *err = mdx_stop();
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "pcm")) {
+    if (tok_is(sub, "pcm"))
+    {
         char *arg = next_token(cursor);
-        if (arg != NULL) {
+        if (arg != NULL)
+        {
             bool on;
-            if (tok_is(arg, "on")) {
+            if (tok_is(arg, "on"))
+            {
                 on = true;
-            } else if (tok_is(arg, "off")) {
+            }
+            else if (tok_is(arg, "off"))
+            {
                 on = false;
-            } else {
+            }
+            else
+            {
                 reply_err("bad argument");
                 return;
             }
-            if (!expect_no_args(cursor)) {
+            if (!expect_no_args(cursor))
+            {
                 return;
             }
             /*
              * デコーダごとリンクされていない構成では on にしても鳴らないので、
              * 黙って OK を返さずに理由を出す（状態表示の方は通す）。
              */
-            if (!PCM8_ENABLED) {
+            if (!PCM8_ENABLED)
+            {
                 printf("# hint    : ADPCM is disabled at build time (PCM8_ENABLED=0)\n");
                 reply_err("unsupported");
                 return;
@@ -1126,23 +1298,30 @@ static void cmd_mdx(char **cursor) {
  *          | source <vgm|mdx|both>
  */
 /* `autoplay`（引数なし）と `autoplay status` の出力。 */
-static void print_autoplay_status(void) {
+static void print_autoplay_status(void)
+{
     printf("# autoplay: %s  mode %s  source %s\n", autoplay_state_name(),
            autoplay_mode_name(), autoplay_source_name());
 
     const char *name = autoplay_current_name();
-    if (name[0] != '\0') {
+    if (name[0] != '\0')
+    {
         printf("# track   : %u/%u  %s %s\n", (unsigned)autoplay_position(),
                (unsigned)autoplay_count(), autoplay_current_is_vgm() ? "vgm" : "mdx", name);
-    } else {
+    }
+    else
+    {
         printf("# track   : -/%u\n", (unsigned)autoplay_count());
     }
 
     /* loop 0 は無限。数値のままだと「0 周でフェード」と読めるので語で出す。 */
-    if (autoplay_loop() == 0u) {
+    if (autoplay_loop() == 0u)
+    {
         printf("# timing  : loop endless  fade %u ms  gap %u ms\n",
                (unsigned)autoplay_fade_ms(), (unsigned)autoplay_gap_ms());
-    } else {
+    }
+    else
+    {
         printf("# timing  : loop %u  fade %u ms  gap %u ms\n", (unsigned)autoplay_loop(),
                (unsigned)autoplay_fade_ms(), (unsigned)autoplay_gap_ms());
     }
@@ -1150,83 +1329,110 @@ static void print_autoplay_status(void) {
 }
 
 /* エラーなら ERR、成功なら変更後の状態を出す（`storage host` などと同じ扱い）。 */
-static void autoplay_reply(const char *err) {
-    if (err != NULL) {
+static void autoplay_reply(const char *err)
+{
+    if (err != NULL)
+    {
         reply_err(err);
-    } else {
+    }
+    else
+    {
         print_autoplay_status();
     }
 }
 
-static void cmd_autoplay(char **cursor) {
+static void cmd_autoplay(char **cursor)
+{
     char *sub = next_token(cursor);
-    if (sub == NULL) {
+    if (sub == NULL)
+    {
         print_autoplay_status();
         return;
     }
 
-    if (tok_is(sub, "status")) {
-        if (expect_no_args(cursor)) {
+    if (tok_is(sub, "status"))
+    {
+        if (expect_no_args(cursor))
+        {
             print_autoplay_status();
         }
         return;
     }
 
-    if (tok_is(sub, "list")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "list"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         /* 行数が多いと printf の待ちが積もるので、1 行ごとにサービスを回す。 */
         const char *err = autoplay_print_list(service_all);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
-        } else {
+        }
+        else
+        {
             reply_ok();
         }
         return;
     }
 
-    if (tok_is(sub, "start")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "start"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_reply(autoplay_start());
         return;
     }
 
-    if (tok_is(sub, "stop")) {
-        if (!expect_no_args(cursor)) {
+    if (tok_is(sub, "stop"))
+    {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_reply(autoplay_stop());
         return;
     }
 
-    if (tok_is(sub, "next") || tok_is(sub, "prev")) {
+    if (tok_is(sub, "next") || tok_is(sub, "prev"))
+    {
         bool forward = tok_is(sub, "next");
-        if (!expect_no_args(cursor)) {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_reply(autoplay_skip(forward ? 1 : -1));
         return;
     }
 
-    if (tok_is(sub, "mode")) {
+    if (tok_is(sub, "mode"))
+    {
         char *arg = next_token(cursor);
-        if (arg == NULL) {
+        if (arg == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
         autoplay_mode_t mode;
-        if (tok_is(arg, "list")) {
+        if (tok_is(arg, "list"))
+        {
             mode = AUTOPLAY_MODE_LIST;
-        } else if (tok_is(arg, "random")) {
+        }
+        else if (tok_is(arg, "random"))
+        {
             mode = AUTOPLAY_MODE_RANDOM;
-        } else {
+        }
+        else
+        {
             reply_err("bad argument");
             return;
         }
-        if (!expect_no_args(cursor)) {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_set_mode(mode);
@@ -1234,24 +1440,34 @@ static void cmd_autoplay(char **cursor) {
         return;
     }
 
-    if (tok_is(sub, "source")) {
+    if (tok_is(sub, "source"))
+    {
         char *arg = next_token(cursor);
-        if (arg == NULL) {
+        if (arg == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
         autoplay_source_t source;
-        if (tok_is(arg, "vgm")) {
+        if (tok_is(arg, "vgm"))
+        {
             source = AUTOPLAY_SOURCE_VGM;
-        } else if (tok_is(arg, "mdx")) {
+        }
+        else if (tok_is(arg, "mdx"))
+        {
             source = AUTOPLAY_SOURCE_MDX;
-        } else if (tok_is(arg, "both")) {
+        }
+        else if (tok_is(arg, "both"))
+        {
             source = AUTOPLAY_SOURCE_BOTH;
-        } else {
+        }
+        else
+        {
             reply_err("bad argument");
             return;
         }
-        if (!expect_no_args(cursor)) {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
         autoplay_set_source(source);
@@ -1264,27 +1480,36 @@ static void cmd_autoplay(char **cursor) {
     bool is_loop = tok_is(sub, "loop");
     bool is_fade = tok_is(sub, "fade");
     bool is_gap = tok_is(sub, "gap");
-    if (is_loop || is_fade || is_gap) {
+    if (is_loop || is_fade || is_gap)
+    {
         char *arg = next_token(cursor);
-        if (arg == NULL) {
+        if (arg == NULL)
+        {
             reply_err("wrong arity");
             return;
         }
         uint32_t v = 0;
         const char *err =
             parse_dec_u32(arg, is_loop ? AUTOPLAY_LOOP_MAX : AUTOPLAY_MS_MAX, &v);
-        if (err != NULL) {
+        if (err != NULL)
+        {
             reply_err(err);
             return;
         }
-        if (!expect_no_args(cursor)) {
+        if (!expect_no_args(cursor))
+        {
             return;
         }
-        if (is_loop) {
+        if (is_loop)
+        {
             autoplay_set_loop(v);
-        } else if (is_fade) {
+        }
+        else if (is_fade)
+        {
             autoplay_set_fade_ms(v);
-        } else {
+        }
+        else
+        {
             autoplay_set_gap_ms(v);
         }
         print_autoplay_status();
@@ -1295,7 +1520,8 @@ static void cmd_autoplay(char **cursor) {
 }
 
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
-static void cmd_selftest(void) {
+static void cmd_selftest(void)
+{
     const char *detail = NULL;
     bool pcm_ok = ym3012_pcm_selftest(&detail);
 
@@ -1310,19 +1536,24 @@ static void cmd_selftest(void) {
     printf("# mdx     : %s\n", mdx_detail);
     printf("# adpcm   : %s\n", pcm8_detail);
 
-    if (pcm_ok && mdx_ok && pcm8_ok && ym3012_selftest_passed()) {
+    if (pcm_ok && mdx_ok && pcm8_ok && ym3012_selftest_passed())
+    {
         reply_ok();
-    } else {
+    }
+    else
+    {
         reply_err("self test failed");
     }
 }
 
 /* 1 行を処理する。空行とコメント行は無応答。 */
-static void process_line(char *line) {
+static void process_line(char *line)
+{
     char *cursor = line;
 
     char *cmd = next_token(&cursor);
-    if (cmd == NULL || cmd[0] == '#') {
+    if (cmd == NULL || cmd[0] == '#')
+    {
         return;
     }
 
@@ -1330,34 +1561,52 @@ static void process_line(char *line) {
     led_notify_command();
 
     /* 複数文字のコマンド。1 文字コマンドの経路には手を入れない。 */
-    if (cmd[1] != '\0') {
-        if (tok_is(cmd, "clock")) {
+    if (cmd[1] != '\0')
+    {
+        if (tok_is(cmd, "clock"))
+        {
             cmd_clock(&cursor);
-        } else if (tok_is(cmd, "storage")) {
+        }
+        else if (tok_is(cmd, "storage"))
+        {
             cmd_storage(&cursor);
-        } else if (tok_is(cmd, "vgm")) {
+        }
+        else if (tok_is(cmd, "vgm"))
+        {
             cmd_vgm(&cursor);
-        } else if (tok_is(cmd, "mdx")) {
+        }
+        else if (tok_is(cmd, "mdx"))
+        {
             cmd_mdx(&cursor);
-        } else if (tok_is(cmd, "autoplay")) {
+        }
+        else if (tok_is(cmd, "autoplay"))
+        {
             cmd_autoplay(&cursor);
-        } else if (tok_is(cmd, "help")) {
-            if (expect_no_args(&cursor)) {
+        }
+        else if (tok_is(cmd, "help"))
+        {
+            if (expect_no_args(&cursor))
+            {
                 print_help();
             }
-        } else {
+        }
+        else
+        {
             reply_err("unknown command");
         }
         return;
     }
 
-    switch (tolower((unsigned char)cmd[0])) {
+    switch (tolower((unsigned char)cmd[0]))
+    {
     case 'w':
         cmd_write(&cursor);
         break;
     case 'r':
-        if (expect_no_args(&cursor)) {
-            if (reject_while_playing()) {
+        if (expect_no_args(&cursor))
+        {
+            if (reject_while_playing())
+            {
                 break;
             }
             opm_reset();
@@ -1365,8 +1614,10 @@ static void process_line(char *line) {
         }
         break;
     case 'c':
-        if (expect_no_args(&cursor)) {
-            if (reject_while_playing()) {
+        if (expect_no_args(&cursor))
+        {
+            if (reject_while_playing())
+            {
                 break;
             }
             opm_clear();
@@ -1383,18 +1634,21 @@ static void process_line(char *line) {
         cmd_stats(&cursor);
         break;
     case 't':
-        if (expect_no_args(&cursor)) {
+        if (expect_no_args(&cursor))
+        {
             cmd_selftest();
         }
         break;
     case 'i':
-        if (expect_no_args(&cursor)) {
+        if (expect_no_args(&cursor))
+        {
             print_info();
         }
         break;
     case 'h':
     case '?':
-        if (expect_no_args(&cursor)) {
+        if (expect_no_args(&cursor))
+        {
             print_help();
         }
         break;
@@ -1406,7 +1660,8 @@ static void process_line(char *line) {
 
 /* ---- メイン ------------------------------------------------------------ */
 
-int main(void) {
+int main(void)
+{
     /*
      * φM を整数分周で作るため、stdio 初期化より前にシステムクロックを上げる。
      * ここで決まるのは起動時のプリセットだけで、以後は clockmode.c が張り替える。
@@ -1449,7 +1704,8 @@ int main(void) {
     bool connected = false;
     uint32_t connect_poll_us = time_us_32();
 
-    for (;;) {
+    for (;;)
+    {
         service_all();
 
         /*
@@ -1458,15 +1714,18 @@ int main(void) {
          * 範囲で出れば足りる。
          */
         uint32_t now_us = time_us_32();
-        if ((uint32_t)(now_us - connect_poll_us) >= CONNECT_POLL_INTERVAL_US) {
+        if ((uint32_t)(now_us - connect_poll_us) >= CONNECT_POLL_INTERVAL_US)
+        {
             connect_poll_us = now_us;
 
             bool now_connected = stdio_usb_connected();
-            if (now_connected != connected) {
+            if (now_connected != connected)
+            {
                 connected = now_connected;
                 s_len = 0;
                 s_overflow = false;
-                if (connected) {
+                if (connected)
+                {
                     /* 接続前の出力は捨てられるので、検出した時点で起動バナーを出す。 */
                     print_info();
                 }
@@ -1478,29 +1737,39 @@ int main(void) {
          * ドライバ走査と time_us_64() の読み出しが毎周回入る。先に TinyUSB の
          * FIFO を見て、空なら降りない。読む経路そのものは stdio のままにする。
          */
-        if (tud_cdc_n_available(USB_CMD_CDC_ITF) == 0u) {
+        if (tud_cdc_n_available(USB_CMD_CDC_ITF) == 0u)
+        {
             tight_loop_contents();
             continue;
         }
 
         int ch = getchar_timeout_us(0);
-        if (ch < 0) {
+        if (ch < 0)
+        {
             tight_loop_contents();
             continue;
         }
 
-        if (ch == '\r' || ch == '\n') {
-            if (s_overflow) {
+        if (ch == '\r' || ch == '\n')
+        {
+            if (s_overflow)
+            {
                 reply_err("too long");
-            } else {
+            }
+            else
+            {
                 s_line[s_len] = '\0';
                 process_line(s_line);
             }
             s_len = 0;
             s_overflow = false;
-        } else if (s_len < LINE_MAX_LEN) {
+        }
+        else if (s_len < LINE_MAX_LEN)
+        {
             s_line[s_len++] = (char)ch;
-        } else {
+        }
+        else
+        {
             s_overflow = true;
         }
     }

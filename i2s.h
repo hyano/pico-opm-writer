@@ -80,10 +80,10 @@ bool i2s_enabled(void);
 
 /* ---- 情報 -------------------------------------------------------------- */
 
-uint32_t i2s_depth(void);      /* DMA の先を走っているフレーム数 */
-uint32_t i2s_clkdiv_int(void); /* PIO 分周比の整数部 */
-uint32_t i2s_clkdiv_frac(void);/* PIO 分周比の小数部（/256） */
-uint32_t i2s_rate_hz(void);    /* 実際に出ているサンプリングレート */
-uint32_t i2s_bck_hz(void);     /* 実際に出ている BCK 周波数 */
+uint32_t i2s_depth(void);       /* DMA の先を走っているフレーム数 */
+uint32_t i2s_clkdiv_int(void);  /* PIO 分周比の整数部 */
+uint32_t i2s_clkdiv_frac(void); /* PIO 分周比の小数部（/256） */
+uint32_t i2s_rate_hz(void);     /* 実際に出ているサンプリングレート */
+uint32_t i2s_bck_hz(void);      /* 実際に出ている BCK 周波数 */
 
 #endif /* I2S_H */

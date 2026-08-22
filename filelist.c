@@ -14,16 +14,20 @@
 
 #include "storage.h"
 
-int filelist_name_cmp(const char *a, const char *b) {
+int filelist_name_cmp(const char *a, const char *b)
+{
     const char *pa = a;
     const char *pb = b;
-    for (;;) {
+    for (;;)
+    {
         int ca = tolower((unsigned char)*pa);
         int cb = tolower((unsigned char)*pb);
-        if (ca != cb) {
+        if (ca != cb)
+        {
             return (ca < cb) ? -1 : 1;
         }
-        if (ca == '\0') {
+        if (ca == '\0')
+        {
             break;
         }
         pa++;
@@ -39,14 +43,18 @@ int filelist_name_cmp(const char *a, const char *b) {
  * 結果を返して順序を一意化するので、".MDX" と ".mdx" のように大小だけが違う
  * 組では 0 にならない。並べ替えの比較子と等値判定は別物として持つ。
  */
-static bool ext_equal(const char *a, const char *b) {
-    for (;;) {
+static bool ext_equal(const char *a, const char *b)
+{
+    for (;;)
+    {
         int ca = tolower((unsigned char)*a);
         int cb = tolower((unsigned char)*b);
-        if (ca != cb) {
+        if (ca != cb)
+        {
             return false;
         }
-        if (ca == '\0') {
+        if (ca == '\0')
+        {
             return true;
         }
         a++;
@@ -55,15 +63,19 @@ static bool ext_equal(const char *a, const char *b) {
 }
 
 /* 末尾が exts のいずれかと一致するか。拡張子の前に 1 文字以上を要求する。 */
-static bool has_ext(const char *name, const char *const *exts, uint32_t n_exts) {
+static bool has_ext(const char *name, const char *const *exts, uint32_t n_exts)
+{
     size_t len = strlen(name);
 
-    for (uint32_t i = 0; i < n_exts; i++) {
+    for (uint32_t i = 0; i < n_exts; i++)
+    {
         size_t ext_len = strlen(exts[i]);
-        if (len < ext_len + 1u) {
+        if (len < ext_len + 1u)
+        {
             continue; /* "x.vgm" が最短。拡張子そのものは名前として認めない */
         }
-        if (ext_equal(name + len - ext_len, exts[i])) {
+        if (ext_equal(name + len - ext_len, exts[i]))
+        {
             return true;
         }
     }
@@ -77,24 +89,30 @@ static bool has_ext(const char *name, const char *const *exts, uint32_t n_exts) 
  */
 static FILINFO s_fi;
 
-static bool is_listable(const FILINFO *fi, const char *const *exts, uint32_t n_exts) {
-    if ((fi->fattrib & (AM_DIR | AM_HID | AM_SYS)) != 0) {
+static bool is_listable(const FILINFO *fi, const char *const *exts, uint32_t n_exts)
+{
+    if ((fi->fattrib & (AM_DIR | AM_HID | AM_SYS)) != 0)
+    {
         return false;
     }
     /* macOS が作る AppleDouble */
-    if (fi->fname[0] == '.') {
+    if (fi->fname[0] == '.')
+    {
         return false;
     }
     return has_ext(fi->fname, exts, n_exts);
 }
 
 const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_exts,
-                           uint32_t max_entries, void (*tick)(void)) {
-    if (!storage_fatfs_may_access()) {
+                           uint32_t max_entries, void (*tick)(void))
+{
+    if (!storage_fatfs_may_access())
+    {
         printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
-    if (storage_fs_state() != STORAGE_FS_MOUNTED) {
+    if (storage_fs_state() != STORAGE_FS_MOUNTED)
+    {
         return "no filesystem";
     }
 
@@ -113,12 +131,15 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
     uint32_t emitted = 0;
     bool first = true;
 
-    for (;;) {
+    for (;;)
+    {
         FRESULT fr = f_opendir(&dp, dir);
-        if (fr == FR_NO_PATH || fr == FR_NO_FILE) {
+        if (fr == FR_NO_PATH || fr == FR_NO_FILE)
+        {
             return "not found";
         }
-        if (fr != FR_OK) {
+        if (fr != FR_OK)
+        {
             return "io error";
         }
 
@@ -126,17 +147,22 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
         uint32_t best_size = 0;
         best[0] = '\0';
 
-        for (;;) {
-            if (f_readdir(&dp, &s_fi) != FR_OK || s_fi.fname[0] == '\0') {
+        for (;;)
+        {
+            if (f_readdir(&dp, &s_fi) != FR_OK || s_fi.fname[0] == '\0')
+            {
                 break; /* 終端かエラー */
             }
-            if (!is_listable(&s_fi, exts, n_exts)) {
+            if (!is_listable(&s_fi, exts, n_exts))
+            {
                 continue;
             }
-            if (!first && filelist_name_cmp(s_fi.fname, prev) <= 0) {
+            if (!first && filelist_name_cmp(s_fi.fname, prev) <= 0)
+            {
                 continue; /* もう出した */
             }
-            if (!found || filelist_name_cmp(s_fi.fname, best) < 0) {
+            if (!found || filelist_name_cmp(s_fi.fname, best) < 0)
+            {
                 snprintf(best, sizeof(best), "%s", s_fi.fname);
                 best_size = (uint32_t)s_fi.fsize;
                 found = true;
@@ -145,13 +171,15 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
 
         f_closedir(&dp);
 
-        if (!found) {
+        if (!found)
+        {
             break;
         }
 
         /* サイズを先に置く。名前は空白を含みうるので必ず最後の欄にする。 */
         printf("# file    : %9u %s\n", (unsigned)best_size, best);
-        if (tick != NULL) {
+        if (tick != NULL)
+        {
             tick();
         }
 
@@ -159,7 +187,8 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
         first = false;
         emitted++;
 
-        if (emitted >= max_entries) {
+        if (emitted >= max_entries)
+        {
             printf("# warn    : truncated at %u entries\n", (unsigned)max_entries);
             break;
         }
@@ -171,7 +200,8 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
 
 /* ---- 一覧を RAM へ集める ----------------------------------------------- */
 
-void filelist_buf_reset(filelist_buf_t *buf) {
+void filelist_buf_reset(filelist_buf_t *buf)
+{
     buf->pool_used = 0;
     buf->count = 0;
     buf->truncated = false;
@@ -184,13 +214,16 @@ void filelist_buf_reset(filelist_buf_t *buf) {
  * 並べ替えるのに比べて追加の RAM が要らず、動かすのは uint16 の配列だけで済む。
  * from を渡すのは、既に入っている前のディレクトリの分と混ぜないため。
  */
-static bool insert_sorted(filelist_buf_t *buf, uint32_t from, const char *name) {
+static bool insert_sorted(filelist_buf_t *buf, uint32_t from, const char *name)
+{
     size_t len = strlen(name) + 1u;
 
-    if (buf->count >= buf->max_entries) {
+    if (buf->count >= buf->max_entries)
+    {
         return false;
     }
-    if (buf->pool_used + len > buf->pool_bytes) {
+    if (buf->pool_used + len > buf->pool_bytes)
+    {
         return false;
     }
 
@@ -199,16 +232,21 @@ static bool insert_sorted(filelist_buf_t *buf, uint32_t from, const char *name) 
 
     uint32_t lo = from;
     uint32_t hi = buf->count;
-    while (lo < hi) {
+    while (lo < hi)
+    {
         uint32_t mid = lo + (hi - lo) / 2u;
-        if (filelist_name_cmp(buf->pool + buf->offs[mid], name) < 0) {
+        if (filelist_name_cmp(buf->pool + buf->offs[mid], name) < 0)
+        {
             lo = mid + 1u;
-        } else {
+        }
+        else
+        {
             hi = mid;
         }
     }
 
-    if (lo < buf->count) {
+    if (lo < buf->count)
+    {
         memmove(&buf->offs[lo + 1u], &buf->offs[lo],
                 (buf->count - lo) * sizeof(buf->offs[0]));
     }
@@ -219,39 +257,49 @@ static bool insert_sorted(filelist_buf_t *buf, uint32_t from, const char *name) 
 }
 
 const char *filelist_collect(const char *dir, const char *const *exts, uint32_t n_exts,
-                             uint32_t name_max, filelist_buf_t *buf) {
-    if (!storage_fatfs_may_access()) {
+                             uint32_t name_max, filelist_buf_t *buf)
+{
+    if (!storage_fatfs_may_access())
+    {
         printf("# hint    : the filesystem is handed to the PC; run storage player first\n");
         return "wrong state";
     }
-    if (storage_fs_state() != STORAGE_FS_MOUNTED) {
+    if (storage_fs_state() != STORAGE_FS_MOUNTED)
+    {
         return "no filesystem";
     }
 
     DIR dp;
     FRESULT fr = f_opendir(&dp, dir);
-    if (fr == FR_NO_PATH || fr == FR_NO_FILE) {
+    if (fr == FR_NO_PATH || fr == FR_NO_FILE)
+    {
         return "not found";
     }
-    if (fr != FR_OK) {
+    if (fr != FR_OK)
+    {
         return "io error";
     }
 
     uint32_t from = buf->count;
     uint32_t skipped = 0;
 
-    for (;;) {
-        if (f_readdir(&dp, &s_fi) != FR_OK || s_fi.fname[0] == '\0') {
+    for (;;)
+    {
+        if (f_readdir(&dp, &s_fi) != FR_OK || s_fi.fname[0] == '\0')
+        {
             break; /* 終端かエラー */
         }
-        if (!is_listable(&s_fi, exts, n_exts)) {
+        if (!is_listable(&s_fi, exts, n_exts))
+        {
             continue;
         }
-        if (strlen(s_fi.fname) > name_max) {
+        if (strlen(s_fi.fname) > name_max)
+        {
             skipped++;
             continue;
         }
-        if (!insert_sorted(buf, from, s_fi.fname)) {
+        if (!insert_sorted(buf, from, s_fi.fname))
+        {
             buf->truncated = true;
             break;
         }
@@ -259,11 +307,13 @@ const char *filelist_collect(const char *dir, const char *const *exts, uint32_t 
 
     f_closedir(&dp);
 
-    if (skipped != 0u) {
+    if (skipped != 0u)
+    {
         printf("# warn    : %s: skipped %u name(s) longer than %u chars\n", dir,
                (unsigned)skipped, (unsigned)name_max);
     }
-    if (buf->truncated) {
+    if (buf->truncated)
+    {
         printf("# warn    : truncated at %u entries\n", (unsigned)buf->count);
     }
 

@@ -39,8 +39,8 @@
 
 /* ---- ジオメトリ -------------------------------------------------------- */
 
-#define FLASH_DISK_SS 512u                 /* 論理セクタ長 */
-#define FLASH_DISK_ES FLASH_SECTOR_SIZE    /* 消去単位 4096 = クラスタ長 */
+#define FLASH_DISK_SS 512u              /* 論理セクタ長 */
+#define FLASH_DISK_ES FLASH_SECTOR_SIZE /* 消去単位 4096 = クラスタ長 */
 
 #define FLASH_DISK_LBA_COUNT  (FLASH_FATFS_SIZE / FLASH_DISK_SS) /* 4096 */
 #define FLASH_DISK_ES_COUNT   (FLASH_FATFS_SIZE / FLASH_DISK_ES) /* 512 */
@@ -59,8 +59,8 @@
 
 /* ---- 戻り値 ------------------------------------------------------------ */
 
-#define FLASH_DISK_OK   0  /* キャッシュに載せた（フラッシュにはまだ書いていない） */
-#define FLASH_DISK_BUSY 1  /* 空き行が無く追い出す行が dirty。あとで再試行すること */
+#define FLASH_DISK_OK   0 /* キャッシュに載せた（フラッシュにはまだ書いていない） */
+#define FLASH_DISK_BUSY 1 /* 空き行が無く追い出す行が dirty。あとで再試行すること */
 #define FLASH_DISK_ERR  (-1)
 
 /* ---- API --------------------------------------------------------------- */

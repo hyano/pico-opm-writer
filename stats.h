@@ -58,7 +58,8 @@ uint32_t stats_usb_percent(void);     /* 直近 1 秒窓の tud_task() の占有
  * 混ざる。どのサービスが空振りしているかはこちらで分かる。サービスはどれも
  * 実仕事をしたかを bool で返すので、拾ってインクリメントするだけで足りる。
  */
-typedef enum {
+typedef enum
+{
     STATS_SVC_PCM8 = 0,
     STATS_SVC_CAPTURE,
     STATS_SVC_I2S,
@@ -84,12 +85,13 @@ uint32_t stats_svc_busy_us(stats_svc_t svc); /* 直近 1 秒窓の滞在時間 [
  * call は bool を返す式（i2s_service() など）。
  */
 #if STATS_PROFILE
-#define STATS_SVC(svc, call)                                                   \
-    do {                                                                       \
-        uint32_t stats_svc_t0_ = time_us_32();                                 \
-        bool stats_svc_worked_ = (call);                                       \
-        stats_svc_busy_add((svc), time_us_32() - stats_svc_t0_);               \
-        stats_svc_note((svc), stats_svc_worked_);                              \
+#define STATS_SVC(svc, call)                                     \
+    do                                                           \
+    {                                                            \
+        uint32_t stats_svc_t0_ = time_us_32();                   \
+        bool stats_svc_worked_ = (call);                         \
+        stats_svc_busy_add((svc), time_us_32() - stats_svc_t0_); \
+        stats_svc_note((svc), stats_svc_worked_);                \
     } while (0)
 #else
 #define STATS_SVC(svc, call) stats_svc_note((svc), (call))
@@ -124,12 +126,12 @@ uint32_t stats_i2s_depth_min(void); /* リセット以降の最小値 */
 
 /* ---- カウンタ ---------------------------------------------------------- */
 
-void stats_count_overrun(void);            /* DMA overrun 発生 */
-void stats_count_forbidden(uint32_t n);    /* YM3012 の禁止コード E=0 を n 個検出 */
-void stats_count_rxstall(void);            /* PIO RX FIFO あふれ */
-void stats_count_frames(uint32_t n);       /* 取り込んだフレーム数を n 加算 */
-void stats_count_i2s_underrun(void);       /* I2S の先行分が尽きた */
-void stats_count_pcm_clip(uint32_t n);     /* ADPCM を混ぜた結果 n サンプルが飽和した */
+void stats_count_overrun(void);         /* DMA overrun 発生 */
+void stats_count_forbidden(uint32_t n); /* YM3012 の禁止コード E=0 を n 個検出 */
+void stats_count_rxstall(void);         /* PIO RX FIFO あふれ */
+void stats_count_frames(uint32_t n);    /* 取り込んだフレーム数を n 加算 */
+void stats_count_i2s_underrun(void);    /* I2S の先行分が尽きた */
+void stats_count_pcm_clip(uint32_t n);  /* ADPCM を混ぜた結果 n サンプルが飽和した */
 
 uint32_t stats_overrun(void);
 uint64_t stats_forbidden(void);
