@@ -41,7 +41,7 @@ static vgm_state_t s_state;
 static FIL s_fp;
 static bool s_open;
 
-static char s_name[64];
+static char s_name[FILELIST_PATH_MAX + 1u]; /* VGM_DIR からの相対パス */
 
 /* ヘッダから読んだもの */
 static uint32_t s_version;
@@ -802,17 +802,8 @@ const char *vgm_play(const char *name)
         return "no filesystem";
     }
 
-    /* 名前の検査。ディレクトリを跨がせない。 */
-    size_t len = strlen(name);
-    if (len == 0u || len > sizeof(s_name) - 1u)
-    {
-        return "bad argument";
-    }
-    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL)
-    {
-        return "bad argument";
-    }
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    /* 名前の検査。VGM_DIR からの相対パスとして妥当なものだけ通す（`..` を含めない）。 */
+    if (!filelist_path_ok(name))
     {
         return "bad argument";
     }
@@ -840,7 +831,7 @@ const char *vgm_play(const char *name)
     }
     s_name[0] = '\0'; /* 失敗したとき前の曲の名前を状態表示に残さない */
 
-    char path[8 + sizeof(s_name)];
+    char path[sizeof(VGM_DIR) + 1u + sizeof(s_name)];
     snprintf(path, sizeof(path), "%s/%s", VGM_DIR, name);
 
     close_file();
@@ -958,7 +949,7 @@ const char *vgm_list(void (*tick)(void))
 
 const char *vgm_collect(filelist_buf_t *buf)
 {
-    /* 名前の上限は s_name に収まる長さ。長い名前は vgm_play() が弾く。 */
+    /* 上限は s_name に収まる長さ。これより長い相対パスは vgm_play() が弾く。 */
     return filelist_collect(VGM_DIR, VGM_EXTS,
                             (uint32_t)(sizeof(VGM_EXTS) / sizeof(VGM_EXTS[0])),
                             (uint32_t)(sizeof(s_name) - 1u), buf);

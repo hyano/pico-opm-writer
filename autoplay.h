@@ -32,11 +32,12 @@
 /*
  * プレイリストの上限。/VGM と /MDX の合計。
  *
- * 名前は '\0' 区切りでプールへ詰める。8.3 なら 12 バイト、長い名前でも数十バイトなので、
- * 12KB あれば 512 件はまず入る。どちらかが先に尽きたら `# warn` を出して打ち切る。
+ * ルートからの相対パスを '\0' 区切りでプールへ詰める。8.3 の直下なら 12 バイト、
+ * サブディレクトリを挟んでも数十バイトなので、24KB あれば 512 件はまず入る。
+ * どちらかが先に尽きたら `# warn` を出して打ち切る。
  */
 #define AUTOPLAY_MAX_ENTRIES 512u
-#define AUTOPLAY_POOL_BYTES  12288u
+#define AUTOPLAY_POOL_BYTES  24576u
 
 /* 既定値。autoplay stop では消えず、電源投入時にここへ戻る。 */
 #define AUTOPLAY_LOOP_DEFAULT    2u

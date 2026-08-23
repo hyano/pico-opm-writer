@@ -4,6 +4,9 @@
  * `vgm list` と `mdx list` は、ディレクトリ・拡張子・件数上限を除いて同じ処理を
  * していたので 1 本にまとめてある。出力の書式もここが唯一の持ち場。
  *
+ * 走査はルート（`/VGM` / `/MDX`）以下を**再帰**する。名前として扱うのは常に
+ * ルートからの相対パスで、区切りは `/`（例 `KONAMI/GRADIUS.VGM`）。
+ *
  * SPDX-License-Identifier: MIT
  */
 #ifndef FILELIST_H
@@ -11,6 +14,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+
+/* 潜れる深さ。ルート自身を 1 段目と数えるので、8 ならルート直下の 7 段下まで。 */
+#define FILELIST_MAX_DEPTH 8u
+
+/* ルートからの相対パスの最大長。vgm.c / mdx.c の s_name もこの長さで持つ。 */
+#define FILELIST_PATH_MAX 127u
 
 /*
  * 大小無視の名前比較。大小無視で等しいときは strcmp() で決める。
@@ -21,17 +30,36 @@
 int filelist_name_cmp(const char *a, const char *b);
 
 /*
- * dir の中の、exts のいずれかで終わる通常ファイルを名前の昇順で 1 行ずつ出力する。
+ * rel が「ルートからの相対パス」として妥当か。
+ *
+ * ファイルを開く前に必ずここを通す。とくに `..` を弾くことで、コマンドの引数から
+ * `/VGM` / `/MDX` の外へ出られないようにしている。
+ *
+ * 通すのは次をすべて満たすものだけ:
+ *   - 長さが 1〜FILELIST_PATH_MAX
+ *   - `\` `:` と制御文字（0x20 未満）を含まない
+ *   - 先頭・末尾が `/` でなく、`//` が無い（空の要素を作らない）
+ *   - どの要素も `.` でも `..` でもない
+ *   - 要素数が FILELIST_MAX_DEPTH 以下
+ */
+bool filelist_path_ok(const char *rel);
+
+/*
+ * dir 以下の、exts のいずれかで終わる通常ファイルを 1 行ずつ出力する。
  *
  * exts は ".vgm" のように先頭のドットを含めた文字列の配列で、比較は大小無視。
  * 拡張子の前に 1 文字以上を要求するので、".vgm" という名前そのものは一致しない。
- * 隠しファイル・システム属性・ディレクトリと、macOS が作る先頭ドットの
- * AppleDouble は除く。
+ * 隠しファイル・システム属性と、macOS が作る先頭ドットの AppleDouble は除く。
+ * 同じ条件をディレクトリにも当てるので、`.` で始まる隠しフォルダには潜らない。
+ *
+ * 並びは**深さ優先**。あるディレクトリのファイルを名前の昇順で出し切ってから、
+ * サブディレクトリを名前の昇順で 1 つずつ降りる。出力する名前は dir からの相対パス。
  *
  * tick は 1 行出すごとに呼ぶ（NULL 可）。1 行の出力で USB が詰まらないよう、
  * 呼び出し側のサービス関数を渡すために用意してある。
  *
- * 戻り値は成功なら NULL、失敗ならエラー理由の文字列。
+ * 戻り値は成功なら NULL、失敗ならエラー理由の文字列。dir 自身が開けないときだけ
+ * 失敗にする。途中のサブディレクトリが開けないときは警告を出して続ける。
  */
 const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_exts,
                            uint32_t max_entries, void (*tick)(void));
@@ -42,15 +70,15 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
  * filelist_collect() の作業領域。バッファは呼び出し側が用意する。
  *
  * filelist_print() が RAM を使わない代わりに 1 件ごとにディレクトリを全走査するのに対し、
- * こちらは 1 回の走査で名前をバッファへ詰める。任意の位置の名前を後から引ける必要が
- * ある用途（autoplay のプレイリスト）向け。
+ * こちらはディレクトリ 1 個につき 1 回の走査で相対パスをバッファへ詰める。任意の位置の
+ * 名前を後から引ける必要がある用途（autoplay のプレイリスト）向け。
  */
 typedef struct
 {
-    char *pool;           /* 名前を '\0' 区切りで詰めるバッファ */
+    char *pool;           /* 相対パスを '\0' 区切りで詰めるバッファ */
     uint32_t pool_bytes;  /* pool の大きさ */
     uint32_t pool_used;   /* 詰まったバイト数 */
-    uint16_t *offs;       /* 名前の昇順に並んだ pool へのオフセット */
+    uint16_t *offs;       /* 深さ優先の順に並んだ pool へのオフセット */
     uint32_t max_entries; /* offs の要素数 */
     uint32_t count;       /* 詰まった件数 */
     bool truncated;       /* 上限に当たって打ち切ったか */
@@ -60,20 +88,23 @@ typedef struct
 void filelist_buf_reset(filelist_buf_t *buf);
 
 /*
- * dir の中の対象ファイルを buf へ集める。対象の選び方は filelist_print() と同じ。
+ * dir 以下の対象ファイルを buf へ集める。対象の選び方も並びも filelist_print() と同じで、
+ * 詰まるのは dir からの相対パス。だから `vgm list` の出力順と autoplay のプレイリストの
+ * 並びが一致する。
  *
- * **buf->count はリセットせず追記し、今回足した範囲だけを名前の昇順に並べる。**
- * 続けて別のディレクトリを集めれば「A の昇順 → B の昇順」が 1 個のバッファに作れる。
+ * **buf->count はリセットせず追記する。** 並べ替えはディレクトリ単位で閉じていて、
+ * 各ディレクトリのファイルをその範囲の中だけで名前の昇順に挿す。続けて別のツリーを
+ * 集めれば「A の全部 → B の全部」が 1 個のバッファに作れる。
  *
- * name_max より長い名前は飛ばす（呼び出し側がそれ以上の名前を扱えないため）。
+ * path_max より長い相対パスは飛ばす（呼び出し側がそれ以上の長さを扱えないため）。
  * 上限に当たったら buf->truncated を立てて打ち切る。
  *
  * 戻り値は成功なら NULL、失敗ならエラー理由の文字列。
  *
- * **filelist_print() と作業用の FILINFO を共用しているので再入できない。**
+ * **filelist_print() と作業用の FILINFO・走査バッファを共用しているので再入できない。**
  * どちらも tick から自分自身へ戻ってこない経路で使うこと。
  */
 const char *filelist_collect(const char *dir, const char *const *exts, uint32_t n_exts,
-                             uint32_t name_max, filelist_buf_t *buf);
+                             uint32_t path_max, filelist_buf_t *buf);
 
 #endif /* FILELIST_H */

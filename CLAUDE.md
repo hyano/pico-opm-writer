@@ -21,7 +21,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ上のブロックデバイス（領域定数・ライトバックキャッシュ） |
 | `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
 | `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
-| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧。出力（`vgm list` / `mdx list`）と、RAM へ集める `filelist_collect()`（autoplay 用）。**この 2 本は `FILINFO` を共用していて再入できない** |
+| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧。`/VGM` `/MDX` **以下を深さ優先で再帰**し、ルートからの相対パスを扱う（深さ 8 段 / パス 127 文字まで）。出力（`vgm list` / `mdx list`）と、RAM へ集める `filelist_collect()`（autoplay 用）と、パスの検査 `filelist_path_ok()`。**前の 2 本は `FILINFO` と走査バッファを共用していて再入できない** |
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
@@ -174,7 +174,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
 | `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
-| `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 14KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
+| `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 26KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
 | `FLASH_FATFS_RESERVE_KB` | 空（256） | ファームウェアに残す KiB。残りが全部 FatFs になる |
 | `FLASH_FATFS_TAIL_RESERVE` | 4096 | フラッシュ末尾に空けるバイト数（UF2 の RP2350-E10 absolute block 用。0 にすると UF2 で焼くたびに FS の末尾が壊れる） |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`FLASH_FATFS_RESERVE_KB` から計算） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |

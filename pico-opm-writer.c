@@ -394,12 +394,12 @@ static void print_help(void)
     puts("# storage format [force] yes          : make a new filesystem (FAT12)");
     puts("# storage trace                       : show the SCSI commands the PC sent");
     puts("# vgm | vgm status                    : show VGM playback state");
-    puts("# vgm list                            : list /VGM/*.vgm and *.vgz");
-    puts("# vgm play <filename>                 : play /VGM/<filename>");
+    puts("# vgm list                            : list /VGM/**/*.vgm and *.vgz");
+    puts("# vgm play <path>                     : play /VGM/<path>, subfolders ok");
     puts("# vgm stop                            : stop playback");
     puts("# mdx | mdx status                    : show MDX playback state");
-    puts("# mdx list                            : list /MDX/*.mdx");
-    puts("# mdx play <filename>                 : play /MDX/<filename>");
+    puts("# mdx list                            : list /MDX/**/*.mdx");
+    puts("# mdx play <path>                     : play /MDX/<path>, subfolders ok");
     puts("# mdx stop                            : stop playback");
     puts("# mdx pcm | mdx pcm on | mdx pcm off  : show / toggle ADPCM (PCM8) mixing");
     puts("# autoplay | autoplay status          : show autoplay state");
@@ -1039,7 +1039,7 @@ static void cmd_storage(char **cursor)
 /* ---- vgm ------------------------------------------------------------ */
 
 /*
- * vgm list | play <filename> | stop
+ * vgm list | play <path> | stop
  *
  * ファイル名は行の残り全部を 1 引数として受けるので、空白を含む名前も扱える。
  */
@@ -1139,7 +1139,7 @@ static void cmd_vgm(char **cursor)
 }
 
 /*
- * mdx list | play <filename> | stop
+ * mdx list | play <path> | stop
  *
  * vgm と同じく、ファイル名は行の残り全部を 1 引数として受ける。
  */

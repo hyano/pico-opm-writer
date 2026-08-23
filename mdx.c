@@ -115,7 +115,7 @@ static mdx_state_t s_state = MDX_STATE_STOPPED;
 static uint8_t s_file[MDX_MAX_BYTES];
 static uint32_t s_size;
 
-static char s_name[64];
+static char s_name[FILELIST_PATH_MAX + 1u]; /* MDX_DIR からの相対パス */
 static char s_title[MDX_TITLE_MAX];
 static char s_pdx[MDX_PDX_MAX];
 
@@ -1608,7 +1608,7 @@ const char *mdx_list(void (*tick)(void))
 
 const char *mdx_collect(filelist_buf_t *buf)
 {
-    /* 名前の上限は s_name に収まる長さ。長い名前は mdx_play() が弾く。 */
+    /* 上限は s_name に収まる長さ。これより長い相対パスは mdx_play() が弾く。 */
     return filelist_collect(MDX_DIR, MDX_EXTS,
                             (uint32_t)(sizeof(MDX_EXTS) / sizeof(MDX_EXTS[0])),
                             (uint32_t)(sizeof(s_name) - 1u), buf);
@@ -1682,13 +1682,16 @@ void mdx_init(void)
 }
 
 /*
- * ヘッダの PDX 名から /MDX/<name>.PDX を組み立てる。
+ * ヘッダの PDX 名から PDX のパスを組み立てる。
+ *
+ * same_dir なら再生中の MDX と同じディレクトリ、そうでなければ MDX_DIR 直下を指す。
+ * s_name が MDX_DIR 直下ならどちらも同じ結果になる。
  *
  * 名前はファイルの中身なので信用しない。ディレクトリを跨がせず、制御文字も弾く。
  * 拡張子は付いていないのが普通だが、付いていたら重ねない。
  * FatFs の LFN 照合は大小を無視するので、実体が小文字でも当たる。
  */
-static bool pdx_path(char *out, size_t out_len)
+static bool pdx_path(char *out, size_t out_len, bool same_dir)
 {
     char base[MDX_PDX_MAX];
     size_t n = 0;
@@ -1723,7 +1726,18 @@ static bool pdx_path(char *out, size_t out_len)
         }
     }
 
-    int len = snprintf(out, out_len, "%s/%s.PDX", MDX_DIR, base);
+    /* s_name のディレクトリ部（末尾の `/` を含む長さ）。直下なら 0。 */
+    size_t dir_len = 0;
+    if (same_dir)
+    {
+        const char *sep = strrchr(s_name, '/');
+        if (sep != NULL)
+        {
+            dir_len = (size_t)(sep - s_name) + 1u;
+        }
+    }
+
+    int len = snprintf(out, out_len, "%s/%.*s%s.PDX", MDX_DIR, (int)dir_len, s_name, base);
     return len > 0 && (size_t)len < out_len;
 }
 
@@ -1736,15 +1750,32 @@ static void open_pdx(void)
     }
     printf("# pdx     : %s\n", s_pdx);
 
-    char path[16 + MDX_PDX_MAX];
-    if (!pdx_path(path, sizeof(path)))
+    /*
+     * 曲と同じディレクトリを先に見て、無ければ MDX_DIR 直下へ落とす。曲ごとの
+     * フォルダに PDX を同梱する置き方と、共通の PDX を直下にまとめる置き方の
+     * どちらでも鳴らせる。
+     */
+    char path[MDX_PDX_PATH_MAX];
+    const char *err = NULL;
+    bool opened = false;
+
+    for (int same_dir = 1; same_dir >= 0 && !opened; same_dir--)
     {
-        printf("# hint    : bad PDX name; the ADPCM part will not sound\n");
-        return;
+        if (!pdx_path(path, sizeof(path), same_dir != 0))
+        {
+            printf("# hint    : bad PDX name; the ADPCM part will not sound\n");
+            return;
+        }
+        err = pcm8_open_pdx(path);
+        opened = (err == NULL);
+
+        if (strrchr(s_name, '/') == NULL)
+        {
+            break; /* 直下の曲は 2 通が同じパスになるので試すのは 1 回でよい */
+        }
     }
 
-    const char *err = pcm8_open_pdx(path);
-    if (err != NULL)
+    if (!opened)
     {
         printf("# hint    : cannot open %s (%s); the ADPCM part will not sound\n", path, err);
         return;
@@ -1769,17 +1800,8 @@ const char *mdx_play(const char *name)
         return "no filesystem";
     }
 
-    /* 名前の検査。ディレクトリを跨がせない。 */
-    size_t len = strlen(name);
-    if (len == 0u || len > sizeof(s_name) - 1u)
-    {
-        return "bad argument";
-    }
-    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL)
-    {
-        return "bad argument";
-    }
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    /* 名前の検査。MDX_DIR からの相対パスとして妥当なものだけ通す（`..` を含めない）。 */
+    if (!filelist_path_ok(name))
     {
         return "bad argument";
     }
@@ -1812,7 +1834,7 @@ const char *mdx_play(const char *name)
     s_pdx[0] = '\0';
     pcm8_reset_counters(); /* PDX を持たない曲へ切り替えたときも 0 に戻す */
 
-    char path[8 + sizeof(s_name)];
+    char path[sizeof(MDX_DIR) + 1u + sizeof(s_name)];
     snprintf(path, sizeof(path), "%s/%s", MDX_DIR, name);
 
     FIL fp;

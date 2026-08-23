@@ -12,6 +12,7 @@
 
 #include "ff.h"
 
+#include "mdx.h"
 #include "stats.h"
 #include "storage.h"
 #include "ym3012.h"
@@ -134,7 +135,7 @@ static uint32_t s_miss;
 static FIL s_pdx_fp;
 static bool s_pdx_open;
 static uint32_t s_pdx_size;
-static char s_pdx_path[80];
+static char s_pdx_path[MDX_PDX_PATH_MAX];
 
 /* エントリ表は 1 バンク分だけ持つ。バンクが変わったときに読み直す。 */
 static uint8_t s_tbl[PDX_BANK_BYTES];

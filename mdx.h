@@ -73,6 +73,12 @@
 #define MDX_TITLE_MAX 128u
 #define MDX_PDX_MAX   32u
 
+/*
+ * PDX の絶対パスの保持長。MDX_DIR + `/` + 曲と同じディレクトリ部 + PDX 名 + ".PDX"。
+ * ディレクトリ部は曲の相対パスの一部なので、最悪 FILELIST_PATH_MAX まで伸びる。
+ */
+#define MDX_PDX_PATH_MAX (sizeof(MDX_DIR) + 1u + FILELIST_PATH_MAX + MDX_PDX_MAX + 5u)
+
 typedef enum
 {
     MDX_STATE_STOPPED = 0,

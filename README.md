@@ -214,8 +214,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `h` | `h` / `?` / `help` | コマンド一覧を表示 |
 | `clock` | `clock` / `clock status` / `clock 4` / `clock 3.58` / `clock auto` / `clock fixed` | φM の表示と切り替え（[§3.16](#316-clockクロック切り替え)） |
 | `storage` | `storage` / `storage status` / `storage host` / `storage player` / `storage format [force] yes` / `storage trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
-| `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <filename>` / `vgm stop` | VGM の状態表示・一覧・再生（[§3.14](#314-vgmvgm-再生)） |
-| `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <filename>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
+| `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <path>` / `vgm stop` | VGM の状態表示・一覧・再生（[§3.14](#314-vgmvgm-再生)） |
+| `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <path>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
 | `autoplay` | `autoplay` / `autoplay status` / `autoplay list` / `autoplay start` / `autoplay stop` / `autoplay next` / `autoplay prev` / `autoplay mode <list\|random>` / `autoplay loop <n>` / `autoplay fade <ms>` / `autoplay gap <ms>` / `autoplay source <vgm\|mdx\|both>` | VGM と MDX の自動連続再生（[§3.17](#317-autoplay自動再生)） |
 
 コマンド体系の規則:
@@ -241,7 +241,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 - **大小は区別しない。** 1 文字のコマンドも `clock` / `storage` / `vgm` / `mdx` / `help`
   とそのサブコマンドも同様。
 - **`vgm play` と `mdx play` のファイル名だけは行の残り全部を 1 引数として受ける**ので、
-  空白を含む名前もそのまま書ける（`vgm play BAD NAME.VGM`）。
+  空白を含む名前もそのまま書ける（`vgm play BAD NAME.VGM`）。サブフォルダは `/` で
+  区切って書く（`vgm play KONAMI/GRADIUS.VGM`）。
 
 1 レジスタ書き込みには約 32µs かかる（最大 3 万回/秒）。内訳は
 [docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)。
@@ -581,8 +582,8 @@ ERR wrong state
 | コマンド | 説明 |
 | --- | --- |
 | `vgm` / `vgm status` | 再生状態を表示する |
-| `vgm list` | `/VGM/` の `.vgm` と `.vgz` を名前順（大小無視）に並べる |
-| `vgm play <filename>` | `/VGM/<filename>` を再生する。`/VGM/` は付けない |
+| `vgm list` | `/VGM/` **以下**の `.vgm` と `.vgz` を並べる。サブフォルダも辿る |
+| `vgm play <path>` | `/VGM/<path>` を再生する。`/VGM/` は付けない。`<path>` は `/VGM/` からの相対パス |
 | `vgm stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
 
 ```
@@ -600,10 +601,13 @@ OK
 > vgm list
 # file    :   1234567 AFTERBURNER.VGM
 # file    :    234567 OUTRUN.VGZ
-# files   : 2
+# file    :    345678 KONAMI/GRADIUS.VGM
+# file    :    456789 KONAMI/OLD/TWINBEE.VGM
+# file    :    567890 SEGA/OUTRUN.VGM
+# files   : 5
 OK
 
-> vgm play AFTERBURNER.VGM
+> vgm play KONAMI/GRADIUS.VGM
 # vgm     : version 1.51  samples 2205000  loop yes
 # clock   : file 3579545 Hz / phiM 4000000 Hz (pitch goes up)
 OK
@@ -611,6 +615,30 @@ OK
 
 サイズを先に置き、ファイル名を必ず最後の欄にしてある（名前に空白を含みうるため）。
 `.vgz` のサイズは圧縮された状態のバイト数。
+
+#### サブフォルダの扱い
+
+`vgm list` / `mdx list` は `/VGM/` `/MDX/` の**下の階層も辿る**。出す名前はルートからの
+相対パスで、区切りは `/`。並びは**深さ優先**で、あるフォルダのファイルを名前順（大小無視）に
+出し切ってから、サブフォルダを名前順に 1 つずつ降りる。上の例なら `KONAMI/GRADIUS.VGM` が
+`KONAMI/OLD/TWINBEE.VGM` より先に来る。
+
+`vgm play` / `mdx play` にも同じ相対パスをそのまま渡せる。上限は 2 つ:
+
+| 制限 | 値 |
+| --- | --- |
+| 相対パスの長さ | 127 文字 |
+| 階層の深さ | 8 段（`/VGM` 自身を 1 段目と数えるので、その下は 7 段まで） |
+
+超えたものは一覧にもプレイリストにも出さず、`# files` 行の前に警告を出す。
+
+```
+# warn    : skipped 3 path(s) longer than 127 chars
+# warn    : skipped 1 directory(s) deeper than 8 levels
+```
+
+`.` で始まるフォルダ（macOS が作る `.Spotlight-V100` など）と、隠し属性・システム属性の
+付いたフォルダには潜らない。
 
 `vgm list` は 256 件で打ち切る。打ち切ったときは `# files` 行の前に警告が出る
 （`mdx list` も同じ上限）。
@@ -677,8 +705,8 @@ ERR not found
 | コマンド | 説明 |
 | --- | --- |
 | `mdx` / `mdx status` | 再生状態を表示する |
-| `mdx list` | `/MDX/` の `.mdx` を名前順（大小無視）に並べる。256 件で打ち切る |
-| `mdx play <filename>` | `/MDX/<filename>` を再生する。`/MDX/` は付けない |
+| `mdx list` | `/MDX/` **以下**の `.mdx` を並べる。サブフォルダも辿る。256 件で打ち切る |
+| `mdx play <path>` | `/MDX/<path>` を再生する。`/MDX/` は付けない。`<path>` は `/MDX/` からの相対パス |
 | `mdx stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
 | `mdx pcm` | ADPCM ミキシングの状態を表示する |
 | `mdx pcm on` / `mdx pcm off` | ADPCM を足す / 足さない（FM だけの音と聴き比べる用） |
@@ -699,7 +727,8 @@ OK
 > mdx list
 # file    :      8192 GRADIUS.MDX
 # file    :     12345 XEVIOUS.MDX
-# files   : 2
+# file    :      6543 ZOOM/OVERTAKE.MDX
+# files   : 3
 OK
 
 > mdx play GRADIUS.MDX
@@ -726,6 +755,8 @@ OK
 ```
 
 `# pdx` は MDX のヘッダが要求している名前、`# pdxpath` は実際に開いたファイル。
+探す順は **MDX と同じフォルダ → `/MDX/` 直下**（[§9](#9-mdx-再生)）。曲ごとのフォルダへ
+PDX を同梱しても、共通の PDX を `/MDX/` 直下にまとめても鳴る。
 
 PDX が見つからないときはエラーにはならず、FM パートだけがそのまま鳴る。
 
@@ -851,7 +882,8 @@ OK
 > autoplay list
 # entry   : *   1 vgm DEMO.VGM
 # entry   :     2 vgm LOOPTEST.VGM
-# entry   :     3 mdx BOS01.MDX
+# entry   :     3 vgm KONAMI/GRADIUS.VGM
+# entry   :     4 mdx BOS01.MDX
 ...
 # entries : 105
 OK
@@ -859,16 +891,20 @@ OK
 
 #### 曲順
 
-`list` は `/VGM/` の全曲（名前の昇順、大小無視）に続けて `/MDX/` の全曲を並べる。
-`vgm list` と `mdx list` の出力をそのまま繋いだ順で、`autoplay list` の並びと一致する。
+`list` は `/VGM/` 以下の全曲に続けて `/MDX/` 以下の全曲を並べる。それぞれの中は
+`vgm list` / `mdx list` と同じ**深さ優先**（[§3.14](#314-vgmvgm-再生)）で、曲名はルートからの
+相対パス。`vgm list` と `mdx list` の出力をそのまま繋いだ順になり、`autoplay list` の
+並びと一致する。
 
 `random` は `autoplay start` のたびにシャッフルし、最後まで行くと並べ直す。並べ直した
 直後に同じ曲が 2 回続かないようにしてある。
 
 プレイリストは `autoplay start` のときだけ作る。`autoplay source` や `autoplay mode` を
 変えたあと、あるいは PC からファイルを足したあとは、`autoplay start` を打ち直す。
-上限は 512 件で、名前の合計が 12KiB を超えるか 512 件に達すると
-`# warn    : truncated at <件数> entries` を出して打ち切る。
+上限は 512 件で、相対パスの合計が 24KiB を超えるか 512 件に達すると
+`# warn    : truncated at <件数> entries` を出して打ち切る。パスが 127 文字を超える曲と
+8 段より深いフォルダは `vgm list` / `mdx list` と同様にプレイリストにも入らず、
+`autoplay start` が同じ `# warn` を出す（[§3.14](#314-vgmvgm-再生)）。
 
 #### 次の曲へ移る条件
 
@@ -940,7 +976,7 @@ ERR wrong state
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DAUTOPLAY_ENABLED=0
 ```
 
-プレイリスト（約 14KiB）と状態機械がリンクされず、`autoplay` は `ERR unsupported` を
+プレイリスト（約 26KiB）と状態機械がリンクされず、`autoplay` は `ERR unsupported` を
 返すようになる。
 
 ```
@@ -1812,9 +1848,18 @@ MSM6258 を叩く。本機はその PCM8 に相当する処理をソフトウェ
 ### 9.7 ADPCM (PCM8) の再生
 
 MDX ファイルのヘッダには PDX（ADPCM の波形集）の名前が入っている。
-`mdx play` はその名前に `.PDX` を付けた **`/MDX/<名前>.PDX`** を開く。大小文字は
-区別しないので、`THEXDER` という名前で `thexder.pdx` も見つかる。
-見つからなくてもエラーにはならず、FM パートだけがそのまま鳴る。
+`mdx play` はその名前に `.PDX` を付けたファイルを、次の順で探す。
+
+1. **再生中の MDX と同じフォルダ** — `/MDX/BOS/BOS01.MDX` なら `/MDX/BOS/<名前>.PDX`
+2. **`/MDX/` 直下** — `/MDX/<名前>.PDX`
+
+曲ごとのフォルダに PDX を同梱する置き方と、共通の PDX を `/MDX/` 直下へまとめる置き方の
+どちらでも鳴る。`/MDX/` 直下の曲では 1. と 2. が同じパスになるので 1 回しか探さない。
+大小文字は区別しないので、`THEXDER` という名前で `thexder.pdx` も見つかる。
+どちらにも無ければエラーにはならず、FM パートだけがそのまま鳴る。
+
+ヘッダの PDX 名そのものにフォルダは書けない。`/` `\` `:` と制御文字を含む名前は
+（ファイルの中身は信用しないので）その場で弾く。
 
 ```
 > mdx play BOS14.MDX
@@ -1823,6 +1868,14 @@ MDX ファイルのヘッダには PDX（ADPCM の波形集）の名前が入っ
 # ch      : 9  voices 8
 # pdx     : bos
 # pdxpath : /MDX/bos.PDX
+OK
+
+> mdx play BOS/BOS01.MDX
+# mdx     : BOS/BOS01.MDX
+# title   : Ｇood Ｍorning ～ from BOSCONIAN-X68
+# ch      : 9  voices 8
+# pdx     : bos
+# pdxpath : /MDX/BOS/bos.PDX
 OK
 ```
 
