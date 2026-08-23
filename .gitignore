@@ -4,3 +4,13 @@ __pycache__
 !.vscode/*
 *.wav
 *.bin
+
+*.kicad_pro.lck
+*.kicad_sch.lck
+*.kicad_pcb.lck
+_autosave*.kicad_sch
+_autosave*.kicad_pcb
+board/fabrication-toolkit-options.json
+board/temp-freerouting.dsn
+board/pico-opm-writer-backups/
+board/production/
