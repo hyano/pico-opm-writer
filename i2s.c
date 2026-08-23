@@ -257,14 +257,18 @@ void i2s_retune(void)
 void i2s_resync(void)
 {
     /*
-     * i2s_poll() の差分はリング長 4096 フレームで剰余を取るので、リング一周
-     * 65.5ms を超えて止まったあとは s_dma_total に一周単位のずれが残る。
-     * その状態では depth が過大に見えて depth <= 0 のアンダーラン復帰が
-     * 二度と発火せず、ソース側カーソルも一周遅れのまま固定されてしまう。
-     * ここで DMA の読み出し位置を読み直して全部を張り直す。
+     * **差分は必ず積む。** s_dma_total と s_fill_total はどちらも
+     * ≡ リング内の添字 (mod I2S_RING_FRAMES) で、fill_silence() も本体の書き込みも
+     * この位相でリングを引いている。ここで基準点だけを張り直すと、直後の
+     * s_fill_total = s_dma_total が CPU の書き込み位置を DMA の読み出し位置から
+     * 止まっていた分だけ手前へ置いてしまい、真の先行量が I2S_TARGET_FRAMES ではなく
+     * (I2S_TARGET_FRAMES - 止まっていた分) になる。depth は満量を報告し続けるので
+     * depth <= 0 のアンダーラン復帰も発火せず、先行が尽きても気づけない。
+     *
+     * 位相さえ合っていれば、あとは i2s_service() のアンダーラン復帰とまったく同じ
+     * 処理でよい（古いフレームを捨てて先行分を無音で埋め直す）。
      */
-    uintptr_t rp = (uintptr_t)dma_channel_hw_addr(s_dma_ch)->read_addr;
-    s_last_ridx = (uint32_t)((rp - (uintptr_t)s_ring) >> 2);
+    i2s_poll();
 
     stats_count_i2s_underrun();
     ym3012_reader_sync(&s_reader);

@@ -206,8 +206,15 @@ bool capture_service(void)
 
     if (s_state == CAPTURE_STATE_DRAINING)
     {
-        /* ドレイン中は p 0 時点までの分しか送らない */
-        uint64_t remain = s_drain_target - ym3012_read_total();
+        /*
+         * ドレイン中は p 0 時点までの分しか送らない。
+         *
+         * ドレイン中にフラッシュの書き出しが入ると capture_resync_after_blackout() が
+         * カーソルを現在位置へ寄せるので、read_total が s_drain_target を追い越しうる。
+         * 素で引くと u64 が回り込んで budget が下がらず、完了枝に落ちなくなる。
+         */
+        uint64_t read_total = ym3012_read_total();
+        uint64_t remain = (s_drain_target > read_total) ? (s_drain_target - read_total) : 0u;
         if (remain < (uint64_t)budget)
         {
             budget = (uint32_t)remain;
