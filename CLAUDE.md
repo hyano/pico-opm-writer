@@ -49,7 +49,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 
 | ディレクトリ | 内容 |
 | --- | --- |
-| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`。`wav_w1/`（矩形）は**意図的にスコープ外**で、一次データを残すだけで解析しない（README §4.11） |
+| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`、README に貼る図は `plot_lfo.py` が `fig/` へ生成。`wav_w1/`（矩形）は**意図的にスコープ外**で、一次データを残すだけで解析しない（README §4.11） |
 | [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのものの調査。NE (`0x0F` bit7) でノイズを ch7 の C2 に直接出すと **DAC 出力が 2 値**になり、符号列がノイズ発生器のビット列そのものになる |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係。**L と R は同一にならない**ので、波形解析には片側だけを使う |
 
