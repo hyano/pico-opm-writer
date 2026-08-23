@@ -14,5 +14,6 @@ board/fabrication-toolkit-options.json
 board/temp-freerouting.dsn
 board/pico-opm-writer-backups/
 board/production/
+board/base/*.FCBak
 
 reference/
