@@ -145,16 +145,52 @@ target_compile_definitions(pico-opm-writer PRIVATE AUTOPLAY_ENABLED=${AUTOPLAY_E
 set(STATS_PROFILE "0" CACHE STRING "per-service timing profile: 1 = on, 0 = off")
 target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE})
 
-# FatFs 領域（内蔵フラッシュ後半）。空なら flash_disk.h の既定値
-# （オフセット 2MiB / サイズ 2MiB）を使う。fatfs 側にも同じ値を渡す。
-set(FLASH_FATFS_OFFSET "" CACHE STRING "FatFs region offset from XIP_BASE, in bytes")
-set(FLASH_FATFS_SIZE "" CACHE STRING "FatFs region size in bytes")
+# FatFs 領域（内蔵フラッシュ）。通常は FLASH_FATFS_RESERVE_KB だけを指定する。
+# ファームウェアに残す KiB を決めれば、そこから末尾の予約セクタの手前までが
+# 自動で FatFs になる。オフセットとサイズをバイトで名指しすることもできる。
+#
+# 末尾の予約は picotool が UF2 へ入れる RP2350-E10 の absolute block 用。
+# 0x10FFFF00 狙いのブロックが 4MiB のフラッシュでは末尾セクタへ折り返すので、
+# ここを空けておかないと UF2 で焼くたびにファイルシステムの末尾が潰れる。
+set(FLASH_TOTAL_BYTES "4194304" CACHE STRING "total on-board flash size in bytes (PICO_FLASH_SIZE_BYTES)")
+set(FLASH_FATFS_RESERVE_KB "" CACHE STRING "KiB of flash reserved for the firmware; FatFs takes the rest (default 256)")
+set(FLASH_FATFS_TAIL_RESERVE "4096" CACHE STRING "bytes kept free at the end of flash (RP2350-E10 absolute block)")
+set(FLASH_FATFS_OFFSET "" CACHE STRING "FatFs region offset from XIP_BASE in bytes (overrides FLASH_FATFS_RESERVE_KB)")
+set(FLASH_FATFS_SIZE "" CACHE STRING "FatFs region size in bytes (default: fill up to the tail reserve)")
+
+# 同じものを 2 通りで指定されると、どちらが効いたのか分からなくなる
+if(NOT FLASH_FATFS_OFFSET STREQUAL "" AND NOT FLASH_FATFS_RESERVE_KB STREQUAL "")
+    message(FATAL_ERROR
+        "FLASH_FATFS_OFFSET と FLASH_FATFS_RESERVE_KB は同時に指定できない。"
+        "どちらか一方にすること")
+endif()
+
 if(NOT FLASH_FATFS_OFFSET STREQUAL "")
-    target_compile_definitions(pico-opm-writer PRIVATE FLASH_FATFS_OFFSET=${FLASH_FATFS_OFFSET})
+    set(fatfs_offset ${FLASH_FATFS_OFFSET})
+elseif(NOT FLASH_FATFS_RESERVE_KB STREQUAL "")
+    math(EXPR fatfs_offset "${FLASH_FATFS_RESERVE_KB} * 1024")
+else()
+    math(EXPR fatfs_offset "256 * 1024") # flash_disk.h の既定と揃えること
 endif()
+
 if(NOT FLASH_FATFS_SIZE STREQUAL "")
-    target_compile_definitions(pico-opm-writer PRIVATE FLASH_FATFS_SIZE=${FLASH_FATFS_SIZE})
+    set(fatfs_size ${FLASH_FATFS_SIZE})
+else()
+    math(EXPR fatfs_size "${FLASH_TOTAL_BYTES} - ${FLASH_FATFS_TAIL_RESERVE} - ${fatfs_offset}")
 endif()
+
+# 詳しい検査は flash_disk.c の _Static_assert が行う。ここで見るのは、
+# 引き算が負になって定義そのものが意味を成さなくなる場合だけ。
+if(fatfs_size LESS_EQUAL 0)
+    message(FATAL_ERROR
+        "FatFs 領域のサイズが ${fatfs_size} バイトになった。"
+        "FLASH_FATFS_RESERVE_KB が大きすぎる")
+endif()
+
+target_compile_definitions(pico-opm-writer PRIVATE
+        FLASH_FATFS_OFFSET=${fatfs_offset}
+        FLASH_FATFS_SIZE=${fatfs_size}
+        FLASH_FATFS_TAIL_RESERVE=${FLASH_FATFS_TAIL_RESERVE})
 
 # 起動時ループバック自己診断。空なら I2S_ENABLED から決める（I2S 有効時は無効）。
 # I2S を配線したまま診断だけ試すことはできないので、DAC を外してから 1 を指定する。
@@ -196,4 +232,16 @@ target_link_libraries(pico-opm-writer
         )
 
 pico_add_extra_outputs(pico-opm-writer)
+
+# リンク結果が FatFs 領域に食い込んでいないかをビルド時に検査する。
+# 実行時の storage_init() による検査は残してあるが、そちらは焼いて起動するまで
+# 分からないので、こちらで先に落とす。
+add_custom_command(TARGET pico-opm-writer POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DNM=${CMAKE_NM}
+            -DELF=$<TARGET_FILE:pico-opm-writer>
+            -DREGION_OFFSET=${fatfs_offset}
+            -DREGION_SIZE=${fatfs_size}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/check_flash_region.cmake
+        VERBATIM)
 

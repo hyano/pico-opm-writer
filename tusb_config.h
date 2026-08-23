@@ -49,7 +49,7 @@
 /* フルスピードのバルクエンドポイントのパケットサイズ */
 #define CFG_TUD_CDC_EP_BUFSIZE 64
 
-/* 内蔵フラッシュ後半を PC へ見せるマスストレージ */
+/* 内蔵フラッシュの FatFs 領域を PC へ見せるマスストレージ */
 #define CFG_TUD_MSC 1
 
 /*

@@ -18,7 +18,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `capture.c` / `capture.h` | キャプチャ状態機械 |
 | `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
 | `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
-| `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ後半のブロックデバイス（領域定数・ライトバックキャッシュ） |
+| `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ上のブロックデバイス（領域定数・ライトバックキャッシュ） |
 | `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
 | `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
 | `filelist.c` / `filelist.h` | FatFs 上のファイル一覧。出力（`vgm list` / `mdx list`）と、RAM へ集める `filelist_collect()`（autoplay 用）。**この 2 本は `FILINFO` を共用していて再入できない** |
@@ -175,7 +175,9 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
 | `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 14KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
-| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`flash_disk.h` の既定） | FatFs 領域 |
+| `FLASH_FATFS_RESERVE_KB` | 空（256） | ファームウェアに残す KiB。残りが全部 FatFs になる |
+| `FLASH_FATFS_TAIL_RESERVE` | 4096 | フラッシュ末尾に空けるバイト数（UF2 の RP2350-E10 absolute block 用。0 にすると UF2 で焼くたびに FS の末尾が壊れる） |
+| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`FLASH_FATFS_RESERVE_KB` から計算） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
 | `STATS_PROFILE` | 0 | サービスごとの滞在時間の計測。1 にすると `s` に `SVCTIME` 行（µs/s）が増える。区間ごとに時刻を 2 回読むので常用しない |
 
@@ -292,6 +294,15 @@ EOF
 `target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_dma` + `hardware_clocks` + `hardware_flash` + `pico_flash` + `tinyusb_device` + `fatfs` + `miniz`）。
 
 `external/` の上流コードは `add_library(... STATIC ...)` の別ターゲットにする（`fatfs` / `miniz`）。`-Wall -Wextra` が `pico-opm-writer` に `PRIVATE` で付いているので、これで上流へ波及せず警告抑止も改変も要らなくなる。
+
+### FatFs 領域はリンク後に検査される
+
+`pico_add_extra_outputs()` の後に `cmake/check_flash_region.cmake` が `POST_BUILD` で走り、
+`arm-none-eabi-nm` で読んだ `__flash_binary_end` と FatFs 領域が重なっていればビルドが失敗する。
+重なっていなければ余裕のバイト数を毎回表示する（`-- flash: ... margin N B  OK`）。
+フラッシュ末尾の 1 セクタは領域外に予約してあり、**ここを潰すと UF2 で焼くたびに
+ファイルシステムの末尾が壊れる**（picotool が入れる RP2350-E10 の absolute block が
+0x10FFFF00 狙いで、4MiB では末尾セクタへ折り返すため）。詳細は README §7.1。
 
 ### システムクロックは φM とペア（既定 144MHz / φM 4MHz）
 

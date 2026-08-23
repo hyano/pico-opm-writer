@@ -1,5 +1,5 @@
 /*
- * 内蔵 QSPI フラッシュの後半をブロックデバイスとして扱う
+ * 内蔵 QSPI フラッシュの一部をブロックデバイスとして扱う
  *
  * 論理セクタは 512 バイトで、FatFs と USB MSC の両方がこのサイズで見る。
  * 一方フラッシュの消去単位は 4096 バイトなので、書き込みは 4KiB 単位の
@@ -24,17 +24,34 @@
 /* ---- 領域 -------------------------------------------------------------- */
 
 /*
- * 内蔵フラッシュ 4MiB のうち、後半 2MiB をファイルシステムに使う。
- * 変えるのはこの 2 つだけでよい（CMake の FLASH_FATFS_OFFSET /
- * FLASH_FATFS_SIZE からも上書きできる）。外付けフラッシュは使わないので
- * GPIO は 1 本も消費しない。
+ * 内蔵フラッシュ 4MiB のうち、ファームウェアの後ろから末尾の予約セクタまでを
+ * ファイルシステムに使う。外付けフラッシュは使わないので GPIO は 1 本も
+ * 消費しない。
+ *
+ * 通常は CMake の FLASH_FATFS_RESERVE_KB（ファームウェアに残す KiB）だけを
+ * 指定すればよく、CMakeLists.txt が下の 3 つを計算して渡す。ここの #ifndef は
+ * CMake を通さないビルドのための保険で、既定値は CMakeLists.txt と揃えてある。
  */
-#ifndef FLASH_FATFS_OFFSET
-#define FLASH_FATFS_OFFSET (2u * 1024u * 1024u) /* XIP_BASE からのオフセット */
+
+/*
+ * 末尾に空けておくバイト数。picotool は UF2 に RP2350-E10 の回避用として
+ * 0x10FFFF00 を狙う absolute block を入れる。4MiB のフラッシュではこの
+ * アドレスが末尾セクタへ折り返すので、領域を末尾まで伸ばすと UF2 で焼くたびに
+ * ファイルシステムの末尾 4KiB が潰れる。
+ */
+#ifndef FLASH_FATFS_TAIL_RESERVE
+#define FLASH_FATFS_TAIL_RESERVE FLASH_SECTOR_SIZE
 #endif
 
+/* ファームウェアに残すバイト数 = 領域の開始位置（XIP_BASE からのオフセット） */
+#ifndef FLASH_FATFS_OFFSET
+#define FLASH_FATFS_OFFSET (256u * 1024u)
+#endif
+
+/* 開始位置から末尾の予約セクタの手前までを全部使う */
 #ifndef FLASH_FATFS_SIZE
-#define FLASH_FATFS_SIZE (2u * 1024u * 1024u)
+#define FLASH_FATFS_SIZE \
+    (PICO_FLASH_SIZE_BYTES - FLASH_FATFS_TAIL_RESERVE - FLASH_FATFS_OFFSET)
 #endif
 
 /* ---- ジオメトリ -------------------------------------------------------- */
@@ -42,8 +59,7 @@
 #define FLASH_DISK_SS 512u              /* 論理セクタ長 */
 #define FLASH_DISK_ES FLASH_SECTOR_SIZE /* 消去単位 4096 = クラスタ長 */
 
-#define FLASH_DISK_LBA_COUNT  (FLASH_FATFS_SIZE / FLASH_DISK_SS) /* 4096 */
-#define FLASH_DISK_ES_COUNT   (FLASH_FATFS_SIZE / FLASH_DISK_ES) /* 512 */
+#define FLASH_DISK_LBA_COUNT  (FLASH_FATFS_SIZE / FLASH_DISK_SS) /* 既定 7672 */
 #define FLASH_DISK_LBA_PER_ES (FLASH_DISK_ES / FLASH_DISK_SS)    /* 8 */
 
 /*

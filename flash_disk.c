@@ -14,15 +14,23 @@
 #include "capture.h"
 #include "stats.h"
 
-/* 領域はフラッシュ全体に収まり、消去単位で割り切れること */
-_Static_assert(FLASH_FATFS_OFFSET + FLASH_FATFS_SIZE <= PICO_FLASH_SIZE_BYTES,
-               "FatFs 領域がフラッシュの外に出ている");
+/* 領域は末尾の予約セクタの手前まで収まり、消去単位で割り切れること */
+_Static_assert(FLASH_FATFS_OFFSET < PICO_FLASH_SIZE_BYTES - FLASH_FATFS_TAIL_RESERVE,
+               "FatFs 領域の開始位置がフラッシュの外に出ている");
+_Static_assert(FLASH_FATFS_OFFSET + FLASH_FATFS_SIZE <= PICO_FLASH_SIZE_BYTES - FLASH_FATFS_TAIL_RESERVE,
+               "FatFs 領域が末尾の予約セクタ（RP2350-E10）に掛かっている");
 _Static_assert(FLASH_FATFS_OFFSET % FLASH_SECTOR_SIZE == 0,
                "FatFs 領域の開始位置は消去単位に揃えること");
 _Static_assert(FLASH_FATFS_SIZE % FLASH_SECTOR_SIZE == 0,
                "FatFs 領域のサイズは消去単位の倍数にすること");
+_Static_assert(FLASH_FATFS_TAIL_RESERVE % FLASH_SECTOR_SIZE == 0,
+               "末尾の予約量は消去単位の倍数にすること");
 _Static_assert(FLASH_DISK_ES % FLASH_PAGE_SIZE == 0,
                "消去単位は書き込みページの倍数であること");
+/* クラスタ長は消去単位に固定なので、クラスタ数が FAT12 の上限を超えると
+   f_mkfs が FAT16 を選び、クラスタと消去セクタの 1:1 対応が壊れる */
+_Static_assert(FLASH_FATFS_SIZE / FLASH_DISK_ES < 4085u,
+               "クラスタ数が FAT12 の上限を超える");
 
 /* ---- キャッシュ -------------------------------------------------------- */
 
@@ -273,7 +281,7 @@ bool flash_disk_flush_one(void)
     uint32_t region_off = (uint32_t)s_meta[idx].es_index * FLASH_DISK_ES;
 
     /*
-     * 未使用ブロック（全 0xFF）なら消去を飛ばせる。新品基板ではフラッシュ後半が
+     * 未使用ブロック（全 0xFF）なら消去を飛ばせる。新品基板では領域全体が
      * まるごと消去済みなので、初回のフォーマットと最初のコピーが目に見えて速くなる。
      */
     flush_arg_t arg = {

@@ -22,7 +22,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [usb_pcm.h](../usb_pcm.h) / [usb_pcm.c](../usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
 | [led.h](../led.h) / [led.c](../led.c) | 非ブロッキングな LED パターン表示 |
 | [stats.h](../stats.h) / [stats.c](../stats.c) | CPU 使用率・high-water・カウンタ |
-| [flash_disk.h](../flash_disk.h) / [flash_disk.c](../flash_disk.c) | 内蔵フラッシュ後半のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
+| [flash_disk.h](../flash_disk.h) / [flash_disk.c](../flash_disk.c) | 内蔵フラッシュ上のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
 | [ffconf.h](../ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
 | [diskio_flash.c](../diskio_flash.c) | FatFs の `disk_*` 実装 |
 | [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
@@ -791,8 +791,15 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   [mdx.h](../mdx.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にするとシーケンサと 64KiB のファイルバッファがリンクされず、`mdx` コマンドは
   すべて失敗する。[§10](#10-mdx-再生)）
-- キャッシュ変数 `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` は指定時のみ同名マクロを渡す。
-  未指定なら [flash_disk.h](../flash_disk.h) の既定値（[README §7.1](../README.md#71-領域の変え方)）
+- FatFs 領域は `FLASH_FATFS_RESERVE_KB`（ファームウェアに残す KiB。既定 256）から
+  オフセットとサイズを CMake 側で計算し、`FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` /
+  `FLASH_FATFS_TAIL_RESERVE` を**常に**マクロとして渡す。後段のリンク後チェックが
+  領域の実値を必要とするため、[flash_disk.h](../flash_disk.h) 側の `#ifndef` 既定値は
+  CMake を通さないビルドのための保険という位置づけ（[README §7.1](../README.md#71-領域の変え方)）。
+  `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` をバイトで名指しすることもでき、
+  `FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` の同時指定は `FATAL_ERROR` にする
+- `pico_add_extra_outputs()` の後に [cmake/check_flash_region.cmake](../cmake/check_flash_region.cmake)
+  を `POST_BUILD` で走らせ、`__flash_binary_end` と領域が重なっていないかを検査する（§8.5）
 - `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本と-msc-の実装)）
 - `pico_enable_stdio_usb 1` / `pico_enable_stdio_uart 0`
 - `target_include_directories` にリポジトリ直下を入れる。SDK の tusb_config.h は
@@ -809,7 +816,7 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 
 ## 8. ストレージ
 
-内蔵 QSPI フラッシュ後半を FAT ファイルシステムとして使う。層の構成は次のとおり。
+内蔵 QSPI フラッシュの一部を FAT ファイルシステムとして使う。層の構成は次のとおり。
 
 ```
   VGM Player                USB MSC (usb_msc.c)
@@ -858,7 +865,7 @@ FatFs 本体は無改変で `external/fatfs/` に置く。設定だけをリポ�
 = 4KiB ブロックで 5 個ほど）とデータクラスタを同時に載せておくため。PC のファイルコピーは
 FAT・ディレクトリ・データを交互に書くので、行が少ないとそのたびに追い出しが起きる。
 
-書き出す前に XIP を読んで全 `0xFF` なら消去を省く。新品の基板ではフラッシュ後半が
+書き出す前に XIP を読んで全 `0xFF` なら消去を省く。新品の基板では領域が
 まるごと消去済みなので、初回のフォーマットと最初のコピーが目に見えて速くなる。
 
 `flash_range_program()` へ渡すポインタは RAM を指している必要がある（書き込み中は
@@ -930,8 +937,22 @@ LOEJ 処理を完全に無効にしても変わらないことを実機で確認
 `hard_assert` で止めないのは、基板が起動しなくなると復旧しづらいため。状態として
 持ち回り、`i` と `storage status` から常時見えるようにしている。
 
-領域自体の妥当性（フラッシュ全体に収まっているか、4096 バイト境界か）は
-`_Static_assert` でコンパイル時に検査する。
+ただし実行時の検査は焼いて起動するまで結果が分からないので、**その前に 2 段構えで
+落とす**。
+
+領域自体の妥当性は [flash_disk.c](../flash_disk.c) の `_Static_assert` でコンパイル時に
+検査する。4096 バイト境界に揃っているか、末尾の予約セクタに食い込んでいないか、
+クラスタ数が FAT12 の上限（4085）を下回るか。
+
+ファームウェアと重なっていないかは、リンクが終わらないと分からない。
+[cmake/check_flash_region.cmake](../cmake/check_flash_region.cmake) を `POST_BUILD` で
+走らせ、`${CMAKE_NM}` で `__flash_binary_end` を読んで領域の先頭と突き合わせる。
+重なっていれば `FATAL_ERROR` でビルドが失敗し、そうでなければ余裕のバイト数を出す。
+
+末尾の予約セクタ（`FLASH_FATFS_TAIL_RESERVE`、既定 4096）は picotool が UF2 へ入れる
+RP2350-E10 の absolute block 用。0x10FFFF00 狙いのブロックが 4MiB のフラッシュでは
+末尾セクタへ折り返すので、ここを領域に含めると UF2 で焼くたびにファイルシステムの
+末尾が潰れる（[README §7.1](../README.md#71-領域の変え方)）。
 
 ## 9. VGM 再生
 

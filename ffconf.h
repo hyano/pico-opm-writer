@@ -83,7 +83,7 @@
 #define FF_MIN_SS 512
 #define FF_MAX_SS 512
 
-#define FF_LBA64    0 /* 2MiB。32bit LBA で足りる */
+#define FF_LBA64    0 /* 最大 4MiB。32bit LBA で足りる */
 #define FF_MIN_GPT  0x10000000
 #define FF_USE_TRIM 0 /* 消去はフラッシュ側（flash_disk.c）で管理する */
 

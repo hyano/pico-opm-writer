@@ -1695,7 +1695,7 @@ int main(void)
     /* φM の実行時切り替え。現在のプリセットを控えるだけなので i2s_init() の後。 */
     clockmode_init();
 
-    /* 内蔵フラッシュ後半のファイルシステム。領域を検査して PLAYER でマウントする。 */
+    /* 内蔵フラッシュ上のファイルシステム。領域を検査して PLAYER でマウントする。 */
     storage_init();
     vgm_init();
     mdx_init();

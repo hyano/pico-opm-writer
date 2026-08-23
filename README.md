@@ -277,7 +277,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 # i2s     : BCK=GP26 LRCK=GP27 DIN=GP28 (clkdiv 36 + 0/256)
 # i2s     : 32fs bck 2000000 Hz rate 62500 Hz latency 1024 frames (16384 us)
 # piotest : SKIP (disabled)
-# storage : flash 0x200000 + 2048 KiB  cluster 4096 B  sector 512 B
+# storage : flash 0x040000 + 3836 KiB  cluster 4096 B  sector 512 B
 # vgm     : dir /VGM  rate 44100 Hz  budget 500 us
 # mdx     : dir /MDX  max 64 KiB  budget 500 us
 # adpcm   : enabled  8 ch  pdx stream 1024 bytes/ch
@@ -505,7 +505,7 @@ OK
 
 ### 3.13 `storage`（ストレージ）
 
-内蔵フラッシュ後半の FAT ファイルシステムを、**Pico 側（FatFs）と PC 側（USB MSC）の
+内蔵フラッシュ上の FAT ファイルシステムを、**Pico 側（FatFs）と PC 側（USB MSC）の
 どちらが持つか**を排他で切り替える。詳しくは [§7](#7-ストレージ) を参照。
 
 | コマンド | 説明 |
@@ -531,12 +531,12 @@ OK
 # storage : PLAYER
 # medium  : not present
 # audio   : enabled
-# region  : flash 0x200000 + 2048 KiB  (LBA 512 B x 4096)
-# firmware: end 0x10011130 (69936 B)  gap 1979 KiB
-# fs      : FAT12  cluster 4096 B  free 1960/2028 KiB
+# region  : flash 0x040000 + 3836 KiB  (LBA 512 B x 7672)
+# firmware: end 0x1001c654 (116308 B)  gap 142 KiB
+# fs      : FAT12  cluster 4096 B  free 3808/3816 KiB
 # label   : OPMVGM
 # cache   : 8 lines  dirty 0
-# flash   : WRITE 25   BLACKOUT max 40693 us
+# flash   : WRITE 13   BLACKOUT max 39976 us
 OK
 ```
 
@@ -1236,48 +1236,91 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 
 ## 7. ストレージ
 
-Raspberry Pi Pico 2 に載っている **内蔵 QSPI フラッシュ 4MiB の後半 2MiB** を
-FAT ファイルシステムとして使う。外付けのフラッシュや SD カードは足さないので、
-**GPIO は 1 本も消費しない**。
+Raspberry Pi Pico 2 に載っている **内蔵 QSPI フラッシュ 4MiB** のうち、
+ファームウェアの後ろから末尾の予約セクタまでを FAT ファイルシステムとして使う。
+外付けのフラッシュや SD カードは足さないので、**GPIO は 1 本も消費しない**。
 
 ```
-0x10000000  ┬ ファームウェア（約 70KiB）
-            ┆  （空き 約 1.9MiB）
-0x10200000  ┬ FatFs 領域 2MiB
+0x10000000  ┬ ファームウェア（約 114KiB）
+            ┆  （空き 約 142KiB）
+0x10040000  ┬ FatFs 領域 3836KiB
+0x103FF000  ┬ 末尾予約 4KiB（RP2350-E10。§7.1 参照）
 0x10400000  ┴
 ```
 
 | 項目 | 値 |
 | --- | --- |
-| 領域 | フラッシュ先頭から 0x200000、サイズ 0x200000（2MiB） |
+| 領域 | フラッシュ先頭から 0x40000、サイズ 3836KiB（3,928,064 バイト） |
 | フォーマット | FAT12 / クラスタ 4096 バイト / SFD（MBR 無し） |
 | 論理セクタ | 512 バイト（FatFs と USB MSC で共通） |
 | ボリュームラベル | `OPMVGM` |
 | VGM の置き場所 | `/VGM/` |
+| MDX の置き場所 | `/MDX/` |
 
 クラスタ長をフラッシュの消去単位と同じ 4096 バイトに揃えてあるので、
 **1 クラスタの書き換えがフラッシュの消去 1 回で済む**。
 
 ### 7.1 領域の変え方
 
-領域は [flash_disk.h](flash_disk.h) の 2 つの定数だけで決まる。
-
-```c
-#define FLASH_FATFS_OFFSET (2u * 1024u * 1024u)   /* XIP_BASE からのオフセット */
-#define FLASH_FATFS_SIZE   (2u * 1024u * 1024u)
-```
-
-ヘッダを触らずに変えるときは CMake のキャッシュ変数を使う。
+通常は **ファームウェアに残す容量（KiB）だけ**を指定すればよい。残りは末尾の
+予約セクタの手前まで自動で FatFs になる。
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 \
-      -DFLASH_FATFS_OFFSET=3145728 -DFLASH_FATFS_SIZE=1048576
+      -DFLASH_FATFS_RESERVE_KB=512
 ```
 
-どちらも 4096 バイト境界に揃え、フラッシュ全体に収まっていること。コンパイル時に
-`_Static_assert` で検査する。**ファームウェアと重なっていないか**は起動時に
-リンカシンボル `__flash_binary_end` と突き合わせて実行時に確認し、重なっていたら
-マウントも書き込みも一切せずに `storage status` へ表示する。
+| `FLASH_FATFS_RESERVE_KB` | 領域の開始 | FatFs の容量 |
+| --- | --- | --- |
+| 128 | 0x20000 | 3964KiB |
+| 256（既定） | 0x40000 | 3836KiB |
+| 512 | 0x80000 | 3580KiB |
+| 1024 | 0x100000 | 3068KiB |
+
+**どこまで広げられるか**は次の 2 つで決まる。
+
+| 境界 | 値 | 理由 |
+| --- | --- | --- |
+| 開始位置の下限 | ファームウェアの終端（約 114KiB）を 4KiB 切り上げた位置 | 重なるとファームウェアを自分で壊す |
+| 終端の上限 | フラッシュ末尾の 1 セクタ手前（0x3FF000） | 下記の RP2350-E10 |
+
+末尾 1 セクタを空けてあるのは、**picotool が UF2 へ RP2350-E10 エラッタ回避用の
+「absolute block」を入れる**ため。これはフラッシュではなく XIP 空間の末尾
+0x10FFFF00 を狙うブロックで、4MiB のフラッシュではアドレスが折り返して
+末尾セクタ（0x3FF000–0x3FFFFF）に落ちる。ここを FatFs に使ってしまうと、
+**BOOTSEL や `picotool load` で UF2 を焼くたびにファイルシステムの末尾 4KiB が消える**。
+SWD で `.elf` を焼く場合は absolute block が付かないので起きない。
+
+予約量を変えたいときは `-DFLASH_FATFS_TAIL_RESERVE=` で指定する（4096 の倍数）。
+UF2 を一切使わない運用なら 0 にできるが、推奨しない。
+
+オフセットとサイズをバイトで名指しすることもできる。`FLASH_FATFS_OFFSET` と
+`FLASH_FATFS_RESERVE_KB` の同時指定はエラーになる。
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 \
+      -DFLASH_FATFS_OFFSET=3145728 -DFLASH_FATFS_SIZE=1044480
+```
+
+**領域を変えたらフォーマットし直すこと。** ジオメトリが変わるので、前の領域で
+作ったファイルシステムはそのままでは使えない（§7.3）。
+
+検査は 3 段構えになっている。
+
+1. **コンパイル時** — 境界の 4096 バイト揃え、末尾予約への食い込み、FAT12 の
+   クラスタ数上限を [flash_disk.c](flash_disk.c) の `_Static_assert` で見る。
+2. **リンク後** — `__flash_binary_end` を読んでファームウェアと領域が重なって
+   いないかを見る。重なっていればビルドが失敗する。余裕は毎回表示される。
+
+   ```
+   -- flash: firmware 116308 B (end 0x1001c654)
+   --        FatFs  0x40000 + 3928064 B (end 0x3ff000)
+   --        margin 145836 B  OK
+   ```
+
+3. **起動時** — 同じ `__flash_binary_end` と突き合わせる。重なっていたらマウントも
+   書き込みも一切せずに `storage status` へ表示する（ビルド時に捕まえ損ねた場合の
+   最後の砦。`hard_assert` で止めると復旧しづらいのでこうしてある）。
 
 ### 7.2 PC から曲データをコピーする
 
@@ -1325,7 +1368,7 @@ USB を挿し直したくない場合、`storage host` と `storage player` の�
 何度でもでき、`vgm list` や `vgm play` も正常に動く。**PC からもう一度書きたいときだけ**
 挿し直しが要る。
 
-新品の基板ではフラッシュ後半が全 `0xFF` なのでファイルシステムが無い。
+新品の基板では領域が全 `0xFF` なのでファイルシステムが無い。
 **起動時に自動でフォーマットすることはしない**ので、最初に 1 度だけ実行する。
 
 ```
@@ -1354,9 +1397,9 @@ SCSI の `SYNCHRONIZE CACHE` では書き出さない。macOS はコピー中に
 
 | 注意点 | 内容 |
 | --- | --- |
-| ファームウェアの再書き込み | OpenOCD の `program` も `picotool load` も ELF/UF2 の中身しか書かないので、**ファイルシステムは残る** |
+| ファームウェアの再書き込み | OpenOCD の `program` も `picotool load` も ELF/UF2 の中身しか書かないので、**ファイルシステムは残る**。UF2 だけは末尾セクタへ 1 ブロック書くが、そこは領域外に予約してある（§7.1） |
 | `picotool erase` / BOOTSEL の nuke UF2 | フラッシュ全体を消すので**ファイルシステムも消える** |
-| 容量 | 2MiB。macOS が `.fseventsd` を作るぶん少し減る（Spotlight は `/.metadata_never_index` で抑止済み） |
+| 容量 | 3836KiB（既定）。macOS が `.fseventsd` を作るぶん少し減る（Spotlight は `/.metadata_never_index` で抑止済み） |
 | 同時アクセス | `PLAYER` では MSC がメディア非挿入を返し、`HOST` では FatFs をアンマウントするので、両者が同時にフラッシュを触ることはない |
 
 ### 7.4 マウントされないときの調べ方
@@ -1520,7 +1563,7 @@ gzip 圧縮された VGM（`.vgz`）を、**一時ファイルを作らずに展
 gzip -9 -c foo.vgm > foo.vgz
 ```
 
-圧縮したままフラッシュに置けるので、**2MiB の領域に入る曲数が数倍になる**（YM2151 の
+圧縮したままフラッシュに置けるので、**領域に入る曲数が数倍になる**（YM2151 の
 VGM は 3〜10 倍に縮む）。`vgm list` は `.vgm` と `.vgz` を区別せず名前順に並べ、
 `vgm play` はどちらも受ける。
 

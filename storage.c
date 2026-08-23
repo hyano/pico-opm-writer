@@ -471,14 +471,16 @@ const char *storage_format(void)
 
     /*
      * クラスタ長を消去単位と同じ 4096 バイトにするのが最重要。
-     * 2MiB / 4KiB ≒ 505 クラスタなので FAT12 が選ばれる（FAT16 にするには
+     * 既定の 3836KiB なら 959 クラスタなので FAT12 が選ばれる（FAT16 にするには
      * 4085 クラスタ以上必要で、そのためにクラスタを 512 バイトへ落とすと
-     * クラスタと消去セクタの 1:1 対応が壊れる）。
+     * クラスタと消去セクタの 1:1 対応が壊れる）。領域を広げてもフラッシュは
+     * 4MiB しかないのでクラスタ数は 1024 を超えず、FAT12 のまま変わらない
+     * （flash_disk.c の _Static_assert で確かめている）。
      * SFD = MBR 無し。USB リムーバブルメディアの標準的な見せ方。
      */
     static const MKFS_PARM opt = {
         .fmt = FM_FAT | FM_SFD,
-        .n_fat = 1,    /* 2MiB では冗長性より容量と消去回数を取る */
+        .n_fat = 1,    /* この容量では冗長性より容量と消去回数を取る */
         .align = 0,    /* disk_ioctl(GET_BLOCK_SIZE) から自動で決める */
         .n_root = 512, /* 16KiB。LFN は 1 名で複数スロット使うので余裕を持たせる */
         .au_size = FLASH_DISK_ES,
@@ -524,7 +526,7 @@ const char *storage_format(void)
     }
 
     /*
-     * macOS の Spotlight にインデックスさせない。2MiB しかない領域を
+     * macOS の Spotlight にインデックスさせない。数 MiB しかない領域を
      * .Spotlight-V100 や .fseventsd で食われるのを防ぐ。
      */
     FIL fp;
