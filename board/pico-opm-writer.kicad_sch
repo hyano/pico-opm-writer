@@ -2491,25 +2491,6 @@
 						)
 					)
 				)
-				(pin passive line
-					(at 0 -22.86 90)
-					(length 2.54)
-					(hide yes)
-					(name "GND"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "12"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
 				(pin bidirectional line
 					(at -10.16 10.16 0)
 					(length 2.54)
@@ -4134,9 +4115,6 @@
 		(pin "12"
 			(uuid "9cc861c9-de5f-49c4-ada2-4e6284867b7a")
 		)
-		(pin "12"
-			(uuid "aae133c8-ba35-4bf5-b975-fe1dac502e67")
-		)
 		(pin "7"
 			(uuid "bfed94d8-8f5b-4119-b9ce-354716c920ea")
 		)
@@ -5235,7 +5213,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "C_Small"
+		(property "Value" "0.1uF"
 			(at 247.65 34.2962 0)
 			(show_name no)
 			(do_not_autoplace no)
