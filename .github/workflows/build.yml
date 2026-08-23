@@ -41,14 +41,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # git describe --tags がタグへ到達するのに必要。
           # 浅いままだと常に短縮ハッシュへフォールバックする。
           fetch-depth: 0
 
       - name: Checkout pico-sdk ${{ env.PICO_SDK_REF }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: raspberrypi/pico-sdk
           ref: ${{ env.PICO_SDK_REF }} # v 接頭辞は付かない
@@ -70,7 +70,7 @@ jobs:
       - name: Cache picotool
         # PICOTOOL_FLAT_INSTALL なので成果物はこの 1 ディレクトリに収まる。
         # ヒットすれば SDK の find_package(picotool CONFIG) が通り、clone もビルドも走らない。
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.PICOTOOL_FETCH_FROM_GIT_PATH }}/picotool
           key: picotool-${{ env.PICO_SDK_REF }}-${{ runner.os }}-${{ runner.arch }}
@@ -91,7 +91,7 @@ jobs:
         run: cmake --build build --target release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.name }}
           path: ${{ steps.package.outputs.zip }}
