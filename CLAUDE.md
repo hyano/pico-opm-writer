@@ -262,6 +262,13 @@ ninja -C build release
 **タグは `release/<バージョン>` の形式**（例 `release/0.3.0` → `pico-opm-writer-0.3.0.zip`）。
 `git describe` はパッケージを作る時点で実行する。`-DRELEASE_VERSION=<文字列>` で上書きできる。
 
+**ファームウェアのバージョンの唯一の定義場所は `CMakeLists.txt` の
+`project(pico-opm-writer VERSION x.y.z ...)`。** ここから `pico_set_program_version`
+（`picotool info` が読む）と `-DOPM_WRITER_VERSION`（起動バナーと `i` が出す文字列）の
+両方が出る。版を上げるときはこの 1 行を直してコミットしてからタグを打つ。
+`make_release.cmake` はタグ由来の版とこの値を照合し、違えば `FATAL_ERROR` で止める
+（タグ無しのビルドと `-DRELEASE_VERSION=` 指定時は照合しない）。
+
 | ファイル | 役割 |
 | --- | --- |
 | `cmake/release_config.cmake.in` | configure 時の値（SDK のパス、各オプションの実効値）を `build/release_config.cmake` へ焼くテンプレート。**キャッシュ変数を増やしたら `REL_OPTIONS` にも足す** |

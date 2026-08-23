@@ -28,7 +28,9 @@ set(PICO_BOARD pico2 CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(pico-opm-writer C CXX ASM)
+# ファームウェアのバージョンの唯一の定義場所。picotool のメタデータ・起動バナー・
+# リリースパッケージはすべてここの VERSION から導出する（他の場所に書かない）。
+project(pico-opm-writer VERSION 0.2.0 LANGUAGES C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -95,8 +97,12 @@ add_executable(pico-opm-writer
         )
 
 pico_set_program_name(pico-opm-writer "pico-opm-writer")
-set(rel_program_version "0.2")
-pico_set_program_version(pico-opm-writer ${rel_program_version})
+
+# バイナリに埋め込むメタデータ（picotool info が読む）と、起動バナー / `i` が出す
+# 版番号。どちらも上の project(VERSION) から出す。
+pico_set_program_version(pico-opm-writer ${PROJECT_VERSION})
+target_compile_definitions(pico-opm-writer PRIVATE
+        OPM_WRITER_VERSION="${PROJECT_VERSION}")
 
 # 自前のソースだけ警告を厳しくする（SDK 側のヘッダには適用しない）
 target_compile_options(pico-opm-writer PRIVATE -Wall -Wextra)

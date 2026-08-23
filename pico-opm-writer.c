@@ -258,6 +258,7 @@ static void reply_err(const char *reason)
 
 static void print_info(void)
 {
+    /* OPM_WRITER_VERSION は CMakeLists.txt の project(VERSION) から -D で渡る */
     printf("# pico-opm-writer %s\n", OPM_WRITER_VERSION);
     /* phiM を先に出す。`clock` の出力と並びを揃えるため。 */
     printf("# phiM    : %u Hz (clkdiv %u + %u/256)\n",

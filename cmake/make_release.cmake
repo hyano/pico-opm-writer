@@ -57,7 +57,7 @@ if(DEFINED RELEASE_VERSION AND NOT RELEASE_VERSION STREQUAL "")
 else()
     rel_git(describe describe_res describe --tags --always)
     if(NOT describe_res EQUAL 0 OR describe STREQUAL "")
-        set(describe "${REL_PROGRAM_VERSION}")
+        set(describe "${REL_FIRMWARE_VERSION}")
         message(WARNING
             "release: git describe --tags --always が使えないので、"
             "バージョンを ${describe} で代用する")
@@ -66,6 +66,24 @@ endif()
 
 # タグは release/<バージョン> の形式。zip のファイル名にスラッシュは使えないので落とす。
 string(REGEX REPLACE "^release/" "" version "${describe}")
+
+# タグ由来のときは、ファームウェアが名乗る版と一致していることを確かめる。
+# ずれたまま通すと、zip 名は新しいのに焼いたファームは古い版を名乗る、という
+# リリースができてしまう。
+#
+# タグが無い（短縮ハッシュ）とき、および -DRELEASE_VERSION= で名指ししたときは
+# 照合しない。どちらもソースの版と一致する必然性がない。
+if(describe MATCHES "^release/")
+    # release/0.3.0-5-gabc1234 のような、タグから進んだ形の接尾辞を落とす
+    string(REGEX REPLACE "-[0-9]+-g[0-9a-f]+$" "" tag_version "${version}")
+    if(NOT tag_version STREQUAL "${REL_FIRMWARE_VERSION}")
+        message(FATAL_ERROR
+            "release: タグの版 \"${tag_version}\" とファームウェアの版 "
+            "\"${REL_FIRMWARE_VERSION}\" が違う。"
+            "CMakeLists.txt の project(VERSION) を直してコミットしてから、"
+            "タグを打ち直すこと")
+    endif()
+endif()
 
 if(version MATCHES "[^A-Za-z0-9._+-]")
     message(FATAL_ERROR
@@ -151,7 +169,7 @@ rel_line(v "describe"        "${describe}")
 rel_line(v "commit"          "${commit}")
 rel_line(v "tree"            "${tree_state}")
 rel_line(v "built"           "${build_time}")
-rel_line(v "program version" "${REL_PROGRAM_VERSION}")
+rel_line(v "firmware version" "${REL_FIRMWARE_VERSION}")
 rel_line(v "board"           "${REL_PICO_BOARD}")
 rel_line(v "platform"        "${REL_PICO_PLATFORM}")
 rel_line(v "sdk"             "${REL_PICO_SDK_VERSION}")

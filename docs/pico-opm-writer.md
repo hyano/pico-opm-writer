@@ -851,8 +851,11 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 それ以外は次の構成になっている。
 
 - `add_executable` に [§1](#1-ソース構成) の `.c` を並べる
-- `pico_set_program_version` はバイナリに埋め込むメタデータ（`picotool info` が読む）。
-  `i` と起動バナーが表示する版番号はこれではなく [opm.h](../opm.h) の `OPM_WRITER_VERSION`
+- **ファームウェアのバージョンの定義は `project(VERSION ...)` の 1 箇所だけ。**
+  そこから `pico_set_program_version`（バイナリに埋め込むメタデータ。`picotool info`
+  が読む）と、`target_compile_definitions` の `OPM_WRITER_VERSION`（`i` と起動バナーが
+  表示する版番号）の両方を出す。代替定義は置いていないので、CMake を通さずに積むと
+  未定義エラーになる
 - `target_compile_options` に `-Wall -Wextra`（自前のソースだけが対象）
 - `pico_generate_pio_header(... opm_clock.pio)` / `(... ym3012.pio)` / `(... i2s.pio)` →
   `build/opm_clock.pio.h` / `build/ym3012.pio.h` / `build/i2s.pio.h` を生成

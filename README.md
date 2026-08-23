@@ -1490,7 +1490,8 @@ shasum -a 256 -c SHA256SUMS     # Linux では sha256sum -c SHA256SUMS
 ```
 
 `VERSION.txt` の `version` が zip 名のバージョン、`describe` が元の git のタグ名
-（`release/<バージョン>`）、`build options` がビルド時のオプションの実効値。
+（`release/<バージョン>`）、`firmware version` がファームウェア自身が名乗る版
+（起動バナーと `i` が出すもの）、`build options` がビルド時のオプションの実効値。
 **問い合わせるときはこのファイルを添えること。**
 
 FatFs の領域はファームウェアを焼いても消えない（[§7.1](#71-領域の変え方)）。
@@ -1507,6 +1508,12 @@ ninja -C build release
 `build/release/pico-opm-writer-<バージョン>.zip` ができる。バージョンは
 `git describe --tags --always` の結果から先頭の `release/` を落としたもの。
 タグが無ければ短縮コミットハッシュになる。
+
+**版を上げるときは [CMakeLists.txt](CMakeLists.txt) の `project(... VERSION x.y.z ...)`
+を直してコミットしてから、`release/x.y.z` のタグを打つ。** ファームウェアの版はここの
+1 箇所だけで決まり、起動バナー・`i`・`picotool info` のすべてがこの値になる。
+タグの版とずれていると `ninja -C build release` はエラーで止まるので、
+「zip 名は新しいのに焼いたファームは古い版を名乗る」リリースは作れない。
 
 同じことを GitHub Actions でもやっている（`.github/workflows/build.yml`）。
 push と Pull Request では zip を artifact として上げるだけで、

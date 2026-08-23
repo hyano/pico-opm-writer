@@ -9,8 +9,6 @@
 #include <stdint.h>
 #include "pico/stdlib.h"
 
-#define OPM_WRITER_VERSION "0.2.0"
-
 /* ---- クロック ---------------------------------------------------------- */
 
 /*
