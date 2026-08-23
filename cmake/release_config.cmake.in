@@ -1,0 +1,39 @@
+# エンドユーザ向け配布 zip を作るための設定。CMakeLists.txt が configure 時に
+# configure_file(@ONLY) で ${CMAKE_BINARY_DIR}/release_config.cmake へ展開し、
+# cmake/make_release.cmake がスクリプトモードで include する。
+#
+# ここに置くのは「configure 時にしか分からない値」だけ。git のバージョンは
+# パッケージを作る時点で取り直すので、ここには入れない。
+#
+# THIS FILE IS A TEMPLATE. 展開後のものではなくこちらを編集すること。
+
+set(REL_SOURCE_DIR       "@CMAKE_CURRENT_LIST_DIR@")
+set(REL_BINARY_DIR       "@CMAKE_BINARY_DIR@")
+set(REL_PROJECT_NAME     "@PROJECT_NAME@")
+set(REL_PROGRAM_VERSION  "@rel_program_version@")
+
+set(REL_UF2              "@CMAKE_BINARY_DIR@/@PROJECT_NAME@.uf2")
+
+set(REL_PICO_SDK_PATH    "@PICO_SDK_PATH@")
+set(REL_PICO_SDK_VERSION "@PICO_SDK_VERSION_STRING@")
+set(REL_PICO_BOARD       "@PICO_BOARD@")
+set(REL_PICO_PLATFORM    "@PICO_PLATFORM@")
+set(REL_BUILD_TYPE       "@CMAKE_BUILD_TYPE@")
+
+# VERSION.txt に並べるビルドオプション。空文字は "(default)" として出す。
+# CMakeLists.txt でキャッシュ変数を増やしたらここにも足すこと。
+set(REL_OPTIONS
+        "OPM_CLOCK_MODE"           "@OPM_CLOCK_MODE@"
+        "I2S_ENABLED"              "@I2S_ENABLED@"
+        "VGM_VGZ_ENABLED"          "@VGM_VGZ_ENABLED@"
+        "MDX_ENABLED"              "@MDX_ENABLED@"
+        "PCM8_ENABLED"             "@PCM8_ENABLED@"
+        "AUTOPLAY_ENABLED"         "@AUTOPLAY_ENABLED@"
+        "STATS_PROFILE"            "@STATS_PROFILE@"
+        "YM3012_LOOPBACK"          "@YM3012_LOOPBACK@"
+        "FLASH_TOTAL_BYTES"        "@FLASH_TOTAL_BYTES@"
+        "FLASH_FATFS_OFFSET"       "@fatfs_offset@ (@fatfs_offset_hex@)"
+        "FLASH_FATFS_SIZE"         "@fatfs_size@"
+        "FLASH_FATFS_TAIL_RESERVE" "@FLASH_FATFS_TAIL_RESERVE@")
+
+set(REL_REPOSITORY_URL "https://github.com/hyano/pico-opm-writer")

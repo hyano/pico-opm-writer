@@ -94,7 +94,8 @@ add_executable(pico-opm-writer
         )
 
 pico_set_program_name(pico-opm-writer "pico-opm-writer")
-pico_set_program_version(pico-opm-writer "0.2")
+set(rel_program_version "0.2")
+pico_set_program_version(pico-opm-writer ${rel_program_version})
 
 # 自前のソースだけ警告を厳しくする（SDK 側のヘッダには適用しない）
 target_compile_options(pico-opm-writer PRIVATE -Wall -Wextra)
@@ -245,3 +246,28 @@ add_custom_command(TARGET pico-opm-writer POST_BUILD
             -P ${CMAKE_CURRENT_LIST_DIR}/cmake/check_flash_region.cmake
         VERBATIM)
 
+
+# エンドユーザ向けの配布 zip。`ninja -C build release` で
+# build/release/pico-opm-writer-<version>.zip を作る。
+#
+# POST_BUILD にはしない。通常のビルドのたびに zip を組み直すのは無駄だし、
+# git describe も毎回走ることになる。
+#
+# configure 時にしか分からない値（SDK のパス、各オプションの実効値）は
+# release_config.cmake へ焼き、バージョンだけはパッケージ実行時に git から取り直す。
+# 領域の位置は README §7.1 が 16 進で書いているので、両方を並べて出す
+math(EXPR fatfs_offset_hex "${fatfs_offset}" OUTPUT_FORMAT HEXADECIMAL)
+
+configure_file(
+        ${CMAKE_CURRENT_LIST_DIR}/cmake/release_config.cmake.in
+        ${CMAKE_BINARY_DIR}/release_config.cmake
+        @ONLY)
+
+add_custom_target(release
+        COMMAND ${CMAKE_COMMAND}
+            -DRELEASE_CONFIG=${CMAKE_BINARY_DIR}/release_config.cmake
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/make_release.cmake
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        COMMENT "packaging release zip"
+        VERBATIM)
+add_dependencies(release pico-opm-writer)

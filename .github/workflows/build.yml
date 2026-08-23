@@ -1,0 +1,113 @@
+# 継続ビルドと、release/<バージョン> タグでのリリース公開。
+#
+# ローカルと同じ手順（cmake → ninja → release ターゲット）をそのまま回す。
+# zip の名前とバージョンの決め方は cmake/make_release.cmake にしかない。
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["release/*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  # CMakeLists.txt の sdkVersion / toolchainVersion と揃えること
+  PICO_SDK_REF: "2.3.0"
+  ARM_GCC_RELEASE: "15.2.Rel1"
+  PICO_BOARD: pico2
+
+jobs:
+  build:
+    # ubuntu-latest は将来 26.04 へ移るのでピンする。
+    # cmake / ninja / g++ / python3 / git / gh はこのイメージに同梱されていて、
+    # picotool は PICOTOOL_NO_LIBUSB=1 でビルドされるので apt install は要らない。
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write # gh release create 用（タグ push のときだけ使う）
+
+    env:
+      PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      # 既定では build/_deps の下に置かれてキャッシュしづらいので外へ出す
+      PICOTOOL_FETCH_FROM_GIT_PATH: ${{ github.workspace }}/.picotool
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # git describe --tags がタグへ到達するのに必要。
+          # 浅いままだと常に短縮ハッシュへフォールバックする。
+          fetch-depth: 0
+
+      - name: Checkout pico-sdk ${{ env.PICO_SDK_REF }}
+        uses: actions/checkout@v4
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: ${{ env.PICO_SDK_REF }} # v 接頭辞は付かない
+          path: pico-sdk
+          # 0 にするとサブモジュールまでフル clone される
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init tinyusb submodule
+        # submodules: true にすると btstack と mbedtls まで来る。
+        # さらに lib/mbedtls があると picotool 側が mbedtls をビルドし始めて遅くなる。
+        run: git -C pico-sdk submodule update --init --depth 1 lib/tinyusb
+
+      - name: Set up arm-none-eabi-gcc
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
+
+      - name: Cache picotool
+        # PICOTOOL_FLAT_INSTALL なので成果物はこの 1 ディレクトリに収まる。
+        # ヒットすれば SDK の find_package(picotool CONFIG) が通り、clone もビルドも走らない。
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PICOTOOL_FETCH_FROM_GIT_PATH }}/picotool
+          key: picotool-${{ env.PICO_SDK_REF }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPICO_BOARD=${{ env.PICO_BOARD }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package
+        id: package
+        # make_release.cmake が $GITHUB_OUTPUT へ version / zip / name を書く。
+        # タグ名から release/ を落とす規則をここに書き写さないため。
+        run: cmake --build build --target release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: error
+
+      - name: Create release
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'release/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # タグは release/0.3.0、リリースの表題は 0.3.0
+          TAG: ${{ github.ref_name }}
+          TITLE: ${{ steps.package.outputs.version }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TITLE" \
+            --generate-notes \
+            --verify-tag \
+            "$ZIP"

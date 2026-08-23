@@ -247,6 +247,29 @@ EOF
 
 `build/pico-opm-writer.{uf2,elf,bin,hex,dis}` および `build/compile_commands.json`（`CMAKE_EXPORT_COMPILE_COMMANDS ON`）。SWD 書き込みには `.elf` を使う。
 
+### リリース用パッケージ
+
+```bash
+ninja -C build release
+```
+
+`build/release/pico-opm-writer-<バージョン>.zip` ができる。中身は `.uf2` + README + docs +
+`tools/opm-writer.py` + ライセンス一式 + `VERSION.txt` + `SHA256SUMS`（README §6.6）。
+
+バージョンは `git describe --tags --always` の結果から先頭の `release/` を落としたもの。
+**タグは `release/<バージョン>` の形式**（例 `release/0.3.0` → `pico-opm-writer-0.3.0.zip`）。
+`git describe` はパッケージを作る時点で実行する。`-DRELEASE_VERSION=<文字列>` で上書きできる。
+
+| ファイル | 役割 |
+| --- | --- |
+| `cmake/release_config.cmake.in` | configure 時の値（SDK のパス、各オプションの実効値）を `build/release_config.cmake` へ焼くテンプレート。**キャッシュ変数を増やしたら `REL_OPTIONS` にも足す** |
+| `cmake/make_release.cmake` | `cmake -P` で走るパッケージャ。git を叩き、ステージして `cmake -E tar --format=zip` で固める |
+| `cmake/release/THIRD-PARTY-LICENSES.md` | zip に入れる静的なライセンス索引 |
+| `.github/workflows/build.yml` | 継続ビルド（zip を artifact へ）と `release/*` タグでの Releases 作成 |
+
+`REL_OPTIONS` は名前と値が交互に並んだリストで、**値が空の要素がある**。展開は必ず
+`foreach(... IN LISTS ...)` で行う（`${REL_OPTIONS}` だと空要素が落ちて対が 1 つずれる）。
+
 ### テスト
 
 **ファームウェアの検証**は **増分ビルド → SWD で書き込み → `/dev/cu.usbmodem112101` の出力を確認** の 3 ステップで行う（上記の各節そのまま）。ホスト上で走るファームウェアのテストは存在しない。

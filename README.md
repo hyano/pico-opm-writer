@@ -1138,6 +1138,8 @@ I2S とは同時に使えず、**I2S が有効な既定構成では `t` / `s` �
 
 ## 6. ビルドと書き込み
 
+**配布されている zip を焼くだけならビルドは要らない。[§6.6](#66-リリース版の-zip-を使う) を読むこと。**
+
 ツールチェーンは `~/.pico-sdk/` 配下にバージョン固定でインストールされている。
 **システムの cmake / ninja / arm-none-eabi-gcc は使わない。**
 
@@ -1233,6 +1235,57 @@ tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c 
 - **SWD の `reset` でターゲットの USB CDC が切断・再列挙される。** 書き込み直後は
   デバイスノードが数秒消えるので、存在を待ってから開く。
 - `stdio_usb` はホストが開く前の出力を捨てるため、起動直後の行は取り逃す。
+
+### 6.6 リリース版の zip を使う
+
+ビルド済みのファームウェアは GitHub の Releases で配っている。
+
+https://github.com/hyano/pico-opm-writer/releases
+
+`pico-opm-writer-<バージョン>.zip` を展開すると、同じ名前のディレクトリが 1 つできる。
+
+| ファイル | 中身 |
+| --- | --- |
+| `pico-opm-writer.uf2` | ファームウェア本体。これを焼く |
+| `README.md` / `docs/` | このドキュメントと内部設計書 |
+| `tools/opm-writer.py` | ホスト側ツール（[§10](#10-ホスト側ツール)） |
+| `VERSION.txt` | どのコミットをどのオプションでビルドしたか |
+| `SHA256SUMS` | 全ファイルのチェックサム |
+| `LICENSE` / `THIRD-PARTY-LICENSES.md` / `licenses/` / `external/` | ライセンス（[§12](#12-ライセンス)） |
+
+**焼き方**（[§6.4](#64-書き込み代替経路) と同じ）。BOOTSEL を押しながら USB を挿すと
+`RPI-RP2` というドライブが現れるので、そこへ `pico-opm-writer.uf2` をコピーする。
+コピーが終わると Pico 2 が勝手に再起動してファームウェアが立ち上がる。
+
+展開した中身が壊れていないかを見るには、展開先のディレクトリで:
+
+```bash
+shasum -a 256 -c SHA256SUMS     # Linux では sha256sum -c SHA256SUMS
+```
+
+`VERSION.txt` の `version` が zip 名のバージョン、`describe` が元の git のタグ名
+（`release/<バージョン>`）、`build options` がビルド時のオプションの実効値。
+**問い合わせるときはこのファイルを添えること。**
+
+FatFs の領域はファームウェアを焼いても消えない（[§7.1](#71-領域の変え方)）。
+ただし `VERSION.txt` の `FLASH_FATFS_OFFSET` と `FLASH_FATFS_SIZE` が
+今使っているものと違う版へ乗り換えると、領域の位置がずれてマウントできなくなる。
+その場合は `storage format` でやり直す。
+
+#### リリース用の zip を自分で作る
+
+```bash
+ninja -C build release
+```
+
+`build/release/pico-opm-writer-<バージョン>.zip` ができる。バージョンは
+`git describe --tags --always` の結果から先頭の `release/` を落としたもの。
+タグが無ければ短縮コミットハッシュになる。
+
+同じことを GitHub Actions でもやっている（`.github/workflows/build.yml`）。
+push と Pull Request では zip を artifact として上げるだけで、
+`release/<バージョン>` の形式のタグを push したときだけ Releases を作って zip を添付する。
+
 
 ## 7. ストレージ
 
