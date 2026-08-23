@@ -14,7 +14,8 @@
  *
  * フェードアウトは ym3012_fade_start() の出力ゲインで作る。**I2S 出力と USB キャプチャ
  * にしか効かず、YM3012 のアナログ出力は最後まで鳴っている**（音が止まるのはフェードが
- * 終わったあとのキーオフ）。
+ * 終わったあとのキーオフ）。ゲインを 1.0 へ戻すのは停止（キーオフ）の後だが、チップの
+ * リリースが消えるまでの猶予を置いてから戻す（AUTOPLAY_RELEASE_MS）。
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,6 +42,20 @@
 #define AUTOPLAY_LOOP_DEFAULT    2u
 #define AUTOPLAY_FADE_MS_DEFAULT 2000u
 #define AUTOPLAY_GAP_MS_DEFAULT  2000u
+
+/*
+ * 出力ゲインを 1.0 へ戻すまでの猶予と、戻すのにかける長さ。コマンドでは変えない。
+ *
+ * キーオフしてもチップの音はすぐには消えない。key_off_all() は RR を 15 にしてから
+ * 落とすが、それでも実測で最悪 5.5ms かかる（KC=0 / KS=0 でリリースが最も遅くなる
+ * 条件）。猶予を置かずに戻すと、その区間が全音量で出る。
+ *
+ * 猶予はフェードが 0 に達したあとの無音を延ばすだけなのでコストが無く、余裕を見て
+ * 3 倍取ってある。ランプは猶予の見積もりが外れて音が残っていたときの保険で、
+ * 曲送りで境界を前へ引き戻したときに次の曲の頭が段差にならない役目も兼ねる。
+ */
+#define AUTOPLAY_RELEASE_MS      16u
+#define AUTOPLAY_RELEASE_RAMP_MS 4u
 
 /* loop / fade / gap の上限（`d <ms>` と同じ 10 進） */
 #define AUTOPLAY_LOOP_MAX 99u

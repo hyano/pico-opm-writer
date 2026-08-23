@@ -53,11 +53,16 @@ static uint64_t s_mix_ready;
  * s_fade_release は「このフレーム以降はゲインを 1.0 に戻す」境界。ゲインを即座に
  * 戻すと、リングにまだ残っている**フェード済みのはずの区間**が全音量で読み出されて
  * しまう（カーソルは書き込み位置より後ろに居る）。解除もフレーム番号で持つ。
+ *
+ * s_release_frames は境界から 1.0 まで戻すのにかける長さ。0 なら境界で一気に戻す。
+ * s_release_inv はフェードアウト側と同じ作りの 1/frames（Q32）。
  */
 static uint64_t s_fade_start;
 static uint32_t s_fade_frames;
 static uint32_t s_fade_inv;
 static uint64_t s_fade_release = UINT64_MAX;
+static uint32_t s_release_frames;
+static uint32_t s_release_inv;
 
 static bool s_selftest_ok;
 static char s_selftest_detail[80];
@@ -328,19 +333,20 @@ void ym3012_fade_start(uint64_t start_frame, uint32_t frames)
     s_fade_inv = (uint32_t)((1ull << 32) / frames);
     s_fade_start = start_frame;
     s_fade_release = UINT64_MAX;
+    s_release_frames = 0;
     s_fade_frames = frames;
 }
 
-void ym3012_fade_clear(void)
+void ym3012_fade_release(uint32_t delay_frames, uint32_t ramp_frames)
 {
     if (s_fade_frames == 0u)
     {
         return;
     }
     /*
-     * 境界は「今」の取り込み位置でなければならない。s_write_total は service_all()
-     * の音声チェーン（500us 間隔）でしか進まないので、ここで引き直さないと境界が
-     * 過去に落ち、まだ落とすべき区間まで解除されてしまう。
+     * 境界の基準は「今」の取り込み位置でなければならない。s_write_total は
+     * service_all() の音声チェーン（500us 間隔）でしか進まないので、ここで引き直さないと
+     * 境界が過去に落ち、まだ落とすべき区間まで解除されてしまう。
      */
     ym3012_ring_poll();
 
@@ -348,7 +354,26 @@ void ym3012_fade_clear(void)
      * 解除するのは「まだ取り込んでいない」フレームから。ここより前は消費者が
      * 読む前でも落とし切った音のままにする（戻すと切り替わりで音が跳ねる）。
      */
-    s_fade_release = s_write_total;
+    uint64_t at = s_write_total + (uint64_t)delay_frames;
+
+    /*
+     * **境界は前へしか動かさない。** s_fade_release は ym3012_fade_start() で
+     * UINT64_MAX に初期化されて 1 回のフェードのあいだ単調減少する。後ろへ動かせると、
+     * fade_apply() の「フェードを撃ち終わった区間はゲイン 0」という性質のせいで、
+     * 一度解除した区間を後から無音に塗り直すことになる。
+     */
+    if (at >= s_fade_release)
+    {
+        return;
+    }
+    s_fade_release = at;
+    s_release_frames = ramp_frames;
+    s_release_inv = (ramp_frames != 0u) ? (uint32_t)((1ull << 32) / ramp_frames) : 0u;
+}
+
+void ym3012_fade_clear(void)
+{
+    ym3012_fade_release(0u, 0u);
 }
 
 void ym3012_reader_init(ym3012_reader_t *rd, bool count_forbidden)
@@ -380,9 +405,14 @@ uint64_t ym3012_reader_read_total(const ym3012_reader_t *rd)
 static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frames,
                                             int16_t *inout)
 {
-    if (first_frame >= s_fade_release)
+    /*
+     * 解除のランプを撃ち終わった区間はまるごと素通し。s_fade_release は UINT64_MAX を
+     * 取りうるので、足し算ではなく引き算で比べる。
+     */
+    if (first_frame >= s_fade_release &&
+        first_frame - s_fade_release >= (uint64_t)s_release_frames)
     {
-        return; /* 解除済みの区間。まるごと素通し */
+        return;
     }
 
     for (uint32_t i = 0; i < frames; i++)
@@ -390,9 +420,23 @@ static void __not_in_flash_func(fade_apply)(uint64_t first_frame, uint32_t frame
         uint32_t g = 0;
         uint64_t f = first_frame + i;
 
-        if (f < s_fade_start || f >= s_fade_release)
+        if (f < s_fade_start)
         {
-            g = 65536u; /* まだ始まっていない / もう解除された */
+            g = 65536u; /* まだ始まっていない */
+        }
+        else if (f >= s_fade_release)
+        {
+            /* 解除側。フェードアウトの q^2 を時間で反転しただけのランプ。 */
+            uint64_t d = f - s_fade_release;
+            if (d >= (uint64_t)s_release_frames)
+            {
+                g = 65536u;
+            }
+            else
+            {
+                uint32_t t = (uint32_t)(((uint64_t)(uint32_t)d * s_release_inv) >> 16);
+                g = (uint32_t)((t * t) >> 16);
+            }
         }
         else
         {

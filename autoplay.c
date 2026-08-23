@@ -95,12 +95,25 @@ static uint32_t cur_loops(void)
 /* ---- 停止 -------------------------------------------------------------- */
 
 /*
- * 鳴っている方を止めて、出力ゲインを 1.0 へ戻す。
+ * ミリ秒をフレーム数へ。レートは φM/64。i2s_rate_hz() ではなくこちらから引くのは、
+ * I2S_ENABLED=0 の構成でも同じ値が要るため。
+ */
+static uint32_t ms_to_frames(uint32_t ms)
+{
+    uint32_t rate = opm_clock_hz_actual() / 64u;
+    return (uint32_t)(((uint64_t)ms * (uint64_t)rate) / 1000ull);
+}
+
+/*
+ * 鳴っている方を止めて、出力ゲインを 1.0 へ戻す予約を入れる。
  *
- * **解除はキーオフの後**でなければならない。ym3012_fade_clear() が戻すのは
+ * **解除はキーオフの後**でなければならない。ym3012_fade_release() が戻すのは
  * 「これから取り込むフレーム」以降なので、先に止めておけば戻る対象は消音済みの
- * 区間だけになる。key_off_all() が RR=15 を書いてから落とすため、チップが黙る
- * までは 1ms もかからない。
+ * 区間だけになる。
+ *
+ * ただし**キーオフの直後ではまだ黙っていない**。key_off_all() は RR を 15 にしてから
+ * 落とすが、それでもチップのリリースは実測で最悪 5.5ms 残る。猶予を置かずに戻すと
+ * その区間が全音量で出るので、AUTOPLAY_RELEASE_MS だけ待ってからランプで戻す。
  *
  * mdx_state() で囲むのは、MDX_ENABLED=0 のスタブの mdx_stop() が hint を出して
  * "unsupported" を返すため（vgm_play() が同じ理由で同じことをしている）。
@@ -115,7 +128,8 @@ static void stop_playback(void)
     {
         mdx_stop();
     }
-    ym3012_fade_clear();
+    ym3012_fade_release(ms_to_frames(AUTOPLAY_RELEASE_MS),
+                        ms_to_frames(AUTOPLAY_RELEASE_RAMP_MS));
 }
 
 static void stop_internal(void)
@@ -192,6 +206,12 @@ static const char *start_track(void)
         err = idx_is_vgm(idx) ? vgm_play(name) : mdx_play(name);
         if (err == NULL)
         {
+            /*
+             * 停止側が置いた猶予を、曲が始まる時点まで引き戻す。GAP を挟まない
+             * autoplay next / prev や gap 0 では、猶予の大半が新しい曲の頭に被る。
+             * 境界は前へしか動かないので、猶予が済んでいればこれは何もしない。
+             */
+            ym3012_fade_release(0u, ms_to_frames(AUTOPLAY_RELEASE_RAMP_MS));
             s_state = AUTOPLAY_PLAYING;
             return NULL;
         }
@@ -214,12 +234,7 @@ static void begin_gap(void)
 
 static void begin_fade(void)
 {
-    /*
-     * フレームレートは φM/64。i2s_rate_hz() ではなくこちらから引くのは、
-     * I2S_ENABLED=0 の構成でも同じ値が要るため。
-     */
-    uint32_t rate = opm_clock_hz_actual() / 64u;
-    uint32_t frames = (uint32_t)(((uint64_t)s_fade_ms * (uint64_t)rate) / 1000ull);
+    uint32_t frames = ms_to_frames(s_fade_ms);
 
     /*
      * 起点はいま取り込み終えたフレーム。消費者はここより後ろを読んでいるので、
