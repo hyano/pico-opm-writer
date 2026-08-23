@@ -27,7 +27,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [ffconf.h](../ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
 | [diskio_flash.c](../diskio_flash.c) | FatFs の `disk_*` 実装 |
 | [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
-| [filelist.h](../filelist.h) / [filelist.c](../filelist.c) | FatFs 上のファイル一覧の出力。`vgm list` / `mdx list` で共用（[§1.3](#13-ファイル一覧の共用)） |
+| [filelist.h](../filelist.h) / [filelist.c](../filelist.c) | FatFs 上のファイル一覧。`vgm list` / `mdx list` の出力、autoplay のプレイリストへ集める `filelist_collect()`、パスの検査 `filelist_path_ok()` で共用（[§1.3](#13-ファイル一覧の共用)） |
 | [usb_msc.c](../usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
 | [vgm.h](../vgm.h) / [vgm.c](../vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
 | [vgz.h](../vgz.h) / [vgz.c](../vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
@@ -41,17 +41,18 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 ### 1.1 メインループ
 
 メインループは `tud_task()` → キャプチャリング位置の取り込み → ADPCM のレンダリング →
-キャプチャの送出 → I2S への供給 → VGM の発行 → MDX の発行 → ストレージの書き出し →
-ボタンの取り込み → LED → 統計 → **ボタンの消化** → コマンド 1 文字読み、を回すだけ。
+キャプチャの送出 → I2S への供給 → VGM の発行 → MDX の発行 → 曲送りの判定 →
+ストレージの書き出し → ボタンの取り込み → LED → 統計 → **ボタンの消化** →
+コマンド 1 文字読み、を回すだけ。
 
 **リング位置の取り込みと ADPCM のレンダリングが先頭に来る**のは、キャプチャも I2S も
 `ym3012_reader_read_pcm()` の中でミックス済みの PCM を受け取るため。どちらが読むより
 先に描き終えていなければならない（[§10.7](#107-adpcm-pcm8-の再生)）。
-`d` の待機、`p 0` のドレイン待ち、`vgm list` / `mdx list` の行出力の合間からも
-同じ処理を呼ぶので、
+`d` の待機、`p 0` のドレイン待ち、`vgm list` / `mdx list` / `autoplay list` の行出力の
+合間、起動時のボタン解放待ち（[§12.6](#126-起動シーケンス)）からも同じ処理を呼ぶので、
 コマンドの待ち時間の中でも PCM の送出・I2S への供給・USB の処理は止まらない。
 
-**この周回は 2 つの DMA リングの位置を追いかけている**（キャプチャ側とI2S 側）。
+**この周回は 2 つの DMA リングの位置を追いかけている**（キャプチャ側と I2S 側）。
 どちらもリング一周は 65.5ms なので、1 周回がこれを超えると位置を見失う。
 フラッシュの消去はこれを超えるので、専用の復帰手順を用意している（[§9.3](#93-書き込み中の停止とリング位置)）。
 
@@ -189,7 +190,7 @@ const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_
 | --- | --- | --- |
 | `s_fi` | 約 300 B | 走査に使う `FILINFO`。段をまたいで使い回す |
 | `s_dp[FILELIST_MAX_DEPTH]` | 約 416 B | 段ごとの `DIR`。8 段ぶん |
-| `s_path` | 160 B | いま見ているディレクトリの絶対パス |
+| `s_path` | 161 B | いま見ているディレクトリの絶対パス（`FILELIST_PATH_BUF`） |
 | `s_prev` / `s_best` | 各 256 B | 「直前に採った名前」と「走査で見つかった最小の名前」 |
 
 **`s_prev` / `s_best` は段をまたいで共用できる。** 深さ優先の順序がそれを保証している。
@@ -860,7 +861,9 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 - `pico_generate_pio_header(... opm_clock.pio)` / `(... ym3012.pio)` / `(... i2s.pio)` →
   `build/opm_clock.pio.h` / `build/ym3012.pio.h` / `build/i2s.pio.h` を生成
 - `target_link_libraries` は `pico_stdlib` / `hardware_pio` / `hardware_dma` /
-  `hardware_clocks` / `hardware_flash` / `pico_flash` / `tinyusb_device` / `fatfs` / `miniz`
+  `hardware_clocks` / `hardware_pll` / `hardware_flash` / `pico_flash` / `pico_rand` /
+  `tinyusb_device` / `fatfs` / `miniz`。`hardware_pll` は [clockmode.c](../clockmode.c) の
+  `pll_init()`、`pico_rand` は [autoplay.c](../autoplay.c) の `get_rand_32()` が要求する
 - FatFs と miniz は `add_library(... STATIC ...)` の別ターゲットにする。`-Wall -Wextra` が
   `pico-opm-writer` に `PRIVATE` で付いているので、これで上流コードに波及せず、
   警告抑止も改変も要らなくなる（[§8](#8-ストレージ)）
@@ -876,24 +879,45 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   上の自動判定を上書きする
 - キャッシュ変数 `VGM_VGZ_ENABLED`（既定 1）は**常に**マクロとして渡す。
   [vgz.h](../vgz.h) がこれで実装ごと切り替わるため、未定義のままにできない
-  （0 にすると展開器と約 86KiB のバッファがリンクされない。[§9.4](#94-vgz-のストリーム展開)）
+  （0 にすると展開器と約 84KiB のバッファがリンクされない。[§9.4](#94-vgz-のストリーム展開)）
 - キャッシュ変数 `MDX_ENABLED`（既定 1）は**常に**マクロとして渡す。
   [mdx.h](../mdx.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にするとシーケンサと 64KiB のファイルバッファがリンクされず、`mdx` コマンドは
   すべて失敗する。[§10](#10-mdx-再生)）
+- キャッシュ変数 `PCM8_ENABLED` は指定時のみマクロとして渡す。空なら
+  [pcm8.h](../pcm8.h) の既定（`MDX_ENABLED` に従う）を使う
+  （0 にするとデコーダとミックスリング約 27KB がリンクされない。[§10.7](#107-adpcm-pcm8-の再生)）
+- キャッシュ変数 `AUTOPLAY_ENABLED`（既定 1）は**常に**マクロとして渡す。
+  [autoplay.h](../autoplay.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  （0 にするとプレイリスト約 26KB と状態機械がリンクされない。[§11](#11-自動連続再生-autoplay)）
+- キャッシュ変数 `BUTTON_ENABLED`（既定 1）は**常に**マクロとして渡す。
+  [button.h](../button.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  （0 にすると GP21 / GP22 に一切触らない。[§12.7](#127-無効化)）
+- キャッシュ変数 `STATS_PROFILE`（既定 0）は**常に**マクロとして渡す。1 で `s` に
+  `SVCTIME` 行が増える（[README §3.11.1](../README.md#3111-サービスの呼び出し間隔)）
 - FatFs 領域は `FLASH_FATFS_RESERVE_KB`（ファームウェアに残す KiB。既定 256）から
   オフセットとサイズを CMake 側で計算し、`FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` /
   `FLASH_FATFS_TAIL_RESERVE` を**常に**マクロとして渡す。後段のリンク後チェックが
   領域の実値を必要とするため、[flash_disk.h](../flash_disk.h) 側の `#ifndef` 既定値は
   CMake を通さないビルドのための保険という位置づけ（[README §7.1](../README.md#71-領域の変え方)）。
   `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` をバイトで名指しすることもでき、
-  `FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` の同時指定は `FATAL_ERROR` にする
+  `FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` の同時指定は `FATAL_ERROR` にする。
+  サイズを名指ししなければ `FLASH_TOTAL_BYTES`（既定 4194304）から末尾予約と
+  オフセットを引いた残り全部になる
 - `pico_add_extra_outputs()` の後に [cmake/check_flash_region.cmake](../cmake/check_flash_region.cmake)
-  を `POST_BUILD` で走らせ、`__flash_binary_end` と領域が重なっていないかを検査する（§8.5）
+  を `POST_BUILD` で走らせ、`__flash_binary_end` と領域が重なっていないかを検査する
+  （[§8.5](#85-領域がファームウェアと重ならないこと)）
 - `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本と-msc-の実装)）
 - `pico_enable_stdio_usb 1` / `pico_enable_stdio_uart 0`
 - `target_include_directories` にリポジトリ直下を入れる。SDK の tusb_config.h は
   `-isystem` で入るので、これで自前の [tusb_config.h](../tusb_config.h) が優先される
+- 配布用の `release` ターゲットを持つ。configure 時の値（SDK のパス、各キャッシュ変数の
+  実効値）を [cmake/release_config.cmake.in](../cmake/release_config.cmake.in) から
+  `build/release_config.cmake` へ焼き、`cmake -P` で走る
+  [cmake/make_release.cmake](../cmake/make_release.cmake) が zip に固める。
+  **キャッシュ変数を増やしたらテンプレートの `REL_OPTIONS` にも足すこと**（`VERSION.txt`
+  に並べるビルドオプション）。版はタグ由来の値と `project(VERSION)` を照合し、違えば
+  `FATAL_ERROR` で止める。中身と使い方は [README §6.6](../README.md#66-リリース版の-zip-を使う)
 
 ### 7.1 PIO のビルドフロー
 
@@ -989,7 +1013,8 @@ FAT やディレクトリを何度も書き直すたびに書き出したそば�
 
 ```
 PLAYER --( storage host )--> HOST
-    ガード: VGM 停止中 かつ capture_state() == IDLE
+    ガード: autoplay 停止中 かつ VGM 停止中 かつ MDX 停止中
+            かつ capture_state() == IDLE
     動作:   i2s_set_enabled(false) -> f_unmount() -> メディア挿入
 
 HOST --( storage player / ホストの eject )--> PLAYER
@@ -1135,9 +1160,10 @@ s_dma_total / s_fill_total ≡ リング内の添字 (mod I2S_RING_FRAMES)
    読まず無音だけを詰める。リング全体が無音なので、停止中に DMA が古い内容を再生しても
    出てくるのは無音。BCK / LRCK と DMA は止めない（止めると PCM5102A がポップし、
    [i2s.h](../i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
-2. **`capture_resync_after_blackout()` で基準点を張り直す。**
-   `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）と、
-   `storage player` への遷移時の 2 か所で呼ぶ
+2. **`capture_resync_after_blackout()` で基準点を張り直す。** 呼ぶのは 3 か所で、
+   `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）、
+   `storage player` への遷移時、そして `button_boot_apply()` の末尾
+   （[§12.6](#126-起動シーケンス)）
 
 **張り直しは 3 本を 1 本にまとめてある**（[§1.2](#12-主要-api)）。`ym3012_ring_resync()` /
 `i2s_resync()` / `pcm8_resync()` を個別に呼ばないのは、消費者が増えたときに呼び忘れが
@@ -1174,7 +1200,8 @@ gzip 圧縮された VGM を、一時ファイルを作らずに展開しなが�
 違うのは補充が `f_read()` か `vgz_read()` かだけ。
 
 **圧縮の判定は拡張子ではなくファイル先頭のマジック（`1F 8B`）で行う。** 中身が gzip の
-`.vgm` も、`.vgm` そのままの `.vgz` も世の中にあるため。`vgm list` と `has_vgm_ext()` は
+`.vgm` も、`.vgm` そのままの `.vgz` も世の中にあるため。`vgm list` の絞り込み
+（[filelist.c](../filelist.c) の `has_ext()` と [vgm.c](../vgm.c) の `VGM_EXTS[]`）は
 拡張子で拾うが、それは一覧に何を出すかの話であって展開するかどうかとは独立している。
 
 **出力リングが DEFLATE の履歴窓を兼ねる。** `tinfl` は出力バッファをリングとして扱い、
@@ -1193,7 +1220,7 @@ mask = (pOut_buf_next - pOut_buf_start) + *pOut_buf_size - 1;
 `VGZ_IN_CHUNK`（256 バイト）だけ渡すと、通常の圧縮率（3〜10 倍）で 1〜3KiB の展開に
 相当する。圧縮率が極端に高い箇所では 1 回でリング末尾まで（最大 32KiB）展開しうるが、
 それでも数 ms で、I2S のリングが 65.5ms あるので破綻しない（[§5.3](#53-出力リングと先行量の維持)）。
-圧縮率 72 倍のファイルを実機で再生したときの `VGM LAG` の最大値は 11ms、
+圧縮率 72 倍のファイルを実機で再生したときの `SEQ LAG` の最大値は 11ms、
 `I2S UNDERRUN` は 0 だった。
 
 `vgm.c` 側の補充単位も非圧縮とは別にしてある。`VGM_GZ_CHUNK` は 1024 バイトで、
@@ -1233,7 +1260,7 @@ POD** で、出力リングを呼び出しごとに引数で渡す造りだか�
 そのまま乗るので、読み飛ばしのあいだもキャプチャと I2S へのサービスが挟まる。
 ここで生じた遅れは `VGM_RESYNC_LAG_US`（200ms）による時計の張り直しが吸収する
 （[§9.2](#92-スケジューラ)）。256KiB のデータブロックを含む `.vgz` を実機で再生したときの
-`VGM LAG` の最大値は 20ms、`I2S UNDERRUN` は 0 だった。
+`SEQ LAG` の最大値は 20ms、`I2S UNDERRUN` は 0 だった。
 
 **gzip トレーラの CRC32 は検証しない。** 読むのは ISIZE（展開後サイズ）だけで、
 `vgm_size()` が `f_size()` の代わりに使う。**ループ再生では終端に到達しないことが普通**で、
@@ -1242,7 +1269,7 @@ POD** で、出力リングを呼び出しごとに引数で渡す造りだか�
 （[§9.1](#91-コマンドの解釈)）として必ず捕まる。
 
 `VGM_VGZ_ENABLED=0` にすると [vgz.c](../vgz.c) は「常に失敗する」スタブだけになり、
-展開器も約 86KiB のバッファもリンクされない（[§7](#7-ビルド構成)）。
+展開器も約 84KiB のバッファもリンクされない（[§7](#7-ビルド構成)）。
 `vgm_play()` は gzip のファイルを `bad file` で拒否し、理由を `# hint` 行で出す。
 
 ## 10. MDX 再生
@@ -1619,7 +1646,7 @@ static uint16_t s_order[AUTOPLAY_MAX_ENTRIES];  // 鳴らす順。値は s_offs 
 static uint32_t s_vgm_count;                    // s_offs の [0, s_vgm_count) が VGM
 ```
 
-プールが 12KiB から 24KiB になっているのは、名前ではなく相対パスを持つようになったため。
+プールが 24KiB あるのは、名前ではなくサブディレクトリを含む相対パスを持つため。
 `vgm_play()` / `mdx_play()` へはこの文字列をそのまま渡す（プレイリスト側はディレクトリを
 意識しない）。
 
@@ -1633,8 +1660,8 @@ static uint32_t s_vgm_count;                    // s_offs の [0, s_vgm_count) �
 ずらす**（切れ目で同じ曲が 2 回続かないように）。
 
 プレイリストを作るのは `autoplay start` のときだけ。再生中にディレクトリを走査し直すと、
-曲の途中で数十 ms 止まるうえ、鳴らしている曲の位置を見失う。ツリーを再帰するように
-なって走査の時間が伸びたぶん、この方針の重みは増している。
+曲の途中で数十 ms 止まるうえ、鳴らしている曲の位置を見失う。走査はツリーを再帰するので、
+段が深いほど止まる時間も伸びる。
 
 ### 11.2 状態機械
 
@@ -1659,9 +1686,13 @@ static uint32_t s_vgm_count;                    // s_offs の [0, s_vgm_count) �
 一巡しても 1 曲も鳴らせなければ自動再生ごと止める（`p 1` 中に φM の違う曲へ進むと
 `clockmode_follow_file()` が拒否するので、この経路は普通に通る）。
 
-`s_busy` は `autoplay_service()` を抑止するフラグ。`vgm list` / `mdx list` /
-`autoplay list` は 1 行ごとに `service_all()` を tick として呼ぶので、一覧を出している
-最中にここから曲送りが走りうる。プレイリストを作る間と出す間は動かさない。
+`s_busy` は `autoplay_service()` を抑止するフラグ。**立てるのは autoplay 自身の 2 経路
+だけ** — `autoplay start` がプレイリストを集めている間と、`autoplay list` が出している間。
+どちらも 1 行ごと（または 1 件ごと）に `service_all()` を tick として呼ぶので、
+立てておかないと集計や出力の最中に曲送りが走ってプレイリストの並びが変わる。
+`vgm list` / `mdx list` は `s_busy` に触らない。曲送りが走っても
+[filelist.c](../filelist.c) の走査バッファは壊れない（`vgm_play()` はそこを触らない）が、
+一覧の途中に `# autoplay:` の行が挟まりうる。
 
 ### 11.3 フェードアウト
 
@@ -1715,9 +1746,9 @@ ch ごとに交互に書くと最初と最後のチャンネルでキーオフ�
 `autoplay gap 0` では猶予の大半が新しい曲の頭に被るので、この打ち直しは省略できない
 （猶予が済んでいれば何もしない）。
 
-**基板の YM3012 のアナログ出力には効かない。** Pico は OPM から DAC へのシリアル線を
-傍受しているだけで、その経路には入っていない。アナログ側で音が止まるのは、フェードが
-終わったあとのキーオフの時点になる。
+**効く出力先が I2S と USB キャプチャに限られる**のは、Pico が OPM から DAC へのシリアル線を
+傍受しているだけで、基板の YM3012 のアナログ経路には入っていないため
+（[README §3.17](../README.md#317-autoplay自動再生)）。
 
 MDX は MXDRV 由来の TL フェード（`0xE7 0x01`）を別に持っているが、autoplay はそちらを
 使わない。VGM に相当物が無く、曲の種類でフェードの効く出力先が変わってしまうため。
@@ -1726,8 +1757,8 @@ MDX は MXDRV 由来の TL フェード（`0xE7 0x01`）を別に持っている
 
 - **手動の `vgm play` / `mdx play` / `*_stop` はコマンド層で `autoplay_stop()` を先に呼ぶ。**
   autoplay 自身も `vgm_play()` を呼ぶので、区別はコマンド層に置くのが一番単純になる。
-- **`storage host` は `autoplay_is_running()` でも拒否する**（[§8.4](#84-所有権の切り替え)）。
-  曲間（`GAP`）は VGM も MDX も鳴っておらず、既存の 2 つの判定では素通りしてしまう。
+- **`storage host` のガードに `autoplay_is_running()` が要る**（[§8.4](#84-所有権の切り替え)）。
+  曲間（`GAP`）は VGM も MDX も鳴っていないので、再生系の判定だけでは素通りしてしまう。
 - 統計（`STATS_SVC_*`）は足していない。`autoplay_service()` は比較が数回で、`s` の
   `SVC` 行を増やすほどの滞在時間にならない。
 
@@ -1759,9 +1790,8 @@ GP21 (SW1) と GP22 (SW2) の 2 個。SW3 は RUN 端子に繋がっていてハ
 してある。メインループの周回数は状況で桁違いに変わる（通常は数十万周/秒、フラッシュの
 消去中は数十 ms 空く）ので、回数で数えると時定数が定義できない。
 
-`button_service()` 自体も `BUTTON_SERVICE_INTERVAL_US`（1000µs）で間引いてある
-（[README §3.11.1](../README.md#3111-サービスの呼び出し間隔)）。デバウンスの窓 10ms に
-対して 10 サンプル取れて十分細かく、1 秒の長押し判定に対しては誤差 0.1% で十分粗い。
+`button_service()` 自体も `BUTTON_SERVICE_INTERVAL_US` で間引いてある。値と決め手は
+[README §3.11.1](../README.md#3111-サービスの呼び出し間隔) にある。
 
 2 本を 1 つの窓でまとめて見ている。片方が暴れている間はもう片方も確定しないが、
 確定値は保持されたままなので実害が無く、ピンごとに窓を持つより状態が少なくて済む。
@@ -1792,9 +1822,10 @@ SW2 が 0.05 秒遅れて入った瞬間に chord が BOTH になり、1.0 秒�
 
 ### 12.4 メールボックス
 
-深さ 1。埋まっている間に来たイベントは捨てる（古い方を残す）。溜めて順に流すと、
-待たされた末に曲が何曲も飛ぶことになるため。長押しの成立後は全解放までロックアウト
-されるので、「長押しの直後に短押しが来て上書きされる」という並びは構造的に起きない。
+深さ 1。埋まっている間に来たイベントは捨てる（古い方を残す）。理由は
+[README §3.20](../README.md#320-ボタンgp21--gp22)。長押しの成立後は全解放まで
+ロックアウトされるので、「長押しの直後に短押しが来て上書きされる」という並びは
+構造的に起きない。
 
 **捨てたことをその場で `printf` しない。** `button_service()` は一覧出力の行ごとの
 tick からも呼ばれるので、そこから行を吐くと出力の途中に割り込む。数だけ
@@ -1802,10 +1833,9 @@ tick からも呼ばれるので、そこから行を吐くと出力の途中に
 
 ### 12.5 LED の一時表示と起動待ち
 
-[led.c](../led.c) の一時表示（オーバーレイ）は元々コマンド受信用の 1 種類しか持てず、
-有効判定がパターン配列の `sizeof` と直結していた。これをポインタ + 長さ + 位置の
-3 変数に変え、`overlay_start()` で差し込む形にした。非アクティブはポインタが `NULL`
-なので、番兵に `(uint32_t)-1` を使う必要も無くなっている。後から来たものが勝つ。
+[led.c](../led.c) の一時表示（オーバーレイ）はポインタ + 長さ + 位置の 3 変数で持ち、
+`overlay_start()` で差し込む。非アクティブはポインタが `NULL` なので番兵の値は要らない。
+種類を問わず後から来たものが勝つ。
 
 **一時表示は基本パターンを完全に置き換える。** 待機は常時点灯なので、点灯だけの
 パターンを重ねても何も変化しない。長押しの合図を `"0111110"`（OFF から始まる）に

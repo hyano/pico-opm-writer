@@ -123,7 +123,7 @@ endif()
 set(I2S_ENABLED "1" CACHE STRING "I2S output: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE I2S_ENABLED=${I2S_ENABLED})
 
-# .vgz（gzip 圧縮された VGM）の再生。0 にすると展開器と 90KB 弱の
+# .vgz（gzip 圧縮された VGM）の再生。0 にすると展開器と約 86KB の
 # バッファがリンクされず、.vgz は bad file になる。
 set(VGM_VGZ_ENABLED "1" CACHE STRING "gzip (.vgz) playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE VGM_VGZ_ENABLED=${VGM_VGZ_ENABLED})
@@ -142,7 +142,7 @@ if(NOT PCM8_ENABLED STREQUAL "")
     target_compile_definitions(pico-opm-writer PRIVATE PCM8_ENABLED=${PCM8_ENABLED})
 endif()
 
-# VGM / MDX の自動連続再生。0 にするとプレイリスト（約 19KB）と状態機械が
+# VGM / MDX の自動連続再生。0 にするとプレイリスト（約 26KB）と状態機械が
 # リンクされず、autoplay コマンドは unsupported になる。
 set(AUTOPLAY_ENABLED "1" CACHE STRING "unattended VGM/MDX playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE AUTOPLAY_ENABLED=${AUTOPLAY_ENABLED})
@@ -155,7 +155,7 @@ set(BUTTON_ENABLED "1" CACHE STRING "GPIO buttons on GP21/GP22: 1 = enabled, 0 =
 target_compile_definitions(pico-opm-writer PRIVATE BUTTON_ENABLED=${BUTTON_ENABLED})
 
 # サービスごとの滞在時間の計測。1 にすると service_all() の各呼び出しが
-# time_us_32() を 2 回読むようになり、`s` の SVC 行に us/s が付く。
+# time_us_32() を 2 回読むようになり、`s` に SVCTIME 行（us/s）が増える。
 # 常設するには重いので、内訳を見たいときだけ 1 で焼く。
 set(STATS_PROFILE "0" CACHE STRING "per-service timing profile: 1 = on, 0 = off")
 target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE})
@@ -167,7 +167,11 @@ target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE
 # 末尾の予約は picotool が UF2 へ入れる RP2350-E10 の absolute block 用。
 # 0x10FFFF00 狙いのブロックが 4MiB のフラッシュでは末尾セクタへ折り返すので、
 # ここを空けておかないと UF2 で焼くたびにファイルシステムの末尾が潰れる。
-set(FLASH_TOTAL_BYTES "4194304" CACHE STRING "total on-board flash size in bytes (PICO_FLASH_SIZE_BYTES)")
+#
+# FLASH_TOTAL_BYTES はここでの引き算（FatFs 領域の末尾）にしか使わない。
+# PICO_FLASH_SIZE_BYTES を設定するわけではないので、SDK 側の値とずれていないかは
+# flash_disk.c の _Static_assert がコンパイル時に検査する。
+set(FLASH_TOTAL_BYTES "4194304" CACHE STRING "flash size in bytes used to size the FatFs region; must match PICO_FLASH_SIZE_BYTES (checked by _Static_assert in flash_disk.c)")
 set(FLASH_FATFS_RESERVE_KB "" CACHE STRING "KiB of flash reserved for the firmware; FatFs takes the rest (default 256)")
 set(FLASH_FATFS_TAIL_RESERVE "4096" CACHE STRING "bytes kept free at the end of flash (RP2350-E10 absolute block)")
 set(FLASH_FATFS_OFFSET "" CACHE STRING "FatFs region offset from XIP_BASE in bytes (overrides FLASH_FATFS_RESERVE_KB)")

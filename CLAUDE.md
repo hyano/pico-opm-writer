@@ -45,6 +45,19 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `tools/opm-lfo-period.py` | キャプチャから LFO の更新周期をサンプル数で測る（`--mode` で AM/PM を指定）。出力は TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
+`board/` はこのファームウェアを載せる基板と、そのベースプレートの設計データ。配線の前提は
+[README.md](README.md) §1.3 にあり、基板もその前提で起こしてある。
+
+| ファイル | 内容 |
+| --- | --- |
+| `board/pico-opm-writer.kicad_pro` / `.kicad_sch` / `.kicad_pcb` | KiCad のプロジェクト・回路図・基板 |
+| `board/YM2151.kicad_sym` / `gy-pcm5102_audio.kicad_sym` | 自作シンボル（`sym-lib-table` で登録） |
+| `board/RPi_Pico_SMD.kicad_mod` / `GY-PCM5102_BOARD.kicad_mod` | 自作フットプリント（`fp-lib-table` で登録） |
+| `board/base/*.FCStd` / `*.stl` | FreeCAD のベースプレートと、そこから出力した STL |
+
+`board/production/`（製造用出力）と `board/pico-opm-writer-backups/`（KiCad の自動バックアップ）、
+KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitignore` で除外してある。
+
 `test/` 以下は上記を使った実機調査の一次データ生成環境。
 
 | ディレクトリ | 内容 |
@@ -177,9 +190,10 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
 | `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 26KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
 | `BUTTON_ENABLED` | 1 | GP21 / GP22 のボタン操作。0 にすると状態機械がリンクされず、GP21 / GP22 は初期化もされない |
+| `FLASH_TOTAL_BYTES` | 4194304 | FatFs 領域の末尾を決めるための総容量。SDK の `PICO_FLASH_SIZE_BYTES` と一致していることを `flash_disk.c` の `_Static_assert` が検査する |
 | `FLASH_FATFS_RESERVE_KB` | 空（256） | ファームウェアに残す KiB。残りが全部 FatFs になる |
 | `FLASH_FATFS_TAIL_RESERVE` | 4096 | フラッシュ末尾に空けるバイト数（UF2 の RP2350-E10 absolute block 用。0 にすると UF2 で焼くたびに FS の末尾が壊れる） |
-| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`FLASH_FATFS_RESERVE_KB` から計算） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |
+| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（オフセットは `FLASH_FATFS_RESERVE_KB × 1024`、サイズは `FLASH_TOTAL_BYTES - FLASH_FATFS_TAIL_RESERVE - オフセット`） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |
 | `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
 | `STATS_PROFILE` | 0 | サービスごとの滞在時間の計測。1 にすると `s` に `SVCTIME` 行（µs/s）が増える。区間ごとに時刻を 2 回読むので常用しない |
 
@@ -285,7 +299,7 @@ ninja -C build release
 
 **ファームウェア自身が持つ自己診断**：
 - `t` コマンド — PCM 変換、MDX の音程 / テンポ換算、ADPCM デコーダの既知ベクタ検証と、起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（サービス関数に居た時間の割合と `tud_task()` の占有率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
+- `s` コマンド — 実行時統計を表示（サービス関数に居た時間の割合と `tud_task()` の占有率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / PIO の RX FIFO があふれた回数 (`RXSTALL`) / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
 - `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
 - `autoplay status` / `autoplay list` コマンド — 自動再生の状態とプレイリスト
 - `s 0` — 統計をリセット
@@ -323,7 +337,7 @@ ninja -C build release
 
 ### ライブラリの追加
 
-`target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_dma` + `hardware_clocks` + `hardware_flash` + `pico_flash` + `tinyusb_device` + `fatfs` + `miniz`）。
+`target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_dma` + `hardware_clocks` + `hardware_pll` + `hardware_flash` + `pico_flash` + `pico_rand` + `tinyusb_device` + `fatfs` + `miniz`）。
 
 `external/` の上流コードは `add_library(... STATIC ...)` の別ターゲットにする（`fatfs` / `miniz`）。`-Wall -Wextra` が `pico-opm-writer` に `PRIVATE` で付いているので、これで上流へ波及せず警告抑止も改変も要らなくなる。
 
@@ -355,4 +369,4 @@ I2S の分周比は `i2s_init()` が **φM の分周値（256 倍固定小数）
 
 ## Git
 
-`.gitignore` は `build` / `__pycache__` / `!.vscode/*` / `*.wav` / `*.bin` の 5 行。**`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash / `launch.json` のデバッグ構成、`settings.json` の PATH 設定を共有するため）。`*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は git の管理対象に入る。
+`.gitignore` が除外するのはビルド生成物（`build` / `build-*` / `__pycache__` / `*.wav` / `*.bin`）、KiCad と FreeCAD のロックファイル・自動保存・バックアップ（`*.kicad_*.lck` / `_autosave*` / `board/pico-opm-writer-backups/` / `board/base/*.FCBak`）、基板の製造用出力（`board/production/` と `board/fabrication-toolkit-options.json` / `board/temp-freerouting.dsn`）、そして同梱しない参照資料と試聴用データ（`reference/`。MXDRV / PCM8 の資料と VGM / MDX のファイル置き場）。**`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash / `launch.json` のデバッグ構成、`settings.json` の PATH 設定を共有するため）。`*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は git の管理対象に入る。
