@@ -5,7 +5,9 @@
  * YM2151 のレジスタ書き込みを発行する。VGM と違い MDX はバイナリ MML なので、
  * 音色・音量・ピッチ・LFO をこちら側で解釈してはじめてレジスタ値になる。
  *
- * 解釈は MXDRV 2.06+17 の仕様に合わせてある（README のライセンス節）。
+ * 解釈は X68k MXDRV music driver version 2.06+17 Rel.X5-S / for Win32 [MXDRVg] V2.00b の
+ * 仕様に合わせてある。一部の機能だけ MXDRV 2.06+16 Rel.3+25 に従う
+ * （README のライセンス節）。
  *
  * ADPCM (MSM6258 / PDX) パートは本機にハードウェアが無いので、PCM8 相当の
  * ソフトデコーダ (pcm8.c) で鳴らす。ヘッダが要求する PDX を /MDX/<名前>.PDX から

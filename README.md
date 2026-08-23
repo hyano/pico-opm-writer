@@ -1791,7 +1791,8 @@ PCM キャプチャ（`p 1`）と I2S 出力は再生中も動く。`mdx play` �
 
 ### 9.6 MXDRV との相違点
 
-レジスタへの書き込み内容と順序は MXDRV 2.06+16 Rel.3+25 に合わせてある。違うのは 1 点だけ。
+レジスタへの書き込み内容と順序は MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b に合わせてある
+（一部の機能だけ MXDRV 2.06+16 Rel.3+25。[§12](#12-ライセンス)）。違うのは 1 点だけ。
 
 **BUSY 待ちをしない。** MXDRV は書き込みのたびに OPM のステータスレジスタを読んで
 bit7 が下りるのを待つが、本機はデータバスが出力専用（`/RD` は H 固定）でステータスを
@@ -1984,8 +1985,10 @@ BSD-3-Clause が適用される（ファイル先頭の表示のとおり）。
 
 `external/` に置いた外部ソースはそれぞれの条件による（[external/README.md](external/README.md)）。
 
-MDX の解釈（[§9](#9-mdx-再生)）は X68000 の音源ドライバ **MXDRV 2.06+16 Rel.3+25**
+MDX の解釈（[§9](#9-mdx-再生)）は X68000 の音源ドライバ MXDRV
 （(c)1988-92 milk., K.MAEKAWA, Missy.M, Yatsube）の仕様に準拠している。
+準拠先は大半が **X68k MXDRV music driver version 2.06+17 Rel.X5-S / for Win32 [MXDRVg] V2.00b**
+で、一部の機能だけ **MXDRV 2.06+16 Rel.3+25** に準拠する。
 MXDRV のソースは本リポジトリには含まれておらず、`mdx.c` は独自に書き起こしたもの。
 
 ADPCM パート（[§9.7](#97-adpcm-pcm8-の再生)）は **PCM8 version 0.48**

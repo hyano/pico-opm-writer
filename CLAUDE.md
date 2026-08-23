@@ -25,7 +25,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
-| `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+16 Rel.3+25 の仕様に準拠**（ソースは同梱していない） |
+| `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b の仕様に準拠**（一部の機能のみ 2.06+16 Rel.3+25。ソースは同梱していない） |
 | `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない** |
 | `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。フェードアウトは `ym3012_fade_start()` の出力ゲインで作るので **I2S と USB キャプチャにしか効かない**（YM3012 のアナログ出力は素通り） |
 | `led.c` / `led.h` | LED 表示 |
