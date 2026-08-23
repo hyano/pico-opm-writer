@@ -78,7 +78,8 @@ if(NOT commit_res EQUAL 0)
     set(commit "unknown")
 endif()
 
-rel_git(porcelain porcelain_res status --porcelain)
+# 未追跡ファイルは数えない。ビルド結果に影響しないものまで dirty になる
+rel_git(porcelain porcelain_res status --porcelain --untracked-files=no)
 if(NOT porcelain_res EQUAL 0)
     set(tree_state "unknown")
 elseif(porcelain STREQUAL "")
