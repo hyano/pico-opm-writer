@@ -123,6 +123,11 @@ void capture_resync_after_blackout(void)
     pcm8_resync();
 }
 
+/*
+ * キャプチャの停止で LED を IDLE へ戻せるのは、キャプチャ中は storage host に
+ * 入れないから（storage.c が拒否する）。この排他を将来緩めると、HOST 中に
+ * キャプチャを止めた時点で LED_STATE_HOST の表示が消える。
+ */
 void capture_abort(void)
 {
     s_state = CAPTURE_STATE_IDLE;

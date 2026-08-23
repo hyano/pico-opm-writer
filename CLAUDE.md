@@ -28,6 +28,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b の仕様に準拠**（一部の機能のみ 2.06+16 Rel.3+25。ソースは同梱していない） |
 | `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない** |
 | `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。フェードアウトは `ym3012_fade_start()` の出力ゲインで作るので **I2S と USB キャプチャにしか効かない**（YM3012 のアナログ出力は素通り） |
+| `button.c` / `button.h` | GP21 (SW1) / GP22 (SW2) の取り込み。デバウンス・短押し / 長押しの状態機械・深さ 1 のメールボックス。**autoplay も storage も知らない**（`service_all()` が再入的に呼ばれるため、消化は `pico-opm-writer.c` の `button_dispatch()` がメインループのトップレベルで行う）。SW3 は RUN 端子でファームからは見えない |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
@@ -175,6 +176,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 | `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
 | `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
 | `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 26KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
+| `BUTTON_ENABLED` | 1 | GP21 / GP22 のボタン操作。0 にすると状態機械がリンクされず、GP21 / GP22 は初期化もされない |
 | `FLASH_FATFS_RESERVE_KB` | 空（256） | ファームウェアに残す KiB。残りが全部 FatFs になる |
 | `FLASH_FATFS_TAIL_RESERVE` | 4096 | フラッシュ末尾に空けるバイト数（UF2 の RP2350-E10 absolute block 用。0 にすると UF2 で焼くたびに FS の末尾が壊れる） |
 | `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（`FLASH_FATFS_RESERVE_KB` から計算） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |

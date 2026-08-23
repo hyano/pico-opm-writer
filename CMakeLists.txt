@@ -79,6 +79,7 @@ add_executable(pico-opm-writer
         i2s.c
         usb_pcm.c
         led.c
+        button.c
         stats.c
         flash_disk.c
         diskio_flash.c
@@ -139,6 +140,13 @@ endif()
 # リンクされず、autoplay コマンドは unsupported になる。
 set(AUTOPLAY_ENABLED "1" CACHE STRING "unattended VGM/MDX playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE AUTOPLAY_ENABLED=${AUTOPLAY_ENABLED})
+
+# GP21 / GP22 のボタン操作（内部プルアップの負論理）。0 にすると状態機械が
+# リンクされず、GP21 / GP22 は初期化もされないのでピンを他の用途へ回せる。
+# スイッチを実装していない基板でも内部プルアップで「離されている」と読めるので、
+# 既定の 1 のままで従来と同じ挙動になる。
+set(BUTTON_ENABLED "1" CACHE STRING "GPIO buttons on GP21/GP22: 1 = enabled, 0 = disabled")
+target_compile_definitions(pico-opm-writer PRIVATE BUTTON_ENABLED=${BUTTON_ENABLED})
 
 # サービスごとの滞在時間の計測。1 にすると service_all() の各呼び出しが
 # time_us_32() を 2 回読むようになり、`s` の SVC 行に us/s が付く。

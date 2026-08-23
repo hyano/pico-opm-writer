@@ -16,6 +16,7 @@
 #include "capture.h"
 #include "flash_disk.h"
 #include "i2s.h"
+#include "led.h"
 #include "mdx.h"
 #include "vgm.h"
 
@@ -223,6 +224,16 @@ const char *storage_set_host(void)
     usb_msc_trace_reset();
     s_mode = STORAGE_MODE_HOST;
 
+    /*
+     * LED は状態を持つ側が張る（capture.c と同じ）。コマンド経由・ボタン経由・
+     * PC の eject 経由の 3 つが必ずここを通るので、1 箇所で揃う。
+     *
+     * LED_STATE_HOST と LED_STATE_CAPTURE は同時に成立しない。`p 1` は HOST 中に
+     * 拒否され、storage host はキャプチャ中に拒否されるため。この排他を将来
+     * 緩めると、キャプチャの停止で LED が IDLE に戻って HOST の表示が消える。
+     */
+    led_set_state(LED_STATE_HOST);
+
     return NULL;
 }
 
@@ -248,6 +259,7 @@ const char *storage_set_player(void)
         s_fs_state = STORAGE_FS_IO_ERROR;
         i2s_set_enabled(true);
         capture_resync_after_blackout();
+        led_set_state(LED_STATE_IDLE);
         return "io error";
     }
 
@@ -265,6 +277,8 @@ const char *storage_set_player(void)
         printf("# warn    : host did not eject; files may be incomplete\n");
     }
     s_host_dirty = false;
+
+    led_set_state(LED_STATE_IDLE);
 
     return NULL;
 }

@@ -15,6 +15,7 @@
 #include "tusb.h"
 
 #include "autoplay.h"
+#include "button.h"
 #include "capture.h"
 #include "clockmode.h"
 #include "flash_disk.h"
@@ -110,6 +111,16 @@
 #define STORAGE_SERVICE_INTERVAL_US 1000u
 #endif
 
+/*
+ * ボタン (GP21 / GP22) を読む最短間隔。
+ *
+ * デバウンスの窓 10ms に対して 10 サンプル取れて十分細かく、1 秒の長押し判定に
+ * 対しては誤差 0.1% で十分粗い。人間には 1ms の遅れは見えない。
+ */
+#ifndef BUTTON_SERVICE_INTERVAL_US
+#define BUTTON_SERVICE_INTERVAL_US 1000u
+#endif
+
 /* 接続状態の確認間隔。起動バナーはこの遅れの範囲で出れば足りる。 */
 #ifndef CONNECT_POLL_INTERVAL_US
 #define CONNECT_POLL_INTERVAL_US 100000u
@@ -119,11 +130,21 @@ static char s_line[LINE_MAX_LEN + 1];
 static size_t s_len;
 static bool s_overflow;
 
+/*
+ * 起動時にボタンで選んだ動作モードの結果。
+ *
+ * 起動直後の printf はホストが CDC を開く前なので捨てられる。後から USB を
+ * 挿しても分かるよう、ここに控えて i の button 行で出す（組み立ては
+ * button_boot_apply()）。
+ */
+static char s_boot_result[48] = "none";
+
 /* 各グループを最後に回した時刻。上の *_INTERVAL_US の基準。 */
 static uint32_t s_usb_last_us;
 static uint32_t s_audio_last_us;
 static uint32_t s_seq_last_us;
 static uint32_t s_storage_last_us;
+static uint32_t s_button_last_us;
 
 /* ---- メインループの 1 周分 --------------------------------------------- */
 
@@ -202,6 +223,20 @@ static void service_all(void)
         STATS_SVC(STATS_SVC_STORAGE, storage_service());
     }
 
+    /*
+     * ボタンは取り込むだけで、autoplay / storage は触らない。この関数はコマンド
+     * 処理中からも再入的に呼ばれるので、ここから上位の操作を呼ぶと filelist の
+     * 走査バッファを壊す。消化は main() のトップレベルの button_dispatch()。
+     *
+     * led_service() の直前に置いてあるのは、長押しが成立した周回のうちに
+     * LED の合図を反映させるため。判定は比較が数回で済むので STATS_SVC では
+     * 包まない（led_service() / autoplay_service() と同じ扱い）。
+     */
+    if (due(&s_button_last_us, t1, BUTTON_SERVICE_INTERVAL_US))
+    {
+        button_service();
+    }
+
     led_service();
 
     stats_usb_busy_add(t1 - t0);
@@ -241,6 +276,14 @@ static void print_info(void)
            OPM_T_WR_US, OPM_T_ADDR_US, OPM_T_DATA_US);
     printf("# ym3012  : SO=GP%d phi1=GP%d SH1=GP%d SH2=GP%d\n",
            YM3012_PIN_SO, YM3012_PIN_PHI1, YM3012_PIN_SH1, YM3012_PIN_SH2);
+#if BUTTON_ENABLED
+    printf("# pins    : SW1=GP%u SW2=GP%u (pull-up, active low)\n",
+           (unsigned)BUTTON_PIN_SW1, (unsigned)BUTTON_PIN_SW2);
+    printf("# button  : long %u ms  boot %s\n",
+           (unsigned)(BUTTON_LONG_PRESS_US / 1000u), s_boot_result);
+#else
+    printf("# button  : disabled\n");
+#endif
     printf("# capture : ring %u bytes (%u frames) rate %u Hz\n",
            (unsigned)YM3012_RING_BYTES, (unsigned)YM3012_RING_FRAMES,
            (unsigned)(opm_clock_hz_actual() / 64u));
@@ -1519,6 +1562,232 @@ static void cmd_autoplay(char **cursor)
     reply_err("unknown command");
 }
 
+/* ---- ボタン操作 ------------------------------------------------------- */
+
+/*
+ * ボタン起点の操作。
+ *
+ * 出すのは `#` で始まる情報行だけで、OK / ERR は出さない。コマンドの応答では
+ * ないので、「1 コマンド 1 応答」（README §3.3）を崩さないため。失敗の理由は
+ * 各 API の戻り値をそのまま埋める。直前に各モジュールの `# hint` / `# warn` が
+ * 出るので、原因は 2 行セットで読める。
+ */
+
+/* 通知行に出すボタンの名前 */
+static const char *button_name(uint32_t mask)
+{
+    if (mask == BUTTON_MASK_BOTH)
+    {
+        return "SW1+SW2";
+    }
+    if (mask == BUTTON_MASK_SW2)
+    {
+        return "SW2";
+    }
+    return "SW1";
+}
+
+/*
+ * autoplay を指定の曲順で始め直す。storage host 中なら先に取り戻す。
+ * 成功なら NULL、失敗ならエラー理由。
+ */
+static const char *button_start_autoplay(autoplay_mode_t mode)
+{
+    if (storage_mode() == STORAGE_MODE_HOST)
+    {
+        const char *err = storage_set_player();
+        if (err != NULL)
+        {
+            return err;
+        }
+        printf("# storage : %s\n", storage_mode_name());
+    }
+
+    autoplay_set_mode(mode);
+
+    /*
+     * autoplay_start() はプレイリストを作り直して 1 曲目から始める。走っていた
+     * 再生（手動の vgm play / mdx play を含む）はこの中で止まるので、ここで
+     * 明示的に止める必要は無い。
+     */
+    return autoplay_start();
+}
+
+/*
+ * ファイルシステムを PC へ渡す。
+ *
+ * autoplay / VGM / MDX は先に止める。キャプチャは止めない（`p 1` 中は必ず
+ * ホストが CDC を握っていて `p 0` を打てるので、ボタンで黙って WAV を切る
+ * 利益が無い）。残る拒否要因はキャプチャ中だけになり、storage_set_host() の
+ * hint がそのまま理由になる。
+ */
+static const char *button_enter_host(void)
+{
+    autoplay_stop();
+    if (vgm_is_playing())
+    {
+        vgm_stop();
+    }
+    if (mdx_is_playing())
+    {
+        mdx_stop();
+    }
+    return storage_set_host();
+}
+
+/* 長押し。元のモードを破棄して新しいモードへ移る。 */
+static void button_do_long(uint32_t mask)
+{
+    const char *err;
+
+    if (mask == BUTTON_MASK_BOTH)
+    {
+        printf("# button  : SW1+SW2 long: storage host\n");
+        err = button_enter_host();
+        if (err != NULL)
+        {
+            printf("# button  : storage host failed (%s)\n", err);
+        }
+        return;
+    }
+
+    bool shuffle = (mask == BUTTON_MASK_SW2);
+
+    printf("# button  : %s long: autoplay %s\n", button_name(mask), shuffle ? "random" : "list");
+    err = button_start_autoplay(shuffle ? AUTOPLAY_MODE_RANDOM : AUTOPLAY_MODE_LIST);
+    if (err != NULL)
+    {
+        printf("# button  : autoplay start failed (%s)\n", err);
+    }
+}
+
+/* 短押し。曲送り。停止中はそのボタンの曲順で始める。 */
+static void button_do_short(uint32_t mask)
+{
+    const char *err;
+
+    if (mask == BUTTON_MASK_BOTH)
+    {
+        /* storage host は破壊的なので、短押しでは絶対に起こさない */
+        printf("# button  : SW1+SW2 short: ignored (hold 1 s for storage host)\n");
+        return;
+    }
+
+    /*
+     * HOST 中は短押しを効かせない。PC がマウントしたままディスクを引き抜くと
+     * 書きかけのファイルが壊れるうえ、macOS では一度 eject すると USB を挿し
+     * 直すまで再マウントできない。抜けるのは長押しか SW3 のリセットだけにする。
+     */
+    if (storage_mode() == STORAGE_MODE_HOST)
+    {
+        printf("# button  : %s short: ignored (storage is handed to the PC)\n",
+               button_name(mask));
+        return;
+    }
+
+    bool forward = (mask != BUTTON_MASK_SW2);
+
+    if (autoplay_is_running())
+    {
+        printf("# button  : %s short: %s track\n", button_name(mask),
+               forward ? "next" : "prev");
+        err = autoplay_skip(forward ? 1 : -1);
+        if (err != NULL)
+        {
+            printf("# button  : autoplay %s failed (%s)\n", forward ? "next" : "prev", err);
+        }
+        return;
+    }
+
+    /* 停止中は曲送りが成立しないので、そのボタンの曲順で始める */
+    printf("# button  : %s short: autoplay %s\n", button_name(mask),
+           forward ? "list" : "random");
+    err = button_start_autoplay(forward ? AUTOPLAY_MODE_LIST : AUTOPLAY_MODE_RANDOM);
+    if (err != NULL)
+    {
+        printf("# button  : autoplay start failed (%s)\n", err);
+    }
+}
+
+/*
+ * ボタンのイベントを 1 個消化する。
+ *
+ * **必ず main() の for(;;) 直下から呼ぶ。** service_all() の中から呼ぶと、
+ * コマンド処理中の待ち（`d` の遅延、`p 0` のドレイン、一覧出力の tick）から
+ * 再入して filelist の走査バッファを壊し、応答の途中へ別の出力が割り込む。
+ *
+ * 取り出しを実行より先に済ませてあるので、実行中に押されたぶんは次の周回へ回る。
+ */
+static void button_dispatch(void)
+{
+    button_event_t ev;
+
+    if (!button_take_event(&ev))
+    {
+        return;
+    }
+
+    if (ev.press == BUTTON_PRESS_LONG)
+    {
+        button_do_long(ev.mask);
+    }
+    else
+    {
+        button_do_short(ev.mask);
+    }
+}
+
+/*
+ * 起動時に押されていたボタンで動作モードを決め、両方が離されてから 1 回だけ
+ * 実行する。押されていなければ何もしない（従来どおりの起動）。
+ *
+ * autoplay_start() は storage_init() のマウントを前提にするので、初期化列の
+ * 最後（autoplay_init() の後）で呼ぶこと。
+ */
+static void button_boot_apply(void)
+{
+    uint32_t chord = button_boot_chord();
+
+    if (chord == 0u)
+    {
+        return;
+    }
+
+    /* 点滅の回数で選んだモードを示す。1 = list / 2 = random / 3 = storage host */
+    led_boot_pattern(chord == BUTTON_MASK_SW1 ? 1u : (chord == BUTTON_MASK_SW2 ? 2u : 3u));
+    button_boot_wait_release(service_all);
+    led_set_state(LED_STATE_IDLE);
+
+    const char *label;
+    const char *err;
+
+    if (chord == BUTTON_MASK_BOTH)
+    {
+        label = "storage host";
+        err = button_enter_host();
+    }
+    else if (chord == BUTTON_MASK_SW2)
+    {
+        label = "autoplay random";
+        err = button_start_autoplay(AUTOPLAY_MODE_RANDOM);
+    }
+    else
+    {
+        label = "autoplay list";
+        err = button_start_autoplay(AUTOPLAY_MODE_LIST);
+    }
+
+    snprintf(s_boot_result, sizeof(s_boot_result), "%s (%s)", label,
+             (err != NULL) ? err : "ok");
+
+    /*
+     * ここまでの printf はホストが CDC を開いていないと 1 本あたり最大
+     * PICO_STDIO_USB_STDOUT_TIMEOUT_US (10ms) ブロックする。複数行出すと I2S の
+     * 先行量 16.4ms を超え得るので、長く止まったあとの作法どおり張り直す。
+     */
+    capture_resync_after_blackout();
+}
+
 /* t（自己テスト）。PCM 変換を実行し、起動時の PIO ループバックの結果も出す。 */
 static void cmd_selftest(void)
 {
@@ -1676,6 +1945,15 @@ int main(void)
     stdio_init_all();
 
     led_init();
+
+    /*
+     * ボタンの GPIO。プルアップを最も早く効かせて整定時間を稼ぐため、また
+     * 押されているかの採取をここで済ませて素早く離した利用者を取りこぼさない
+     * ため、初期化列の先頭に置く。GP21 / GP22 は opm_init() の
+     * gpio_init_mask()（GP2-GP14）にも ym3012 にも I2S にも含まれない。
+     */
+    button_init();
+
     stats_init();
     opm_init();
 
@@ -1701,12 +1979,26 @@ int main(void)
     mdx_init();
     autoplay_init();
 
+    /*
+     * 起動時にボタンが押されていたら、離されるのを待ってからその動作モードで
+     * 始める。autoplay_start() が storage のマウントを前提にするので、
+     * 初期化列を全部終えたここで呼ぶ。
+     */
+    button_boot_apply();
+
     bool connected = false;
     uint32_t connect_poll_us = time_us_32();
 
     for (;;)
     {
         service_all();
+
+        /*
+         * ボタンの消化はここだけ。service_all() の中でやると、コマンド処理中の
+         * 待ちから再入して filelist の走査バッファを壊す。ここが process_line()
+         * の外側であることが構文的に保証される唯一の点。
+         */
+        button_dispatch();
 
         /*
          * 接続の確認は 100ms ごとで足りる。stdio_usb_connected() は毎周回

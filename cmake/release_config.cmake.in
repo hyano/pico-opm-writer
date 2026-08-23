@@ -29,6 +29,7 @@ set(REL_OPTIONS
         "MDX_ENABLED"              "@MDX_ENABLED@"
         "PCM8_ENABLED"             "@PCM8_ENABLED@"
         "AUTOPLAY_ENABLED"         "@AUTOPLAY_ENABLED@"
+        "BUTTON_ENABLED"           "@BUTTON_ENABLED@"
         "STATS_PROFILE"            "@STATS_PROFILE@"
         "YM3012_LOOPBACK"          "@YM3012_LOOPBACK@"
         "FLASH_TOTAL_BYTES"        "@FLASH_TOTAL_BYTES@"
