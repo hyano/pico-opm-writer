@@ -489,12 +489,12 @@ class Serial:
 # ---- 実行 ---------------------------------------------------------------
 
 def reply_timeout(line):
-    """コマンドに応じた応答待ち時間。`d <ms>` と r/c は余分に待つ。"""
+    """コマンドに応じた応答待ち時間。`d <ms>` と reset/c は余分に待つ。"""
     tokens = line.split()
     cmd = tokens[0].lower() if tokens else ""
     if cmd == "d" and len(tokens) >= 2 and tokens[1].isdigit():
         return REPLY_TIMEOUT_S + int(tokens[1]) / 1000.0
-    if cmd in ("r", "c"):
+    if cmd in ("reset", "c"):
         return REPLY_TIMEOUT_S + 5.0
     if cmd == "p":
         # `p 0` はリングの残りを送り切ってから応答する（ファーム側の上限は 2 秒）

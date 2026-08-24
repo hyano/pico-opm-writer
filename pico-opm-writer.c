@@ -273,8 +273,8 @@ static void print_info(void)
            OPM_PIN_D0, OPM_PIN_D0 + 7, OPM_PIN_A0, OPM_PIN_CS, OPM_PIN_WR, OPM_PIN_RD, OPM_PIN_IC);
     printf("# pins    : phiM=GP%d /IRQ=GP%d\n",
            OPM_PIN_PHIM, OPM_PIN_IRQ);
-    printf("# timing  : t_wr=%dus t_addr=%dus t_data=%dus\n",
-           OPM_T_WR_US, OPM_T_ADDR_US, OPM_T_DATA_US);
+    printf("# timing  : t_wr=%dus t_addr=%dus t_data=%dus t_rd=%dus\n",
+           OPM_T_WR_US, OPM_T_ADDR_US, OPM_T_DATA_US, OPM_T_RD_US);
     printf("# ym3012  : SO=GP%d phi1=GP%d SH1=GP%d SH2=GP%d\n",
            YM3012_PIN_SO, YM3012_PIN_PHI1, YM3012_PIN_SH1, YM3012_PIN_SH2);
 #if BUTTON_ENABLED
@@ -423,7 +423,8 @@ static void print_stats(void)
 static void print_help(void)
 {
     puts("# w <addr> <data> [<addr> <data> ...] : write register(s), hex 00-ff");
-    puts("# r                                   : hardware reset (/IC)");
+    puts("# r 0 | r 1                           : read one byte with A0=0 / A0=1");
+    puts("# reset                               : hardware reset (/IC)");
     puts("# c                                   : clear all registers (software)");
     puts("# d <ms>                              : delay, decimal 0-60000");
     puts("# p | p 1 | p 0                       : show / start / stop PCM output on CDC #1");
@@ -696,6 +697,37 @@ static void cmd_write(char **cursor)
         opm_write(addr, data);
         pairs++;
     }
+}
+
+/*
+ * r 0 / r 1
+ *
+ * /RD で 1 バイト読み出す。A0=1 がデータシート上のステータスレジスタ。
+ * レジスタを変えないので、再生中でも拒否しない（w / reset / c とはここが違う）。
+ */
+static void cmd_read(char **cursor)
+{
+    char *tok = next_token(cursor);
+    if (tok == NULL)
+    {
+        reply_err("wrong arity");
+        return;
+    }
+    if (!expect_no_args(cursor))
+    {
+        return;
+    }
+
+    uint32_t a0;
+    const char *err = parse_dec_u32(tok, 1u, &a0);
+    if (err != NULL)
+    {
+        reply_err(err);
+        return;
+    }
+
+    printf("# read    : a0=%u data=0x%02x\n", (unsigned)a0, opm_read(a0 != 0u));
+    reply_ok();
 }
 
 static void cmd_delay(char **cursor)
@@ -1853,6 +1885,17 @@ static void process_line(char *line)
         {
             cmd_autoplay(&cursor);
         }
+        else if (tok_is(cmd, "reset"))
+        {
+            if (expect_no_args(&cursor))
+            {
+                if (!reject_while_playing())
+                {
+                    opm_reset();
+                    reply_ok();
+                }
+            }
+        }
         else if (tok_is(cmd, "help"))
         {
             if (expect_no_args(&cursor))
@@ -1873,15 +1916,7 @@ static void process_line(char *line)
         cmd_write(&cursor);
         break;
     case 'r':
-        if (expect_no_args(&cursor))
-        {
-            if (reject_while_playing())
-            {
-                break;
-            }
-            opm_reset();
-            reply_ok();
-        }
+        cmd_read(&cursor);
         break;
     case 'c':
         if (expect_no_args(&cursor))

@@ -117,8 +117,8 @@ void opm_clock_retune_up(uint32_t phim_hz)
 /*
  * データバスの向きを切り替える。
  *
- * 現状は書き込み専用なので常に出力だが、将来 /RD を使ってステータスや
- * レジスタを読み出すときは、ここを入力へ倒してから /RD を叩くことになる。
+ * 既定は出力（書き込み方向）で、読み出しの間だけ入力へ倒す。OPM に D0-D7 を
+ * 駆動させる前に必ず入力にしておくこと（バスの衝突を防ぐ）。
  */
 static void opm_bus_set_dir(bool out)
 {
@@ -173,9 +173,38 @@ void opm_write(uint8_t addr, uint8_t data)
     opm_bus_cycle(false, addr);
     busy_wait_us_32(OPM_T_ADDR_US);
 
-    /* データサイクル。BUSY 読み出しは未実装なので固定時間待つ。 */
+    /* データサイクル。BUSY は opm_read() で読めるが、書き込み経路では見ずに固定時間待つ。 */
     opm_bus_cycle(true, data);
     busy_wait_us_32(OPM_T_DATA_US);
+}
+
+/*
+ * /RD による 1 バイト読み出し。A0=1 がデータシート上のステータスレジスタ。
+ *
+ * 手順の並びがバス衝突の防止そのものなので崩さないこと。Pico 側を先に入力へ
+ * 倒してから OPM に駆動させ、OPM が手放すのを待ってから出力へ戻す。
+ */
+uint8_t opm_read(bool a0)
+{
+    opm_bus_set_dir(false);
+
+    /* A0 を確定させると同時に /CS を L にする（D0-D7 は入力中なので触らない） */
+    gpio_put_masked(OPM_MASK_A0 | OPM_MASK_CS, a0 ? OPM_MASK_A0 : 0u);
+    busy_wait_at_least_cycles(s_setup_cycles); /* t_SETUP */
+
+    gpio_clr_mask(OPM_MASK_RD);
+    busy_wait_us_32(OPM_T_RD_US);
+    uint32_t all = gpio_get_all();
+    gpio_set_mask(OPM_MASK_RD);
+
+    /* /RD を H に戻した後に /CS を H に戻す */
+    gpio_set_mask(OPM_MASK_CS);
+
+    /* OPM が D0-D7 を手放すのを待ってから出力へ戻す */
+    busy_wait_us_32(OPM_T_FLOAT_US);
+    opm_bus_set_dir(true);
+
+    return (uint8_t)((all >> OPM_PIN_D0) & 0xffu);
 }
 
 void opm_reset(void)

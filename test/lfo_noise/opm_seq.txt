@@ -1,4 +1,4 @@
-r
+reset
 d 100
 
 w 0f @NFRQ@ # NFRQ (00, 1f)
@@ -46,5 +46,5 @@ w 08 78     # KON ch0
 
 !capture @TIME@
 
-r
+reset
 d 100

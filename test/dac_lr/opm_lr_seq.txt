@@ -1,4 +1,4 @@
-r
+reset
 d 100
 
 # LFO は一切使わない。NFRQ / LFRQ / PMD / AMD / W は書かず、リセット直後の 0 のまま。
@@ -40,5 +40,5 @@ w 08 78     # KON ch0
 
 !capture @TIME@
 
-r
+reset
 d 100

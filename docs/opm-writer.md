@@ -41,14 +41,14 @@
 例（[test/lfo_noise/opm_seq.txt](../test/lfo_noise/opm_seq.txt) から抜粋）:
 
 ```
-r                       # ハードウェアリセット
+reset                   # ハードウェアリセット
 d 100
 w 0f @NFRQ@             # NFRQ (00, 1f)
 w 18 @LFRQ@             # LFRQ
 w 08 78                 # KEY ON
 !capture @TIME@
 w 08 00                 # KEY OFF
-r
+reset
 ```
 
 ## キャプチャの出力形式
@@ -137,7 +137,7 @@ DMA リングが溢れて overrun になる。
 | コマンド | 待ち時間 | 補足 |
 | --- | --- | --- |
 | `d <ms>` | 5 秒 + `<ms>` |  |
-| `r` / `c` | 10 秒 |  |
+| `reset` / `c` | 10 秒 |  |
 | `p` | 10 秒 | サブコマンドによらず `REPLY_TIMEOUT_S` 5 秒 + `PCM_DRAIN_TIMEOUT_S` 5 秒。`p 0` がリング残りを送り切るのを待つぶん（ファーム側上限 2 秒） |
 | その他 | 5 秒 |  |
 

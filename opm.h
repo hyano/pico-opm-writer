@@ -44,7 +44,7 @@
 #define OPM_PIN_A0   10 /* L=アドレスラッチ / H=データ書き込み */
 #define OPM_PIN_CS   11 /* チップセレクト（負論理） */
 #define OPM_PIN_WR   12 /* 書き込みストローブ（負論理） */
-#define OPM_PIN_RD   13 /* 読み出しストローブ（負論理）。現在は H 固定 */
+#define OPM_PIN_RD   13 /* 読み出しストローブ（負論理）。読み出し中だけ L */
 #define OPM_PIN_IC   14 /* ハードウェアリセット（負論理） */
 #define OPM_PIN_PHIM 15 /* マスタークロック（PIO 出力） */
 #define OPM_PIN_IRQ  16 /* 割り込み要求（負論理）。入力・レベル参照のみ */
@@ -55,6 +55,8 @@
 #define OPM_T_WR_US      1   /* /WR の L 期間 */
 #define OPM_T_ADDR_US    5   /* アドレスラッチ後の待機 */
 #define OPM_T_DATA_US    25  /* データ書き込み後の BUSY 待ち */
+#define OPM_T_RD_US      1   /* /RD の L 期間（データが出揃うまでを含む） */
+#define OPM_T_FLOAT_US   1   /* /RD を H に戻してからバスを出力へ戻すまで */
 #define OPM_T_IC_LOW_MS  10  /* /IC の L 保持時間 */
 #define OPM_T_IC_WAIT_MS 10  /* /IC を H に戻してから最初の書き込みまで */
 
@@ -62,6 +64,7 @@
 
 void opm_init(void);                        /* GPIO と PIO(φM) を初期化し /IC リセットを実行 */
 void opm_write(uint8_t addr, uint8_t data); /* 1 レジスタ書き込み（アドレス→データの 2 サイクル） */
+uint8_t opm_read(bool a0);                  /* /RD による 1 バイト読み出し（A0=1 がステータスレジスタ） */
 void opm_reset(void);                       /* /IC によるハードウェアリセット */
 void opm_clear(void);                       /* ソフトウェアによる全レジスタクリア */
 bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true = H = 非アサート） */

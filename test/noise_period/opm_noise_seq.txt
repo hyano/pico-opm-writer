@@ -1,4 +1,4 @@
-r
+reset
 d 100
 
 # ノイズを LFO に通さず直接 DAC へ出す。
@@ -51,5 +51,5 @@ w 08 7f     # KON ch7 全スロット
 
 !capture @TIME@
 
-r
+reset
 d 100
