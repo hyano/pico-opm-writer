@@ -217,30 +217,40 @@ void opm_reset(void)
 
 void opm_clear(void)
 {
-    /* 1. 全 8 チャンネルを KEY OFF */
+    /*
+     * 1. 全 32 スロットの D1L/RR を D1L=0 / RR=15（最速リリース）に。
+     *    KEY OFF より前に書くので、直前の音色の RR に関わらず即座に減衰する。
+     *    0xff が uint8_t の上限なので、ループ変数は uint32_t で回す。
+     */
+    for (uint32_t reg = 0xe0; reg <= 0xff; reg++)
+    {
+        opm_write((uint8_t)reg, 0x0f);
+    }
+
+    /* 2. 全 8 チャンネルを KEY OFF */
     for (uint8_t ch = 0; ch < 8; ch++)
     {
         opm_write(0x08, ch);
     }
 
-    /* 2. 全 32 スロットの TL を最小音量に */
+    /* 3. 全 32 スロットの TL を最小音量に */
     for (uint8_t reg = 0x60; reg <= 0x7f; reg++)
     {
         opm_write(reg, 0x7f);
     }
 
-    opm_write(0x0f, 0x00); /* 3. ノイズ off */
-    opm_write(0x14, 0x00); /* 4. タイマ / IRQ 停止 */
-    opm_write(0x01, 0x00); /* 5. LFO リセット解除 */
-    opm_write(0x18, 0x00); /* 6. LFO 周波数 */
+    opm_write(0x0f, 0x00); /* 4. ノイズ off */
+    opm_write(0x14, 0x00); /* 5. タイマ / IRQ 停止 */
+    opm_write(0x01, 0x00); /* 6. LFO リセット解除 */
+    opm_write(0x18, 0x00); /* 7. LFO 周波数 */
 
-    /* 7. 0x19 は bit7 で書き込み先が切り替わる。PMD(0x80) と AMD(0x00) の両方を消す。 */
+    /* 8. 0x19 は bit7 で書き込み先が切り替わる。PMD(0x80) と AMD(0x00) の両方を消す。 */
     opm_write(0x19, 0x80);
     opm_write(0x19, 0x00);
 
-    opm_write(0x1b, 0x00); /* 8. LFO 波形 / CT1・CT2 */
+    opm_write(0x1b, 0x00); /* 9. LFO 波形 / CT1・CT2 */
 
-    /* 9. RL / FB / CONNECT */
+    /* 10. RL / FB / CONNECT */
     for (uint8_t reg = 0x20; reg <= 0x27; reg++)
     {
         opm_write(reg, 0x00);
