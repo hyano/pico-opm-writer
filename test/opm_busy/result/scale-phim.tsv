@@ -1,0 +1,16 @@
+# phiM    : 4000000 Hz (clkdiv 18 + 0/256)
+# sys_clk : 144000000 Hz
+# preset  : 4  (vgm fixed)
+# i2s     : clkdiv 36 + 0/256  rate 62500 Hz  bck 2000000 Hz
+# capture : rate 62500 Hz
+OK
+# scale   : addr=0x60 data=0x7f sys=144000000 Hz
+# phim_hz	last1_ns	first0_ns	rise_ns	fall_ns
+3600000	17250	17875	0	17630
+3000000	4294967295	125	248	21406
+2400000	26375	27375	156	26851
+1800000	4294967295	250	726	36159
+1440000	4294967295	125	1078	45574
+1200000	4294967295	125	1439	54731
+# restored: phim=4000000 Hz
+OK

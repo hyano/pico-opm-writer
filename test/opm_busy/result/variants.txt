@@ -1,0 +1,90 @@
+===== A  現状  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=0 -DOPM_T_DATA_US=)
+# bench   : poll=0 defer=0 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	32004	0	32004
+2	34002	2001	32001
+5	37001	5000	32001
+10	42000	10000	32000
+15	47000	15000	32000
+20	52000	20000	32000
+30	62000	30000	32000
+50	82000	50000	32000
+# sample  : clka=896 measured=2039 us expected=2048 us
+# verify  : poll=0 defer=0 t_data=25us n=2048
+# worst   : clka=967 measured=890 us expected=912 us err=22 us
+# busy    : poll=0 defer=0 timeouts=0 polls_max=0
+===== B  t_data=18  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=0 -DOPM_T_DATA_US=18)
+# bench   : poll=0 defer=0 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	25006	0	25006
+2	27004	2000	25004
+5	30001	5000	25001
+10	35000	10000	25000
+15	40000	15000	25000
+20	45000	20000	25000
+30	55000	30000	25000
+50	75000	50000	25000
+# sample  : clka=896 measured=2045 us expected=2048 us
+# verify  : poll=0 defer=0 t_data=18us n=2048
+# worst   : clka=896 measured=2038 us expected=2048 us err=10 us
+# busy    : poll=0 defer=0 timeouts=0 polls_max=0
+===== C  ポーリング  (-DOPM_BUSY_POLL=1 -DOPM_BUSY_DEFER=0 -DOPM_T_DATA_US=)
+# bench   : poll=1 defer=0 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	25004	0	25004
+2	27004	2000	25004
+5	30001	5000	25001
+10	35001	10000	25001
+15	40000	15000	25000
+20	45000	20000	25000
+30	55000	30000	25000
+50	75000	50000	25000
+# sample  : clka=896 measured=2041 us expected=2048 us
+# verify  : poll=1 defer=0 t_data=25us n=2048
+# worst   : clka=967 measured=904 us expected=912 us err=8 us
+# busy    : poll=1 defer=0 timeouts=0 polls_max=15
+===== E  繰り延べ  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=1 -DOPM_T_DATA_US=)
+# bench   : poll=0 defer=1 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	32005	0	32005
+2	32000	2000	30000
+5	32000	5000	27000
+10	32001	10000	22001
+15	32001	15001	17000
+20	32000	20000	12000
+30	37001	30000	7001
+50	57000	50000	7000
+# sample  : clka=896 measured=2065 us expected=2048 us
+# verify  : poll=0 defer=1 t_data=25us n=2048
+# worst   : clka=896 measured=2060 us expected=2048 us err=12 us
+# busy    : poll=0 defer=1 timeouts=0 polls_max=0
+===== B+E t_data=18+繰り延べ  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=1 -DOPM_T_DATA_US=18)
+# bench   : poll=0 defer=1 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	25005	0	25005
+2	25001	2000	23001
+5	25000	5000	20000
+10	25000	10000	15000
+15	25000	15000	10000
+20	27000	20000	7000
+30	37000	30000	7000
+50	57000	50000	7000
+# sample  : clka=896 measured=2060 us expected=2048 us
+# verify  : poll=0 defer=1 t_data=18us n=2048
+# worst   : clka=997 measured=446 us expected=432 us err=14 us
+# busy    : poll=0 defer=1 timeouts=0 polls_max=0
+===== C+E ポーリング+繰り延べ  (-DOPM_BUSY_POLL=1 -DOPM_BUSY_DEFER=1 -DOPM_T_DATA_US=)
+# bench   : poll=1 defer=1 sys=144000000 Hz phim=4000000 Hz
+# work_us	iter_ns	spin_ns	write_ns
+0	25606	0	25606
+2	25805	2000	23805
+5	25928	5000	20928
+10	25800	10000	15800
+15	26000	15000	11000
+20	29000	20000	9000
+30	39000	30000	9000
+50	59000	50000	9000
+# sample  : clka=896 measured=2064 us expected=2048 us
+# verify  : poll=1 defer=1 t_data=25us n=2048
+# worst   : clka=896 measured=2068 us expected=2048 us err=20 us
+# busy    : poll=1 defer=1 timeouts=0 polls_max=15

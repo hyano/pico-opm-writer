@@ -1,0 +1,799 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fdc69d7..c6b4188 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -160,6 +160,22 @@ target_compile_definitions(pico-opm-writer PRIVATE BUTTON_ENABLED=${BUTTON_ENABL
+ set(STATS_PROFILE "0" CACHE STRING "per-service timing profile: 1 = on, 0 = off")
+ target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE})
+ 
++# ---- BUSY 調査用の一時コード（test/opm_busy/）。調査が済んだら削除する ----
++# OPM_DIAG    : `busy` 診断コマンドをリンクする
++# OPM_BUSY_POLL  : opm_write() の待ちを固定ウェイトから BUSY ポーリングへ
++# OPM_BUSY_DEFER : 待つ位置を「書き込み後」から「次にバスを触る直前」へ
++set(OPM_DIAG "0" CACHE STRING "OPM busy diagnostics command: 1 = on, 0 = off")
++set(OPM_BUSY_POLL "0" CACHE STRING "opm_write(): poll the BUSY flag instead of a fixed wait")
++set(OPM_BUSY_DEFER "0" CACHE STRING "opm_write(): defer the wait to the next bus access")
++target_compile_definitions(pico-opm-writer PRIVATE
++    OPM_DIAG=${OPM_DIAG}
++    OPM_BUSY_POLL=${OPM_BUSY_POLL}
++    OPM_BUSY_DEFER=${OPM_BUSY_DEFER})
++set(OPM_T_DATA_US "" CACHE STRING "override opm.h t_DATA (us)")
++if(NOT OPM_T_DATA_US STREQUAL "")
++    target_compile_definitions(pico-opm-writer PRIVATE OPM_T_DATA_US=${OPM_T_DATA_US})
++endif()
++
+ # FatFs 領域（内蔵フラッシュ）。通常は FLASH_FATFS_RESERVE_KB だけを指定する。
+ # ファームウェアに残す KiB を決めれば、そこから末尾の予約セクタの手前までが
+ # 自動で FatFs になる。オフセットとサイズをバイトで名指しすることもできる。
+diff --git a/cmake/release_config.cmake.in b/cmake/release_config.cmake.in
+index 0a69ad7..eefc6e4 100644
+--- a/cmake/release_config.cmake.in
++++ b/cmake/release_config.cmake.in
+@@ -31,6 +31,9 @@ set(REL_OPTIONS
+         "AUTOPLAY_ENABLED"         "@AUTOPLAY_ENABLED@"
+         "BUTTON_ENABLED"           "@BUTTON_ENABLED@"
+         "STATS_PROFILE"            "@STATS_PROFILE@"
++        "OPM_DIAG"                 "@OPM_DIAG@"
++        "OPM_BUSY_POLL"            "@OPM_BUSY_POLL@"
++        "OPM_BUSY_DEFER"           "@OPM_BUSY_DEFER@"
+         "YM3012_LOOPBACK"          "@YM3012_LOOPBACK@"
+         "FLASH_TOTAL_BYTES"        "@FLASH_TOTAL_BYTES@"
+         "FLASH_FATFS_OFFSET"       "@fatfs_offset@ (@fatfs_offset_hex@)"
+diff --git a/opm.c b/opm.c
+index 60b82eb..1177259 100644
+--- a/opm.c
++++ b/opm.c
+@@ -36,6 +36,8 @@ static uint32_t s_clock_hz_actual;
+ /* OPM_T_SETUP_NS 相当のシステムクロックサイクル数 */
+ static uint32_t s_setup_cycles;
+ 
++void opm_busy_flush(void);
++
+ /*
+  * φM の分周比と、それに付随する sys_clk 依存の値を算出する。
+  *
+@@ -104,12 +106,14 @@ static void opm_clock_start(void)
+ 
+ void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz)
+ {
++    opm_busy_flush(); /* φM を止める前に BUSY を明けさせる */
+     opm_clock_compute(sys_hz, phim_hz, false);
+     opm_clock_apply();
+ }
+ 
+ void opm_clock_retune_up(uint32_t phim_hz)
+ {
++    opm_busy_flush(); /* φM を止める前に BUSY を明けさせる */
+     opm_clock_compute(clock_get_hz(clk_sys), phim_hz, true);
+     opm_clock_apply();
+ }
+@@ -148,6 +152,90 @@ static void opm_bus_cycle(bool a0, uint8_t value)
+     gpio_set_mask(OPM_MASK_CS);
+ }
+ 
++/* ---- BUSY 待ち（test/opm_busy/ の調査用。既定はどちらも 0 = 従来動作） ---- */
++
++static void opm_read_enter(void);
++static uint8_t opm_read_once(bool a0);
++static void opm_read_leave(void);
++
++#if OPM_BUSY_POLL
++/*
++ * BUSY が立つ前に読むと即座に抜けて書き込みが化けるので、データサイクルから
++ * 最低これだけは空けてから最初のポーリングを行う。time_us_32() の分解能が 1us
++ * なので実際には 1〜2us になる。
++ */
++#define OPM_BUSY_ASSERT_US  2u
++/* チップ不在なら A0=1 の読みは直前に駆動した値を返す。bit7 が立っていると
++ * 永久に BUSY に見えるので、必ず打ち切って固定ウェイトへ落ちる。 */
++#define OPM_BUSY_TIMEOUT_US (2u * OPM_T_DATA_US)
++
++static uint32_t s_busy_timeouts;  /* 打ち切った回数 */
++static uint32_t s_busy_polls_max; /* 1 回の待ちで読んだ最大回数 */
++
++static void opm_busy_settle(uint32_t ref_us)
++{
++    while ((int32_t)(time_us_32() - (ref_us + OPM_BUSY_ASSERT_US)) < 0)
++    {
++        tight_loop_contents();
++    }
++
++    opm_read_enter();
++    uint32_t polls = 0;
++    bool timed_out = false;
++    while ((opm_read_once(true) & 0x80u) != 0u)
++    {
++        polls++;
++        if (time_us_32() - ref_us >= OPM_BUSY_TIMEOUT_US)
++        {
++            timed_out = true;
++            break;
++        }
++    }
++    opm_read_leave();
++
++    if (timed_out)
++    {
++        busy_wait_us_32(OPM_T_DATA_US);
++        s_busy_timeouts++;
++    }
++    if (polls > s_busy_polls_max)
++    {
++        s_busy_polls_max = polls;
++    }
++}
++#endif /* OPM_BUSY_POLL */
++
++#if OPM_BUSY_DEFER
++static uint32_t s_busy_ref_us; /* データサイクルを終えた時刻 */
++static bool s_busy_pending;
++
++/*
++ * 未消化の待ちを消化する。バスを触る前と、φM を止める / 張り替える前に必ず呼ぶ
++ * （φM が止まると BUSY が明けないまま書き込みが化ける）。
++ */
++void opm_busy_flush(void)
++{
++    if (!s_busy_pending)
++    {
++        return;
++    }
++    s_busy_pending = false;
++#if OPM_BUSY_POLL
++    opm_busy_settle(s_busy_ref_us);
++#else
++    /* time_us_32() は 71.6 分でラップするので符号付きの差分で比較する */
++    while ((int32_t)(time_us_32() - (s_busy_ref_us + OPM_T_DATA_US)) < 0)
++    {
++        tight_loop_contents();
++    }
++#endif
++}
++#else
++void opm_busy_flush(void)
++{
++}
++#endif /* OPM_BUSY_DEFER */
++
+ void opm_init(void)
+ {
+     /* 出力ピンをまとめて初期化。/CS・/WR・/RD・/IC は負論理なので H から始める。 */
+@@ -169,13 +257,25 @@ void opm_init(void)
+ 
+ void opm_write(uint8_t addr, uint8_t data)
+ {
++    opm_busy_flush(); /* OPM_BUSY_DEFER=0 なら空 */
++
+     /* アドレスサイクル */
+     opm_bus_cycle(false, addr);
+     busy_wait_us_32(OPM_T_ADDR_US);
+ 
+-    /* データサイクル。BUSY は opm_read() で読めるが、書き込み経路では見ずに固定時間待つ。 */
++    /* データサイクル */
+     opm_bus_cycle(true, data);
++
++#if OPM_BUSY_DEFER
++    /* 待たずに戻る。次にバスを触るときに opm_busy_flush() が消化する。 */
++    s_busy_ref_us = time_us_32();
++    s_busy_pending = true;
++#elif OPM_BUSY_POLL
++    opm_busy_settle(time_us_32());
++#else
++    /* BUSY は opm_read() で読めるが、書き込み経路では見ずに固定時間待つ。 */
+     busy_wait_us_32(OPM_T_DATA_US);
++#endif
+ }
+ 
+ /*
+@@ -183,11 +283,17 @@ void opm_write(uint8_t addr, uint8_t data)
+  *
+  * 手順の並びがバス衝突の防止そのものなので崩さないこと。Pico 側を先に入力へ
+  * 倒してから OPM に駆動させ、OPM が手放すのを待ってから出力へ戻す。
++ *
++ * 連続して読むとき（BUSY ポーリング）に方向切り替えを 1 往復で済ませられるよう、
++ * 「入る / 読む / 出る」の 3 つに分けてある。opm_read() はその 1 回ぶん。
+  */
+-uint8_t opm_read(bool a0)
++static void opm_read_enter(void)
+ {
+     opm_bus_set_dir(false);
++}
+ 
++static uint8_t opm_read_once(bool a0)
++{
+     /* A0 を確定させると同時に /CS を L にする（D0-D7 は入力中なので触らない） */
+     gpio_put_masked(OPM_MASK_A0 | OPM_MASK_CS, a0 ? OPM_MASK_A0 : 0u);
+     busy_wait_at_least_cycles(s_setup_cycles); /* t_SETUP */
+@@ -200,15 +306,27 @@ uint8_t opm_read(bool a0)
+     /* /RD を H に戻した後に /CS を H に戻す */
+     gpio_set_mask(OPM_MASK_CS);
+ 
++    return (uint8_t)((all >> OPM_PIN_D0) & 0xffu);
++}
++
++static void opm_read_leave(void)
++{
+     /* OPM が D0-D7 を手放すのを待ってから出力へ戻す */
+     busy_wait_us_32(OPM_T_FLOAT_US);
+     opm_bus_set_dir(true);
++}
+ 
+-    return (uint8_t)((all >> OPM_PIN_D0) & 0xffu);
++uint8_t opm_read(bool a0)
++{
++    opm_read_enter();
++    uint8_t v = opm_read_once(a0);
++    opm_read_leave();
++    return v;
+ }
+ 
+ void opm_reset(void)
+ {
++    opm_busy_flush();
+     gpio_clr_mask(OPM_MASK_IC);
+     sleep_ms(OPM_T_IC_LOW_MS);
+     gpio_set_mask(OPM_MASK_IC);
+@@ -276,3 +394,207 @@ bool opm_irq_level(void)
+ {
+     return gpio_get(OPM_PIN_IRQ);
+ }
++
++#if OPM_DIAG
++/* ---- BUSY 調査用（test/opm_busy/）。調査後に削除する ------------------- */
++
++/*
++ * 1 点の測定。opm_write() ではなくバス操作を直接並べるので、OPM_BUSY_POLL /
++ * OPM_BUSY_DEFER をどう焼いても測り方は同じになる。ポーリングで測ると
++ * ポーリング自身のバス操作が測定対象を乱すので、遅延を振って 1 回だけ読む。
++ */
++/*
++ * 掃引用のステータス読み。opm_read() をそのまま使うと t_RD の busy_wait_us_32(1)
++ * がタイマ境界へ丸めるので、サンプル時刻が 1us 単位に量子化されて分解能が
++ * 落ちる。ここではサイクル基準の待ちに置き換えて、サンプル時刻が delay の
++ * 連続関数になるようにしてある（バスの動かし方は opm_read() と同一）。
++ */
++static bool opm_diag_status_busy(void)
++{
++    uint32_t rd_cycles = (uint32_t)(((uint64_t)clock_get_hz(clk_sys) * OPM_T_RD_US + 999999u) / 1000000u);
++
++    opm_bus_set_dir(false);
++    gpio_put_masked(OPM_MASK_A0 | OPM_MASK_CS, OPM_MASK_A0);
++    busy_wait_at_least_cycles(s_setup_cycles);
++    gpio_clr_mask(OPM_MASK_RD);
++    busy_wait_at_least_cycles(rd_cycles);
++    uint32_t all = gpio_get_all();
++    gpio_set_mask(OPM_MASK_RD);
++    gpio_set_mask(OPM_MASK_CS);
++    busy_wait_us_32(OPM_T_FLOAT_US);
++    opm_bus_set_dir(true);
++
++    return ((all >> (OPM_PIN_D0 + 7)) & 1u) != 0u;
++}
++
++bool opm_diag_busy_at(uint8_t addr, uint8_t data, uint32_t delay_cycles)
++{
++    opm_busy_flush();
++    busy_wait_us_32(100); /* 直前の書き込みの BUSY を確実に明けさせる */
++
++    opm_bus_cycle(false, addr);
++    busy_wait_us_32(OPM_T_ADDR_US);
++    opm_bus_cycle(true, data);
++    busy_wait_at_least_cycles(delay_cycles);
++
++    return opm_diag_status_busy();
++}
++
++bool opm_diag_busy_at_addr(uint8_t addr, uint32_t delay_cycles)
++{
++    opm_busy_flush();
++    busy_wait_us_32(100);
++
++    opm_bus_cycle(false, addr);
++    busy_wait_at_least_cycles(delay_cycles);
++
++    return opm_diag_status_busy();
++}
++
++uint32_t opm_diag_read_ns(uint32_t n)
++{
++    opm_busy_flush();
++    busy_wait_us_32(100);
++    uint32_t t0 = time_us_32();
++    for (uint32_t i = 0; i < n; i++)
++    {
++        (void)opm_read(true);
++    }
++    uint32_t dt = time_us_32() - t0;
++    return (uint32_t)(((uint64_t)dt * 1000u) / n);
++}
++
++uint32_t opm_diag_poll_ns(uint32_t n)
++{
++    opm_busy_flush();
++    busy_wait_us_32(100);
++    uint32_t t0 = time_us_32();
++    opm_read_enter();
++    for (uint32_t i = 0; i < n; i++)
++    {
++        (void)opm_read_once(true);
++    }
++    opm_read_leave();
++    uint32_t dt = time_us_32() - t0;
++    return (uint32_t)(((uint64_t)dt * 1000u) / n);
++}
++
++/* TL を最小音量にする書き込み（opm_clear() が使う値）なので音は出ない */
++uint32_t opm_diag_write_ns(uint32_t n, uint32_t work_us)
++{
++    opm_busy_flush();
++    busy_wait_us_32(100);
++    uint32_t t0 = time_us_32();
++    for (uint32_t i = 0; i < n; i++)
++    {
++        opm_write(0x60u, 0x7fu);
++        if (work_us != 0u)
++        {
++            busy_wait_us_32(work_us);
++        }
++    }
++    opm_busy_flush(); /* 繰り延べた待ちも勘定に入れる */
++    uint32_t dt = time_us_32() - t0;
++    return (uint32_t)(((uint64_t)dt * 1000u) / n);
++}
++
++/* work_us だけを回したときの 1 回あたり。opm_diag_write_ns() から引く用。 */
++uint32_t opm_diag_spin_ns(uint32_t n, uint32_t work_us)
++{
++    uint32_t t0 = time_us_32();
++    for (uint32_t i = 0; i < n; i++)
++    {
++        if (work_us != 0u)
++        {
++            busy_wait_us_32(work_us);
++        }
++    }
++    uint32_t dt = time_us_32() - t0;
++    return (uint32_t)(((uint64_t)dt * 1000u) / n);
++}
++
++uint32_t opm_diag_busy_timeouts(void)
++{
++#if OPM_BUSY_POLL
++    return s_busy_timeouts;
++#else
++    return 0;
++#endif
++}
++
++uint32_t opm_diag_busy_polls_max(void)
++{
++#if OPM_BUSY_POLL
++    return s_busy_polls_max;
++#else
++    return 0;
++#endif
++}
++
++/*
++ * 書き込みが化けていないことの検証。
++ *
++ * OPM のレジスタは読み戻せないが、タイマ A の周期は書き込んだ CLKA の値
++ * そのもの（64 x (1024 - CLKA) / φM）なので、周期を測れば「チップが実際に
++ * 何を受け取ったか」が分かる。ウェイトを詰めて書き込みが化けれれば周期がずれる。
++ *
++ * 戻り値は測った中での最大の誤差 (us)。読み出しの往復ぶん数 us は必ず出るので、
++ * 「化けていない」の判定は CLKA 1 LSB ぶん（φM=4MHz で 16us）より十分小さいこと。
++ */
++uint32_t opm_diag_verify(uint32_t n, uint32_t *worst_clka, uint32_t *measured_us,
++                         uint32_t *expected_us)
++{
++    uint32_t worst = 0;
++    *worst_clka = 0;
++    *measured_us = 0;
++    *expected_us = 0;
++
++    for (uint32_t i = 0; i < n; i++)
++    {
++        /* 周期が 256us〜2048us に収まる範囲を舐める。
++         * これより短いと読み出しの往復（約 2us）に埋もれて測れない。
++         * CLKA が 1 だけ化けても周期は 16us（φM=4MHz）動くので判別できる。 */
++        uint32_t clka = 896u + (i * 71u) % 112u;
++
++        opm_write(0x10u, (uint8_t)(clka >> 2));
++        opm_write(0x11u, (uint8_t)(clka & 0x03u));
++        opm_write(0x14u, 0x10u); /* F-Reset A、LOAD A を落とす */
++        opm_write(0x14u, 0x05u); /* LOAD A + IRQEN A で走らせる（README §3.21 と同じ） */
++
++        uint32_t t0 = time_us_32();
++        uint32_t elapsed;
++        for (;;)
++        {
++            if ((opm_read(true) & 0x01u) != 0u)
++            {
++                elapsed = time_us_32() - t0;
++                break;
++            }
++            if (time_us_32() - t0 > 10000u)
++            {
++                elapsed = 0; /* 立たなかった */
++                break;
++            }
++        }
++
++        uint32_t expect =
++            (uint32_t)((64ull * (1024ull - clka) * 1000000ull) / opm_clock_hz_actual());
++        uint32_t err = (elapsed > expect) ? (elapsed - expect) : (expect - elapsed);
++        if (err > worst)
++        {
++            worst = err;
++            *worst_clka = clka;
++            *measured_us = elapsed;
++            *expected_us = expect;
++        }
++    }
++
++    opm_write(0x14u, 0x00u);
++    return worst;
++}
++
++uint32_t opm_diag_sys_hz(void)
++{
++    return clock_get_hz(clk_sys);
++}
++#endif /* OPM_DIAG */
+diff --git a/opm.h b/opm.h
+index f504678..804cf7d 100644
+--- a/opm.h
++++ b/opm.h
+@@ -49,12 +49,26 @@
+ #define OPM_PIN_PHIM 15 /* マスタークロック（PIO 出力） */
+ #define OPM_PIN_IRQ  16 /* 割り込み要求（負論理）。入力・レベル参照のみ */
+ 
++/* ---- BUSY 調査用のビルドスイッチ（test/opm_busy/）。調査後に削除する ---- */
++
++#ifndef OPM_DIAG
++#define OPM_DIAG 0
++#endif
++#ifndef OPM_BUSY_POLL
++#define OPM_BUSY_POLL 0
++#endif
++#ifndef OPM_BUSY_DEFER
++#define OPM_BUSY_DEFER 0
++#endif
++
+ /* ---- タイミング定数 ---------------------------------------------------- */
+ 
+ #define OPM_T_SETUP_NS   100 /* データ確定から /WR 立ち下がりまで */
+ #define OPM_T_WR_US      1   /* /WR の L 期間 */
+ #define OPM_T_ADDR_US    5   /* アドレスラッチ後の待機 */
++#ifndef OPM_T_DATA_US
+ #define OPM_T_DATA_US    25  /* データ書き込み後の BUSY 待ち */
++#endif
+ #define OPM_T_RD_US      1   /* /RD の L 期間（データが出揃うまでを含む） */
+ #define OPM_T_FLOAT_US   1   /* /RD を H に戻してからバスを出力へ戻すまで */
+ #define OPM_T_IC_LOW_MS  10  /* /IC の L 保持時間 */
+@@ -68,6 +82,7 @@ uint8_t opm_read(bool a0);                  /* /RD による 1 バイト読み
+ void opm_reset(void);                       /* /IC によるハードウェアリセット */
+ void opm_clear(void);                       /* ソフトウェアによる全レジスタクリア */
+ bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true = H = 非アサート） */
++void opm_busy_flush(void);                  /* 未消化の BUSY 待ちを消化する（OPM_BUSY_DEFER=0 なら空） */
+ 
+ uint32_t opm_clock_hz_actual(void); /* 実際に生成されている φM 周波数 */
+ uint32_t opm_clock_div_int(void);   /* PIO 分周比の整数部 */
+@@ -86,4 +101,26 @@ uint32_t opm_clock_div_frac(void);  /* PIO 分周比の小数部（/256） */
+ void opm_clock_retune_for(uint32_t sys_hz, uint32_t phim_hz);
+ void opm_clock_retune_up(uint32_t phim_hz);
+ 
++#if OPM_DIAG
++/* ---- BUSY 調査用（test/opm_busy/）。調査後に削除する ------------------- */
++
++/* 1 レジスタ書き込みを行い、データサイクルの delay_cycles 後にステータスを読む。
++ * 戻り値が BUSY (bit7)。opm_write() ではなくバス操作を直接使うので、
++ * OPM_BUSY_POLL / OPM_BUSY_DEFER の設定に関わらず同じ測り方になる。 */
++bool opm_diag_busy_at(uint8_t addr, uint8_t data, uint32_t delay_cycles);
++/* アドレスサイクル (A0=0) だけを行い、その delay_cycles 後にステータスを読む */
++bool opm_diag_busy_at_addr(uint8_t addr, uint32_t delay_cycles);
++
++uint32_t opm_diag_read_ns(uint32_t n);  /* opm_read() 1 回の実所要時間 (ns) */
++uint32_t opm_diag_poll_ns(uint32_t n);  /* ポーリング 1 回 = opm_read_once() の実所要時間 (ns) */
++uint32_t opm_diag_write_ns(uint32_t n, uint32_t work_us); /* 書き込み + work_us の 1 回あたり (ns) */
++uint32_t opm_diag_spin_ns(uint32_t n, uint32_t work_us);  /* work_us だけの 1 回あたり (ns) */
++
++uint32_t opm_diag_busy_timeouts(void);  /* ポーリングを打ち切った回数 */
++uint32_t opm_diag_busy_polls_max(void); /* 1 回の待ちで読んだ最大回数 */
++uint32_t opm_diag_verify(uint32_t n, uint32_t *worst_clka, uint32_t *measured_us,
++                         uint32_t *expected_us); /* タイマ A の周期で書き込みを検証 */
++uint32_t opm_diag_sys_hz(void);
++#endif /* OPM_DIAG */
++
+ #endif /* OPM_H */
+diff --git a/pico-opm-writer.c b/pico-opm-writer.c
+index 40ea48f..30c7f9f 100644
+--- a/pico-opm-writer.c
++++ b/pico-opm-writer.c
+@@ -1849,6 +1849,272 @@ static void cmd_selftest(void)
+ }
+ 
+ /* 1 行を処理する。空行とコメント行は無応答。 */
++#if OPM_DIAG
++/* ---- BUSY 調査用（test/opm_busy/）。調査後に削除する ------------------- */
++
++#define DIAG_STEP_NS 125u
++
++static uint32_t diag_cycles_for_ns(uint32_t ns)
++{
++    return (uint32_t)(((uint64_t)ns * opm_diag_sys_hz()) / 1000000000u);
++}
++
++/*
++ * delay を 0 から max_ns まで振り、各点で reps 回測って BUSY=1 だった回数を出す。
++ * last_all1_ns / first_all0_ns に境界を返す（見つからなければ UINT32_MAX）。
++ */
++static uint32_t s_diag_rise_ns; /* BUSY が立つまでの期待値 */
++static uint32_t s_diag_fall_ns; /* BUSY が落ちるまでの期待値 */
++
++static void diag_sweep(uint8_t addr, uint8_t data, bool addr_only, uint32_t max_ns,
++                       uint32_t reps, bool verbose, uint32_t *last_all1_ns,
++                       uint32_t *first_all0_ns)
++{
++    *last_all1_ns = UINT32_MAX;
++    *first_all0_ns = UINT32_MAX;
++    uint64_t area1 = 0;    /* sum P(BUSY)  = E[fall] - E[rise] */
++    uint64_t lead0 = 0;    /* 立ち上がる前の sum (1-P) = E[rise] */
++    bool risen = false;
++
++    for (uint32_t ns = 0; ns <= max_ns; ns += DIAG_STEP_NS)
++    {
++        uint32_t cycles = diag_cycles_for_ns(ns);
++        uint32_t busy = 0;
++        for (uint32_t i = 0; i < reps; i++)
++        {
++            bool b = addr_only ? opm_diag_busy_at_addr(addr, cycles)
++                               : opm_diag_busy_at(addr, data, cycles);
++            if (b)
++            {
++                busy++;
++            }
++        }
++        if (busy == reps && *first_all0_ns == UINT32_MAX)
++        {
++            *last_all1_ns = ns;
++        }
++        if (busy == 0u && *first_all0_ns == UINT32_MAX && ns != 0u)
++        {
++            *first_all0_ns = ns;
++        }
++        area1 += busy;
++        tud_task(); /* 長い掃引の間も USB を回す（回さないとホストが切断する） */
++        if (busy == reps)
++        {
++            risen = true;
++        }
++        if (!risen)
++        {
++            lead0 += (reps - busy);
++        }
++        if (verbose)
++        {
++            printf("%u\t%u\t%u\n", (unsigned)ns, (unsigned)busy, (unsigned)reps);
++        }
++    }
++    s_diag_rise_ns = (uint32_t)((lead0 * DIAG_STEP_NS) / reps);
++    s_diag_fall_ns = s_diag_rise_ns + (uint32_t)((area1 * DIAG_STEP_NS) / reps);
++}
++
++static void diag_report_bounds(const char *label, uint32_t last1, uint32_t first0)
++{
++    printf("# %-10s: last BUSY=1 %u ns / first BUSY=0 %u ns\n", label,
++           (unsigned)last1, (unsigned)(first0 == UINT32_MAX ? 0u : first0));
++}
++
++static void cmd_busy(char **cursor)
++{
++    char *sub = next_token(cursor);
++    if (sub == NULL)
++    {
++        reply_err("wrong arity");
++        return;
++    }
++
++    if (tok_is(sub, "sweep") || tok_is(sub, "addr"))
++    {
++        bool addr_only = tok_is(sub, "addr");
++        char *ta = next_token(cursor);
++        uint8_t a = 0x60u, d = 0x7fu;
++        if (ta != NULL)
++        {
++            const char *err = parse_hex_u8(ta, &a);
++            if (err != NULL) { reply_err(err); return; }
++        }
++        if (!addr_only)
++        {
++            char *td = next_token(cursor);
++            if (td != NULL)
++            {
++                const char *err = parse_hex_u8(td, &d);
++                if (err != NULL) { reply_err(err); return; }
++            }
++        }
++
++        uint32_t max_ns = 30000u;
++        char *tm = next_token(cursor);
++        if (tm != NULL)
++        {
++            uint32_t v;
++            const char *err = parse_dec_u32(tm, 200000u, &v);
++            if (err != NULL) { reply_err(err); return; }
++            max_ns = v;
++        }
++
++        uint32_t last1, first0;
++        printf("# sweep   : addr=0x%02x data=0x%02x %s sys=%u Hz phim=%u Hz\n",
++               a, d, addr_only ? "(address cycle only)" : "", (unsigned)opm_diag_sys_hz(),
++               (unsigned)opm_clock_hz_actual());
++        puts("# delay_ns\tbusy\treps");
++        diag_sweep(a, d, addr_only, max_ns, 32u, true, &last1, &first0);
++        diag_report_bounds("bounds", last1, first0);
++        printf("# expect  : rise %u ns  fall %u ns  width %u ns\n",
++               (unsigned)s_diag_rise_ns, (unsigned)s_diag_fall_ns,
++               (unsigned)(s_diag_fall_ns - s_diag_rise_ns));
++        opm_clear();
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "regs"))
++    {
++        static const uint8_t regs[] = {0x01u, 0x08u, 0x0fu, 0x12u, 0x14u, 0x18u,
++                                       0x1bu, 0x20u, 0x28u, 0x38u, 0x60u, 0xe0u};
++        static const uint8_t vals[] = {0x00u, 0x08u, 0x00u, 0xffu, 0x00u, 0x00u,
++                                       0x00u, 0x00u, 0x4au, 0x00u, 0x7fu, 0x0fu};
++        printf("# regs    : sys=%u Hz phim=%u Hz\n", (unsigned)opm_diag_sys_hz(),
++               (unsigned)opm_clock_hz_actual());
++        puts("# addr\tdata\tlast1_ns\tfirst0_ns\trise_ns\tfall_ns");
++        for (uint32_t i = 0; i < count_of(regs); i++)
++        {
++            uint32_t last1, first0;
++            diag_sweep(regs[i], vals[i], false, 30000u, 32u, false, &last1, &first0);
++            printf("0x%02x\t0x%02x\t%u\t%u\t%u\t%u\n", regs[i], vals[i], (unsigned)last1,
++                   (unsigned)(first0 == UINT32_MAX ? 0u : first0),
++                   (unsigned)s_diag_rise_ns, (unsigned)s_diag_fall_ns);
++        }
++        opm_clear();
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "phim"))
++    {
++        char *th = next_token(cursor);
++        if (th == NULL) { reply_err("wrong arity"); return; }
++        uint32_t hz;
++        const char *err = parse_dec_u32(th, 8000000u, &hz);
++        if (err != NULL) { reply_err(err); return; }
++        if (hz < 100000u) { reply_err("out of range"); return; }
++        opm_clock_retune_for(opm_diag_sys_hz(), hz);
++        busy_wait_us_32(1000);
++        printf("# phim    : %u Hz (clkdiv %u + %u/256)\n", (unsigned)opm_clock_hz_actual(),
++               (unsigned)opm_clock_div_int(), (unsigned)opm_clock_div_frac());
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "scale"))
++    {
++        /*
++         * φM を振って境界を測る。sys_clk は動かさないので読み出し経路のオフセットは
++         * 一定のまま、境界 b(φM) = N/φM - offset が 1/φM の 1 次式になる。
++         * 傾きから BUSY の φM サイクル数 N が、切片からオフセットが出る。
++         */
++        /* φM 周期が 1us（タイマの刻み）と整合すると位相が固定されて偏るので、
++         * 144MHz の整数分周のうち周期が割り切れないものを選ぶ。 */
++        static const uint32_t phim[] = {3600000u, 3000000u, 2400000u, 1800000u,
++                                        1440000u, 1200000u};
++        uint32_t sys_hz = opm_diag_sys_hz();
++        printf("# scale   : addr=0x60 data=0x7f sys=%u Hz\n", (unsigned)sys_hz);
++        puts("# phim_hz\tlast1_ns\tfirst0_ns\trise_ns\tfall_ns");
++        for (uint32_t i = 0; i < count_of(phim); i++)
++        {
++            uint32_t last1, first0;
++            opm_clock_retune_for(sys_hz, phim[i]);
++            busy_wait_us_32(1000);
++            /* 100 φM サイクルぶんまで見れば足りる */
++            uint32_t max_ns = (uint32_t)((100ull * 1000000000ull) / phim[i]);
++            diag_sweep(0x60u, 0x7fu, false, max_ns, 64u, false, &last1, &first0);
++            printf("%u\t%u\t%u\t%u\t%u\n", (unsigned)opm_clock_hz_actual(),
++                   (unsigned)last1, (unsigned)(first0 == UINT32_MAX ? 0u : first0),
++                   (unsigned)s_diag_rise_ns, (unsigned)s_diag_fall_ns);
++        }
++        opm_clock_retune_for(sys_hz, OPM_CLOCK_HZ);
++        busy_wait_us_32(1000);
++        opm_clear();
++        printf("# restored: phim=%u Hz\n", (unsigned)opm_clock_hz_actual());
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "read"))
++    {
++        printf("# read    : opm_read() %u ns  opm_read_once() %u ns\n",
++               (unsigned)opm_diag_read_ns(2000u), (unsigned)opm_diag_poll_ns(2000u));
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "bench"))
++    {
++        static const uint32_t work[] = {0u, 2u, 5u, 10u, 15u, 20u, 30u, 50u};
++        printf("# bench   : poll=%d defer=%d sys=%u Hz phim=%u Hz\n", OPM_BUSY_POLL,
++               OPM_BUSY_DEFER, (unsigned)opm_diag_sys_hz(),
++               (unsigned)opm_clock_hz_actual());
++        puts("# work_us\titer_ns\tspin_ns\twrite_ns");
++        for (uint32_t i = 0; i < count_of(work); i++)
++        {
++            uint32_t iter = opm_diag_write_ns(2000u, work[i]);
++            uint32_t spin = opm_diag_spin_ns(2000u, work[i]);
++            printf("%u\t%u\t%u\t%u\n", (unsigned)work[i], (unsigned)iter, (unsigned)spin,
++                   (unsigned)(iter > spin ? iter - spin : 0u));
++        }
++        opm_clear();
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "verify"))
++    {
++        uint32_t n = 512u;
++        char *tn = next_token(cursor);
++        if (tn != NULL)
++        {
++            uint32_t v;
++            const char *err = parse_dec_u32(tn, 100000u, &v);
++            if (err != NULL) { reply_err(err); return; }
++            n = v;
++        }
++        uint32_t clka = 0, meas = 0, exp = 0;
++        /* 1 回だけ単発で測って表示（動いていることの確認用） */
++        uint32_t c1 = 0, m1 = 0, e1 = 0;
++        (void)opm_diag_verify(1u, &c1, &m1, &e1);
++        printf("# sample  : clka=%u measured=%u us expected=%u us\n", (unsigned)c1,
++               (unsigned)m1, (unsigned)e1);
++        uint32_t worst = opm_diag_verify(n, &clka, &meas, &exp);
++        printf("# verify  : poll=%d defer=%d t_data=%dus n=%u\n", OPM_BUSY_POLL,
++               OPM_BUSY_DEFER, OPM_T_DATA_US, (unsigned)n);
++        printf("# worst   : clka=%u measured=%u us expected=%u us err=%u us\n",
++               (unsigned)clka, (unsigned)meas, (unsigned)exp, (unsigned)worst);
++        opm_clear();
++        reply_ok();
++        return;
++    }
++
++    if (tok_is(sub, "stat"))
++    {
++        printf("# busy    : poll=%d defer=%d timeouts=%u polls_max=%u\n", OPM_BUSY_POLL,
++               OPM_BUSY_DEFER, (unsigned)opm_diag_busy_timeouts(),
++               (unsigned)opm_diag_busy_polls_max());
++        reply_ok();
++        return;
++    }
++
++    reply_err("unknown command");
++}
++#endif /* OPM_DIAG */
++
+ static void process_line(char *line)
+ {
+     char *cursor = line;
+@@ -1896,6 +2162,12 @@ static void process_line(char *line)
+                 }
+             }
+         }
++#if OPM_DIAG
++        else if (tok_is(cmd, "busy"))
++        {
++            cmd_busy(&cursor);
++        }
++#endif
+         else if (tok_is(cmd, "help"))
+         {
+             if (expect_no_args(&cursor))

@@ -1,0 +1,40 @@
+===== A  現状  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=0 -DOPM_T_DATA_US=)
+# CPU     : 40% (max 40%)   USB 5%
+# I2S     : depth 929/1024 frames  MIN 854  UNDERRUN 0
+# OVERRUN : 0   E0 : 0   RXSTALL : 0
+# RATE    : 62471 frames/s (expect 62500)
+# LOOP    : 650519 passes/s
+# SVCTIME : pcm8 22543  cap 2607  i2s 25699  vgm 5380  mdx 49026  sto 106  us per s
+# MDX TICK: @t 213  11008 us  reslip 0
+# MDX PCM : on  1/8 ch  mask 01  keyon 142  miss 0  reads 205  CLIP 0
+# SEQ LAG : max 171 us
+===== B  t_data=18  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=0 -DOPM_T_DATA_US=18)
+# CPU     : 40% (max 40%)   USB 5%
+# I2S     : depth 994/1024 frames  MIN 872  UNDERRUN 0
+# OVERRUN : 0   E0 : 0   RXSTALL : 0
+# RATE    : 62493 frames/s (expect 62500)
+# LOOP    : 655728 passes/s
+# SVCTIME : pcm8 22463  cap 2629  i2s 25715  vgm 5457  mdx 41788  sto 106  us per s
+# MDX TICK: @t 213  11008 us  reslip 0
+# MDX PCM : on  1/8 ch  mask 01  keyon 143  miss 0  reads 206  CLIP 0
+# SEQ LAG : max 125 us
+===== B+E t_data=18+繰り延べ  (-DOPM_BUSY_POLL=0 -DOPM_BUSY_DEFER=1 -DOPM_T_DATA_US=18)
+# CPU     : 40% (max 40%)   USB 5%
+# I2S     : depth 959/1024 frames  MIN 873  UNDERRUN 0
+# OVERRUN : 0   E0 : 0   RXSTALL : 0
+# RATE    : 62492 frames/s (expect 62500)
+# LOOP    : 657484 passes/s
+# SVCTIME : pcm8 22525  cap 2800  i2s 25699  vgm 5563  mdx 38778  sto 123  us per s
+# MDX TICK: @t 213  11008 us  reslip 0
+# MDX PCM : on  1/8 ch  mask 01  keyon 143  miss 0  reads 205  CLIP 0
+# SEQ LAG : max 177 us
+===== C  ポーリング (-DOPM_BUSY_POLL=1 -DOPM_BUSY_DEFER=0)
+# CPU     : 40% (max 40%)   USB 6%
+# I2S     : depth 962/1024 frames  MIN 869  UNDERRUN 0
+# OVERRUN : 0   E0 : 0   RXSTALL : 0
+# RATE    : 62504 frames/s (expect 62500)
+# LOOP    : 622634 passes/s
+# SVCTIME : pcm8 22578  cap 2574  i2s 25763  vgm 2621  mdx 44057  sto 190  us per s
+# MDX TICK: @t 213  11008 us  reslip 0
+# MDX PCM : on  1/8 ch  mask 01  keyon 143  miss 0  reads 207  CLIP 0
+# SEQ LAG : max 125 us
