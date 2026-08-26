@@ -1331,7 +1331,8 @@ VGM / MDX を鳴らしたままステータスを覗ける。
 
 **`w` の BUSY 待ちには使っていない。** `opm_write()` はデータサイクル後に固定時間
 （`OPM_T_DATA_US` = 25µs）待つ方式のままで、ステータスはポーリングしない
-（[docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)）。
+（[docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)、
+[test/opm_busy/](test/opm_busy/README.md)）。
 
 ## 4. PCM 出力
 
@@ -2122,8 +2123,9 @@ PCM キャプチャ（`p 1`）と I2S 出力は再生中も動く。`mdx play` �
 （一部の機能だけ MXDRV 2.06+16 Rel.3+25。[§12](#12-ライセンス)）。違うのは 1 点だけ。
 
 **BUSY 待ちをしない。** MXDRV は書き込みのたびに OPM のステータスレジスタを読んで
-bit7 が下りるのを待つが、本機はデータバスが出力専用（`/RD` は H 固定）でステータスを
-読めない。代わりに固定ウェイト（アドレス後 5µs / データ後 25µs、合計約 32µs）を使う。
+bit7 が下りるのを待つが、本機は固定ウェイト（アドレス後 5µs / データ後 25µs、
+合計約 32µs）で代える。ステータス自体は [`r 1`](#321-r読み出し) で読めるが、
+書き込み経路では見ない（[test/opm_busy/](test/opm_busy/README.md)）。
 X68000 実機より遅い方向なので、詰まるとすれば書き込みが間に合わない側に出る。
 `s` の `MDX TICK` の `reslip` と I2S のアンダーランで検出できる。
 
@@ -2303,6 +2305,7 @@ OK
 | [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形（`LFRQ` / `NFRQ` の掃引） |
 | [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのもの（NE でノイズを直接 DAC へ出す） |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係 |
+| [test/opm_busy/](test/opm_busy/README.md) | BUSY フラグと `opm_write()` の待ち時間 |
 
 ## 11. 将来の拡張（本仕様の範囲外）
 
@@ -2315,8 +2318,8 @@ OK
   いま鳴っている曲は CDC #0 でしか分からない）
 - 自動再生の設定（曲順・ループ回数・フェード）のフラッシュへの保存。現在は電源を
   入れ直すと既定値に戻る
-- `/RD` を使ったステータス（BUSY）ポーリングによる待ち時間の最適化。配線と
-  データバスの向き切り替え（`opm_bus_set_dir()`）は用意してあるが、読み出し自体は未実装
+- `opm_write()` の固定ウェイトの短縮。`t_ADDR`（5µs）と `t_WR`（1µs）は仮置きの値で、
+  最小値を測っていない（[test/opm_busy/](test/opm_busy/README.md)）
 - `/IRQ` の割り込み処理。現在はレベルを参照できるだけ（`s` の `IRQ`）
 - バス書き込みの PIO 化と FIFO による非同期キューイング
 - 2 個目の OPM / 他の Yamaha 音源チップ (OPN 系) への対応
