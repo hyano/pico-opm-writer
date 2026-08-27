@@ -26,7 +26,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
 | `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b の仕様に準拠**（一部の機能のみ 2.06+16 Rel.3+25。ソースは同梱していない） |
-| `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない** |
+| `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない**。**発音状態を変える関数は `flush_now()` でミックスリングを実時刻まで描き切ってから変える**（これが FM との発音時刻を合わせている。[test/pcm8_sync/](test/pcm8_sync/README.md)） |
 | `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。フェードアウトは `ym3012_fade_start()` の出力ゲインで作るので **I2S と USB キャプチャにしか効かない**（YM3012 のアナログ出力は素通り） |
 | `button.c` / `button.h` | GP21 (SW1) / GP22 (SW2) の取り込み。デバウンス・短押し / 長押しの状態機械・深さ 1 のメールボックス。**autoplay も storage も知らない**（`service_all()` が再入的に呼ばれるため、消化は `pico-opm-writer.c` の `button_dispatch()` がメインループのトップレベルで行う）。SW3 は RUN 端子でファームからは見えない |
 | `led.c` / `led.h` | LED 表示 |
@@ -65,6 +65,7 @@ KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitigno
 | [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`、README に貼る図は `plot_lfo.py` が `fig/` へ生成。`wav_w1/`（矩形）は**意図的にスコープ外**で、一次データを残すだけで解析しない（README §4.11） |
 | [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのものの調査。NE (`0x0F` bit7) でノイズを ch7 の C2 に直接出すと **DAC 出力が 2 値**になり、符号列がノイズ発生器のビット列そのものになる |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係。**L と R は同一にならない**ので、波形解析には片側だけを使う |
+| [test/pcm8_sync/](test/pcm8_sync/README.md) | FM と ADPCM の発音タイミング。**ADPCM は自分でフレーム番号を選ぶので、束ねと間引きのぶんだけ FM より早く出ていた**（実曲で最大 2.0ms）。`flush_now()` で発音の直前に前線を実時刻へ寄せて 0 にした。測定用の MDX / PDX は `gen_testdata.py` が作り、診断コードは `diag.patch` に残してあり本体には入っていない |
 | [test/opm_busy/](test/opm_busy/README.md) | BUSY フラグと `opm_write()` の待ち時間。**BUSY は書き込みから 67 φM サイクルで落ち、レジスタにもチップの状態にも依存しない**ので、ポーリングは φM から待ち時間を算出するのに対して優位が無い。調査に使った診断コードは `diag.patch` に残してあり、本体には入っていない |
 
 ## 開発上の約束
@@ -305,13 +306,15 @@ ninja -C build release
 - `autoplay status` / `autoplay list` コマンド — 自動再生の状態とプレイリスト
 - `s 0` — 統計をリセット
 
-**ホスト側スクリプトの検証**は次の 4 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
+**ホスト側スクリプトの検証**は次の 6 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
 
 ```bash
 ./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（30 秒 / 47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
 ./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（15 秒 / 46 ケース）
 ./test/noise_period/analyze_noise.py --self-test # ノイズ発生器の周期推定の自己検証（1 秒 / 14 ケース）
+./test/pcm8_sync/analyze_sync.py --self-test # 立ち上がり検出と対応づけの自己検証（1 秒 / 15 ケース）
+./test/pcm8_sync/gen_testdata.py --self-test # 生成する MDX / PDX の書式の自己検証（1 秒 / 27 ケース）
 ```
 
 **実機調査**：`tools/opm-writer.py` は `test/` の掃引スクリプトをそのまま実行できる。

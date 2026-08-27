@@ -1,0 +1,11 @@
+# FM (右) と ADPCM (左) を同じ tick でキーオンし続ける曲を鳴らして取り込む。
+# @MDX@ には SYNC.MDX（quiet）か SYNC2.MDX（busy）を渡す。
+# どちらも gen_testdata.py が作り、SYNC.PDX ともども /MDX/ へ置いてある。
+
+mdx stop
+mdx pcm on              # ADPCM を FM に足す（これが無いと左は無音）
+mdx play @MDX@          # 6 clock (24.58ms) ごとに両方をキーオンし続ける
+
+!capture @TIME@
+
+mdx stop

@@ -1,0 +1,4 @@
+# gen_testdata.py が作る一次データ。実行すればいつでも同じものが出る。
+SYNC.MDX
+SYNC2.MDX
+SYNC.PDX

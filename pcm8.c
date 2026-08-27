@@ -565,31 +565,16 @@ void pcm8_init(void)
     ym3012_set_mix_ready(s_rendered_total);
 }
 
-bool __not_in_flash_func(pcm8_service)(void)
+/*
+ * フレーム番号 w まで描く。戻り値は実際に発音していたか。
+ *
+ * **描くものが無いときは s_sounding を触らない。** 0 フレームの呼び出しで
+ * 落としてしまうと、束ねの判定（pcm8_service()）が毎回「無音」と見て
+ * まとめずに描くようになる。
+ */
+static bool __not_in_flash_func(render_upto)(uint64_t w)
 {
-    uint64_t w = ym3012_write_total();
     if (s_rendered_total >= w)
-    {
-        return false;
-    }
-
-    uint64_t behind = w - s_rendered_total;
-    if (behind > PCM8_MIX_FRAMES)
-    {
-        /*
-         * リング 1 周ぶんより遅れた（フラッシュ書き込みなどでメインループが
-         * 止まった）。追いつこうとしても読まれない領域を描くだけなので、
-         * 無音で埋めて位置を張り直す。
-         */
-        pcm8_resync();
-        return false;
-    }
-
-    /*
-     * 鳴っているあいだはある程度まとめて描く。無音のときはブロックの支度そのものを
-     * しないので（リング全体が既に 0）、束ねずに毎回進めてよい。
-     */
-    if (s_sounding && behind < PCM8_BATCH_FRAMES)
     {
         return false;
     }
@@ -621,6 +606,67 @@ bool __not_in_flash_func(pcm8_service)(void)
         s_clip_scanned = s_rendered_total - PCM8_MIX_FRAMES;
     }
     return sounded;
+}
+
+/*
+ * 発音状態を変える前に、いまこの瞬間のフレーム番号まで描き切る。
+ *
+ * **これが FM との時間関係を決めている。** レンダリング前線 s_rendered_total は
+ * 束ね（PCM8_BATCH_FRAMES）と音声チェーンの間引き（AUDIO_SERVICE_INTERVAL_US）の
+ * ぶんだけ「今」より後ろにある。そこへキーオンを描き込むと、その音は**過去の
+ * フレーム番号から**鳴り始める。FM は opm_write() した瞬間の音がそのフレーム番号に
+ * 入るので、ADPCM だけが早く出ることになる。前線をここで実時刻へ寄せておけば、
+ * 続く発音は正しいフレーム番号から始まる。
+ *
+ * **ym3012_ring_poll() を呼ぶのが肝。** これが無いと ym3012_write_total() は直前の
+ * 音声チェーン（最大 AUDIO_SERVICE_INTERVAL_US 前）の値のままで、その分のずれが残る。
+ * 差分を積むだけの関数なので何度呼んでも安全。
+ */
+static void __not_in_flash_func(flush_now)(void)
+{
+    ym3012_ring_poll();
+    uint64_t w = ym3012_write_total();
+    if (w > s_rendered_total && w - s_rendered_total > PCM8_MIX_FRAMES)
+    {
+        pcm8_resync(); /* リング 1 周ぶんより遅れた。追いつかずに張り直す。 */
+        return;
+    }
+    (void)render_upto(w);
+}
+
+bool __not_in_flash_func(pcm8_service)(void)
+{
+    uint64_t w = ym3012_write_total();
+    if (s_rendered_total >= w)
+    {
+        return false;
+    }
+
+    uint64_t behind = w - s_rendered_total;
+    if (behind > PCM8_MIX_FRAMES)
+    {
+        /*
+         * リング 1 周ぶんより遅れた（フラッシュ書き込みなどでメインループが
+         * 止まった）。追いつこうとしても読まれない領域を描くだけなので、
+         * 無音で埋めて位置を張り直す。
+         */
+        pcm8_resync();
+        return false;
+    }
+
+    /*
+     * 鳴っているあいだはある程度まとめて描く。無音のときはブロックの支度そのものを
+     * しないので（リング全体が既に 0）、束ねずに毎回進めてよい。
+     *
+     * ここで待たせても発音の時刻は動かない。キーオンなどの発音状態を変える操作は
+     * flush_now() で前線を実時刻へ寄せてから行うため。
+     */
+    if (s_sounding && behind < PCM8_BATCH_FRAMES)
+    {
+        return false;
+    }
+
+    return render_upto(w);
 }
 
 void pcm8_resync(void)
@@ -726,6 +772,8 @@ static bool apply_params(pcm8_ch_t *c, int mode, int vol, int pan)
 static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, int mode,
                    int vol, int pan)
 {
+    flush_now();
+
     if (!apply_params(c, mode, vol, pan))
     {
         s_miss++;
@@ -770,6 +818,7 @@ void pcm8_set_mode(uint32_t ch, int vol, int mode, int pan)
     {
         return;
     }
+    flush_now();
     pcm8_ch_t *c = &s_ch[ch];
     if (!apply_params(c, mode, vol, pan))
     {
@@ -785,6 +834,7 @@ void pcm8_stop(uint32_t ch)
     {
         return;
     }
+    flush_now();
     s_ch[ch].active = false;
 }
 
@@ -799,6 +849,7 @@ void pcm8_end_all(void)
 
 void pcm8_abort_all(void)
 {
+    flush_now();
     for (uint32_t i = 0; i < PCM8_CH_MAX; i++)
     {
         s_ch[i].active = false;
@@ -819,6 +870,7 @@ void pcm8_iocs_mod(bool abort)
 {
     if (abort)
     {
+        flush_now();
         s_ch[0].active = false; /* d1=1 中止 */
     }
     /* d1=0 終了 = チェイン動作の終了。チェインを使っていないので何もしない。 */
@@ -881,6 +933,7 @@ void pcm8_reset_counters(void)
 
 void pcm8_set_enabled(bool on)
 {
+    flush_now();
     s_enabled = on;
 }
 
