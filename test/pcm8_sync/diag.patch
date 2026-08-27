@@ -1,0 +1,94 @@
+diff --git a/pcm8.c b/pcm8.c
+index 34a32d1..2e1eae5 100644
+--- a/pcm8.c
++++ b/pcm8.c
+@@ -130,6 +130,38 @@ static uint32_t s_reads;
+ static uint32_t s_keyon;
+ static uint32_t s_miss;
+ 
++/* ---- 一時的な診断（test/pcm8_sync/ の測定用。本体には残さない）---------- */
++static uint32_t s_dbg_min = 0xffffffffu;
++static uint32_t s_dbg_max;
++static uint64_t s_dbg_sum;
++static uint32_t s_dbg_cnt;
++
++/* 発音を始めた瞬間に、描き終えた位置が「今」からどれだけ後ろにあるか。 */
++static void dbg_note_skew(void)
++{
++    ym3012_ring_poll();
++    uint64_t w = ym3012_write_total();
++    uint32_t d = (w > s_rendered_total) ? (uint32_t)(w - s_rendered_total) : 0u;
++    if (d < s_dbg_min)
++    {
++        s_dbg_min = d;
++    }
++    if (d > s_dbg_max)
++    {
++        s_dbg_max = d;
++    }
++    s_dbg_sum += d;
++    s_dbg_cnt++;
++}
++
++void pcm8_dbg_skew(uint32_t *mn, uint32_t *mx, uint32_t *avg, uint32_t *cnt)
++{
++    *mn = (s_dbg_cnt != 0u) ? s_dbg_min : 0u;
++    *mx = s_dbg_max;
++    *avg = (s_dbg_cnt != 0u) ? (uint32_t)(s_dbg_sum / s_dbg_cnt) : 0u;
++    *cnt = s_dbg_cnt;
++}
++
+ /* ---- PDX --------------------------------------------------------------- */
+ 
+ static FIL s_pdx_fp;
+@@ -773,6 +805,7 @@ static void key_on(pcm8_ch_t *c, uint32_t bank, uint32_t note, bool word_len, in
+                    int vol, int pan)
+ {
+     flush_now();
++    dbg_note_skew(); /* 直っていればここは 0 になる */
+ 
+     if (!apply_params(c, mode, vol, pan))
+     {
+@@ -929,6 +962,10 @@ void pcm8_reset_counters(void)
+     s_keyon = 0;
+     s_miss = 0;
+     s_reads = 0;
++    s_dbg_min = 0xffffffffu;
++    s_dbg_max = 0;
++    s_dbg_sum = 0;
++    s_dbg_cnt = 0;
+ }
+ 
+ void pcm8_set_enabled(bool on)
+diff --git a/pcm8.h b/pcm8.h
+index d6660f3..9193c9d 100644
+--- a/pcm8.h
++++ b/pcm8.h
+@@ -136,6 +136,9 @@ uint32_t pcm8_read_count(void); /* PDX を読んだ回数 */
+ uint32_t pcm8_keyon_count(void); /* 発音を開始した回数 */
+ uint32_t pcm8_miss_count(void);  /* 波形が無い / 音量 0 で鳴らせなかった回数 */
+ 
++/* 一時的な診断（test/pcm8_sync/）。発音開始時の「描き終えた位置の遅れ」フレーム数。 */
++void pcm8_dbg_skew(uint32_t *mn, uint32_t *mx, uint32_t *avg, uint32_t *cnt);
++
+ /* keyon / miss / reads を 0 に戻す（`s 0` から呼ぶ。PDX は閉じない） */
+ void pcm8_reset_counters(void);
+ 
+diff --git a/pico-opm-writer.c b/pico-opm-writer.c
+index 40ea48f..5418edf 100644
+--- a/pico-opm-writer.c
++++ b/pico-opm-writer.c
+@@ -413,6 +413,13 @@ static void print_stats(void)
+            (unsigned)PCM8_CH_MAX, (unsigned)pcm8_active_mask(),
+            (unsigned)pcm8_keyon_count(), (unsigned)pcm8_miss_count(),
+            (unsigned)pcm8_read_count(), (unsigned long long)stats_pcm_clip());
++    {
++        /* 一時的な診断（test/pcm8_sync/）。本体には残さない。 */
++        uint32_t mn, mx, avg, cnt;
++        pcm8_dbg_skew(&mn, &mx, &avg, &cnt);
++        printf("# MDX SKEW: min %u  max %u  avg %u  n %u  frames\n",
++               (unsigned)mn, (unsigned)mx, (unsigned)avg, (unsigned)cnt);
++    }
+     /* スケジューラの遅れは VGM と MDX で共用（同時に走らないので 1 個で足りる） */
+     printf("# SEQ LAG : max %u us\n", (unsigned)stats_seq_lag_max_us());
+     printf("# PIOTEST : %s\n", ym3012_selftest_detail());
