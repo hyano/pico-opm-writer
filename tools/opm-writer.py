@@ -71,6 +71,13 @@ BANNER_DRAIN_S = 1.0
 # 届いたキャプチャが要求のこの割合を下回ったら失敗扱いにする
 CAPTURE_SHORT_RATIO = 0.99
 
+# `!capture-song` が 1 曲に費やす上限 [ms]。`vgm loop 0` のまま録ろうとして
+# 永遠に終わらないのを防ぐ。到達したら失敗扱いにして出力を消す
+DEFAULT_SONG_MAX_MS = 900000
+
+# ファームが `p 2` のキャプチャを終えたときに CDC #0 へ出す行
+CAPTURE_DONE_PREFIX = "# capture : done"
+
 # WAV へ書く既定値
 DEFAULT_PHIM = 4000000.0
 DEFAULT_ZSTD_LEVEL = 22
@@ -90,15 +97,28 @@ KEYWORD_RE = re.compile(r"@([A-Za-z0-9_]+)@")
 # ---- 前処理・検証 -------------------------------------------------------
 
 class Step:
-    """実行 1 ステップ。kind は "line"（ファームへ送る）か "capture"。"""
+    """実行 1 ステップ。
 
-    def __init__(self, kind, lineno, text, ms=None, output=None, fmt=None):
+    kind は次の 3 つ。
+
+    | kind | 内容 |
+    | --- | --- |
+    | `line` | ファームへそのまま送る |
+    | `capture` | `!capture <ms>`。指定ミリ秒だけ録る |
+    | `capture-song` | `!capture-song <コマンド>`。`<コマンド>` で始まる曲を頭から終わりまで録る |
+    """
+
+    def __init__(self, kind, lineno, text, ms=None, output=None, fmt=None, cmd=None):
         self.kind = kind
         self.lineno = lineno
         self.text = text
-        self.ms = ms
+        self.ms = ms        # capture の長さ / capture-song の上限
         self.output = output
         self.fmt = fmt      # capture のときの出力形式（"wav" / "wav.zst"）
+        self.cmd = cmd      # capture-song で演奏を始めるコマンド
+
+    def is_capture(self):
+        return self.kind in ("capture", "capture-song")
 
 
 # ---- WAV 出力 -----------------------------------------------------------
@@ -231,7 +251,7 @@ def capture_path(base, index):
     return base.with_name(f"{base.name[:-n]}-{index}{base.name[-n:]}")
 
 
-def preprocess(path, defines, capture_base):
+def preprocess(path, defines, capture_base, song_max_ms=DEFAULT_SONG_MAX_MS):
     """入力ファイルを Step のリストへ変換する。戻り値は (steps, errors)。"""
     steps = []
     errors = []
@@ -257,27 +277,34 @@ def preprocess(path, defines, capture_base):
             steps.append(Step("line", lineno, line))
             continue
 
-        # 特殊コマンド
-        tokens = line[1:].split()
-        name = tokens[0].lower() if tokens else ""
-        args = tokens[1:]
+        # 特殊コマンド。引数は 1 個だけ切り出す（曲名に空白が入りうるので split() では割らない）
+        head, _, rest = line[1:].partition(" ")
+        name = head.lower()
+        rest = rest.strip()
 
-        if name != "capture":
-            errors.append(f"{path}:{lineno}: 未知の特殊コマンド !{name or ''}")
-            continue
-        if len(args) != 1:
-            errors.append(f"{path}:{lineno}: !capture は引数を 1 個（ms）取る: {line}")
-            continue
-        if not args[0].isdigit() or int(args[0]) <= 0:
-            errors.append(f"{path}:{lineno}: !capture の引数が正の 10 進整数でない: {args[0]}")
+        if name == "capture":
+            if not rest.isdigit() or int(rest) <= 0:
+                errors.append(
+                    f"{path}:{lineno}: !capture は引数に正の 10 進整数（ms）を 1 個取る: {line}")
+                continue
+            ms, cmd = int(rest), None
+        elif name == "capture-song":
+            if not rest:
+                errors.append(
+                    f"{path}:{lineno}: !capture-song は演奏を始めるコマンドを引数に取る: {line}")
+                continue
+            ms, cmd = song_max_ms, rest
+        else:
+            errors.append(f"{path}:{lineno}: 未知の特殊コマンド !{name}")
             continue
 
         n_capture += 1
         output = capture_path(capture_base, n_capture)
-        steps.append(Step("capture", lineno, line,
-                          ms=int(args[0]),
+        steps.append(Step(name, lineno, line,
+                          ms=ms,
                           output=output,
-                          fmt=capture_kind(output)))
+                          fmt=capture_kind(output),
+                          cmd=cmd))
 
     return steps, errors
 
@@ -525,8 +552,10 @@ def capture_command(step, args):
     """表示用のコマンドライン文字列。"""
     # 実行時は execute() が解決済みのデバイスパスを入れている。dry-run では
     # 実機を探しに行かないので、代わりに探す対象のインタフェース名を出す。
-    return (f"p 1 → {args.pcm_device or CDC_PCM_NAME} ({step.ms} ms) → {step.output} "
-            f"→ p 0")
+    dev = args.pcm_device or CDC_PCM_NAME
+    if step.kind == "capture-song":
+        return f"p 2 → {step.cmd} → {dev} (曲の終わりまで) → {step.output} → p 0"
+    return f"p 1 → {dev} ({step.ms} ms) → {step.output} → p 0"
 
 
 def pcm_rate(args):
@@ -550,16 +579,24 @@ def report_output(step, args, captured):
 
     captured は実際に受け取ったバイト数。ホストが PCM を読み落としても `p 0` の応答は
     `OK` で返るため、長さを見ないと短い出力を成功と誤認する。
+
+    **`!capture-song` では長さの検査をしない。** 曲の長さは事前に分からず、要求値が
+    無い。代わりに「1 バイトも届いていない」だけを弾く（上限に達したときの打ち切りは
+    run_capture() の側で失敗にしている）。
     """
     if not step.output.exists():
         return f"キャプチャファイルが生成されていない: {step.output}"
 
-    want = expected_bytes(step, args)
     rate = capture_byte_rate(args)
-    if want is not None and captured < want * CAPTURE_SHORT_RATIO:
-        return discard_output(
-            step, f"キャプチャが短い: {captured / rate:.3f}s / "
-                  f"要求 {step.ms / 1000.0:.3f}s ({100.0 * captured / want:.1f}%)")
+    if step.kind == "capture-song":
+        if captured == 0:
+            return discard_output(step, "キャプチャが空: PCM が 1 バイトも届かなかった")
+    else:
+        want = expected_bytes(step, args)
+        if want is not None and captured < want * CAPTURE_SHORT_RATIO:
+            return discard_output(
+                step, f"キャプチャが短い: {captured / rate:.3f}s / "
+                      f"要求 {step.ms / 1000.0:.3f}s ({100.0 * captured / want:.1f}%)")
 
     tail = f" / キャプチャ {captured / rate:.3f}s" if rate else ""
     print(f"* {step.output} ({step.output.stat().st_size} bytes){tail}", flush=True)
@@ -583,13 +620,15 @@ def run_capture(step, args, ser):
 
     fp = closers = sink = None
     captured = 0
+    overrun = False
     try:
         # 前回の取りこぼしが残っていることがあるので、開始前に捨てる
         pcm.drain_bytes(0.2)
 
-        err = send_line(ser, "p 1")
+        start = "p 2" if step.kind == "capture-song" else "p 1"
+        err = send_line(ser, start)
         if err is not None:
-            return f"p 1 が失敗した: {err}"
+            return f"{start} が失敗した: {err}"
 
         try:
             fp, closers = open_output(step.output, args.zstd_level)
@@ -598,15 +637,40 @@ def run_capture(step, args, ser):
             return str(e)
         sink = WavSink(fp, 2, 2, pcm_rate(args))
 
-        deadline = time.monotonic() + step.ms / 1000.0
-        while True:
-            remain = deadline - time.monotonic()
-            if remain <= 0:
-                break
-            chunk = pcm.read_bytes(min(remain, 0.05))
-            if chunk:
-                sink.writeframes(chunk)
-                captured += len(chunk)
+        if step.kind == "capture-song":
+            # `p 2` は待機しているだけなので、ここで演奏を始めて録り始めさせる
+            err = send_line(ser, step.cmd)
+            if err is not None:
+                send_line(ser, "p 0")
+                return f"{step.cmd} が失敗した: {err}"
+
+            # 曲が終わるとファームが自分で停止して done を出す。それまで読み続ける
+            deadline = time.monotonic() + step.ms / 1000.0
+            done = False
+            while not done:
+                if time.monotonic() >= deadline:
+                    overrun = True
+                    break
+                chunk = pcm.read_bytes(0.01)
+                if chunk:
+                    sink.writeframes(chunk)
+                    captured += len(chunk)
+                line = ser.read_line(time.monotonic() + 0.005)
+                if line is None:
+                    continue
+                print(f"< {line}", flush=True)
+                if line.startswith(CAPTURE_DONE_PREFIX):
+                    done = True
+        else:
+            deadline = time.monotonic() + step.ms / 1000.0
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0:
+                    break
+                chunk = pcm.read_bytes(min(remain, 0.05))
+                if chunk:
+                    sink.writeframes(chunk)
+                    captured += len(chunk)
 
         # p 0 の応答はドレインの完了を待つので、待つ間も PCM を読み続ける
         print("> p 0", flush=True)
@@ -647,6 +711,12 @@ def run_capture(step, args, ser):
             c.close()
         pcm.close()
 
+    # 出力を消すのは sink を閉じたあと（閉じる側が書き戻すので順序を逆にできない）
+    if overrun:
+        return discard_output(
+            step, f"曲が {step.ms} ms 以内に終わらなかった"
+                  "（--song-max-ms で伸ばすか、vgm loop / mdx loop を設定すること）")
+
     return report_output(step, args, captured)
 
 
@@ -670,7 +740,7 @@ def execute(steps, args):
             # あるときだけ要るので、無いシーケンスで見つからなくても失敗させない。
             try:
                 args.device = resolve_device(args.device, CDC_COMMAND_NAME)
-                if any(step.kind == "capture" for step in steps):
+                if any(step.is_capture() for step in steps):
                     args.pcm_device = resolve_device(args.pcm_device, CDC_PCM_NAME)
             except RuntimeError as e:
                 print(f"! {e}", file=sys.stderr, flush=True)
@@ -681,7 +751,7 @@ def execute(steps, args):
                 print(f"< {line}", flush=True)
 
         for step in steps:
-            if step.kind == "line":
+            if not step.is_capture():
                 n_sent += 1
                 if args.dry_run:
                     print(f"> {step.text}", flush=True)
@@ -740,6 +810,10 @@ def main(argv=None):
     parser.add_argument("--zstd-level", type=int, default=DEFAULT_ZSTD_LEVEL,
                         metavar="N",
                         help=f".wav.zst の圧縮レベル（既定 {DEFAULT_ZSTD_LEVEL} = 最大）")
+    parser.add_argument("--song-max-ms", type=int, default=DEFAULT_SONG_MAX_MS,
+                        metavar="MS",
+                        help=f"!capture-song が 1 曲に費やす上限 [ms]"
+                             f"（既定 {DEFAULT_SONG_MAX_MS}）")
     parser.add_argument("-n", "--dry-run", action="store_true",
                         help="シリアルに触らず、実行内容だけ表示する")
     parser.add_argument("--stop-on-error", action="store_true",
@@ -755,7 +829,7 @@ def main(argv=None):
         return 1
 
     try:
-        steps, errors = preprocess(args.input, defines, args.capture)
+        steps, errors = preprocess(args.input, defines, args.capture, args.song_max_ms)
     except OSError as e:
         print(f"! {e}", file=sys.stderr)
         return 1
