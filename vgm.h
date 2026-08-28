@@ -113,6 +113,7 @@ const char *vgm_current_name(void);  /* 再生中のファイル名。無けれ�
 uint64_t vgm_position_samples(void); /* 発行済みのサンプル位置 */
 uint32_t vgm_total_samples(void);    /* ヘッダの総サンプル数。不明なら 0 */
 uint32_t vgm_loop_count(void);
+uint32_t vgm_play_seq(void);      /* 再生を始めた回数。変わったら新しいトラック */
 uint32_t vgm_reslip_count(void); /* 時計を張り直した回数 */
 
 bool vgm_is_compressed(void); /* 再生中のファイルが .vgz か */

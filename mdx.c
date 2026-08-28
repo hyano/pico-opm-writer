@@ -221,6 +221,7 @@ static uint64_t s_due_us;
 static uint64_t s_ticks;
 static uint32_t s_loops;
 static uint32_t s_reslips;
+static uint32_t s_play_seq; /* 再生を始めた回数。mdx_play_seq() の実体 */
 static uint32_t s_cursor; /* tick を中断したときの次のチャンネル */
 static bool s_in_tick;
 
@@ -1892,6 +1893,7 @@ const char *mdx_play(const char *name)
     s_ticks = 0;
     s_loops = 0;
     s_reslips = 0;
+    s_play_seq++;
     s_cursor = 0;
     s_in_tick = false;
     s_tie_flag = false;
@@ -1917,12 +1919,18 @@ const char *mdx_play(const char *name)
  */
 const char *mdx_stop(void)
 {
+    /*
+     * **音を止めるのは状態に関わらず行う。** 自然終了 (end of data) では OPM を
+     * 触らないので、鳴り終わったあとの余韻を消せるのはこのコマンドだけになる。
+     * 参照実装の L_STOP も、演奏中かどうかを見ずに L00063e を通る。
+     */
+    key_off_all();
+
     if (s_state != MDX_STATE_PLAYING && s_state != MDX_STATE_ERROR)
     {
         return NULL;
     }
 
-    key_off_all();
     pcm8_close_pdx();
     s_pcm8_mode = false; /* 参照実装 L00034E の clr.b PCM8_FLG */
     s_state = MDX_STATE_STOPPED;
@@ -2036,8 +2044,13 @@ bool mdx_service(void)
 
     if (s_enable == 0u)
     {
-        key_off_all();
-        pcm8_close_pdx();
+        /*
+         * **ここでは OPM に何も書かない。** 参照実装 L001442 は、END_FLG / LOOP_FLG から
+         * 自分のビットを落として全部落ちたら停止フラグを立て、PCM8 を止めるだけで、
+         * OPM には 1 バイトも書かない。最後の音は音色本来の RR で自然に減衰する。
+         * 消音 (L00063e) が走るのは STOP コマンドと、次の PLAY の先頭だけ。
+         */
+        pcm8_close_pdx(); /* 参照実装 L001442 の PCM8_SUB($01ff) */
         s_pcm8_mode = false; /* 参照実装 L001290 の clr.b PCM8_FLG */
         s_state = MDX_STATE_STOPPED;
         printf("# mdx     : end of data\n");
@@ -2103,6 +2116,16 @@ uint64_t mdx_tick_count(void)
 uint32_t mdx_loop_count(void)
 {
     return s_loops;
+}
+
+/*
+ * 再生を始めた回数。songend / capture が「新しいトラックが始まった」を検出するのに
+ * 使う。鳴っている最中に別の曲を play しても再生状態は落ちないので、レベルを
+ * 見ているだけでは切り替えを拾えない。
+ */
+uint32_t mdx_play_seq(void)
+{
+    return s_play_seq;
 }
 
 uint32_t mdx_reslip_count(void)
@@ -2222,6 +2245,7 @@ const char *mdx_pdx_name(void) { return ""; }
 uint32_t mdx_channels(void) { return 0; }
 uint64_t mdx_tick_count(void) { return 0; }
 uint32_t mdx_loop_count(void) { return 0; }
+uint32_t mdx_play_seq(void) { return 0; }
 uint32_t mdx_reslip_count(void) { return 0; }
 uint32_t mdx_tempo(void) { return 0; }
 uint32_t mdx_tick_us(void) { return 0; }

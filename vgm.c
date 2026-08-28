@@ -58,6 +58,7 @@ static uint64_t s_samples; /* 発行済みコマンドまでのサンプル数�
 static uint64_t s_due_us;
 static uint32_t s_loops;
 static uint32_t s_reslips;
+static uint32_t s_play_seq; /* 再生を始めた回数。vgm_play_seq() の実体 */
 
 /*
  * ストリーム用のバッファ。非圧縮なら 1 クラスタぶん読むので f_read は FIL の
@@ -572,7 +573,12 @@ end_of_data:
         return true;
     }
 
-    key_off_all();
+    /*
+     * **ここでは OPM に何も書かない。** 参照実装 L001442 は、END_FLG / LOOP_FLG から
+     * 自分のビットを落として全部落ちたら停止フラグを立て、PCM8 を止めるだけで、
+     * OPM には 1 バイトも書かない。最後の音は音色本来の RR で自然に減衰する。
+     * 消音 (L00063e) が走るのは STOP コマンドと、次の PLAY の先頭だけ。
+     */
     close_file();
     s_state = VGM_STATE_STOPPED;
     printf("# vgm     : end of data\n");
@@ -889,6 +895,7 @@ const char *vgm_play(const char *name)
     s_loops = 0;
     s_reslips = 0;
     s_gz_reloads = 0;
+    s_play_seq++;
     s_start_us = time_us_64();
     s_due_us = s_start_us;
     s_state = VGM_STATE_PLAYING;
@@ -902,12 +909,18 @@ const char *vgm_play(const char *name)
  */
 const char *vgm_stop(void)
 {
+    /*
+     * **音を止めるのは状態に関わらず行う。** 自然終了 (end of data) では OPM を
+     * 触らないので、鳴り終わったあとの余韻を消せるのはこのコマンドだけになる。
+     * 参照実装の L_STOP も、演奏中かどうかを見ずに L00063e を通る。
+     */
+    key_off_all();
+
     if (s_state != VGM_STATE_PLAYING && s_state != VGM_STATE_ERROR)
     {
         return NULL;
     }
 
-    key_off_all();
     close_file();
     s_state = VGM_STATE_STOPPED;
     return NULL;
@@ -977,6 +990,16 @@ uint32_t vgm_total_samples(void)
 uint32_t vgm_loop_count(void)
 {
     return s_loops;
+}
+
+/*
+ * 再生を始めた回数。songend / capture が「新しいトラックが始まった」を検出するのに
+ * 使う。鳴っている最中に別の曲を play しても再生状態は落ちないので、レベルを
+ * 見ているだけでは切り替えを拾えない。
+ */
+uint32_t vgm_play_seq(void)
+{
+    return s_play_seq;
 }
 
 uint32_t vgm_reslip_count(void)
