@@ -222,6 +222,18 @@ bool songend_service(void)
             printf("# warn    : ringout cut at %u ms\n", (unsigned)SONGEND_RINGOUT_MAX_MS);
             did = true;
         }
+        else if (time_us_64() - s_ringout_us >=
+                 (uint64_t)SONGEND_RINGOUT_GIVEUP_MS * 1000ull)
+        {
+            /*
+             * 強制消音しても無音にならなかった。待ち続けると誰も曲の終わりを
+             * 観測できなくなるので、ここで諦めて IDLE へ落とす。
+             */
+            s_state = SONGEND_IDLE;
+            printf("# warn    : ringout gave up at %u ms\n",
+                   (unsigned)SONGEND_RINGOUT_GIVEUP_MS);
+            did = true;
+        }
         break;
 
     case SONGEND_IDLE:

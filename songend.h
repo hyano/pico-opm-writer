@@ -68,9 +68,15 @@ typedef enum
  * RR=0 の音色が残ったまま曲が終わると減衰しないので、待つのをやめるだけでは
  * チップが鳴りっぱなしになる。**参照実装は自然終了後の音を止めないので、ここは
  * 保険としての意図的な逸脱。**
+ *
+ * GIVEUP は最後の逃げ道。強制消音しても出力が YM3012_QUIET_LEVEL を割らない限り
+ * RINGOUT からは抜けられず、**songend_is_active() が永久に true になって
+ * キャプチャの終端も autoplay の曲送りも同時に止まる**。状態機械に袋小路を
+ * 残さないため、ここまで来たら無音を待つのをやめて IDLE へ落とす。
  */
-#define SONGEND_RINGOUT_QUIET_MS 100u
-#define SONGEND_RINGOUT_MAX_MS   5000u
+#define SONGEND_RINGOUT_QUIET_MS  100u
+#define SONGEND_RINGOUT_MAX_MS    5000u
+#define SONGEND_RINGOUT_GIVEUP_MS 10000u
 
 /*
  * 出力ゲインを 1.0 へ戻すまでの猶予と、戻すのにかける長さ。コマンドでは変えない。
