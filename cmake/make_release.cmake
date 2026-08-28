@@ -137,9 +137,11 @@ rel_copy("${REL_SOURCE_DIR}/cmake/release/THIRD-PARTY-LICENSES.md"
 
 rel_copy("${REL_SOURCE_DIR}/docs/pico-opm-writer.md" "${pkg_dir}/docs/pico-opm-writer.md")
 rel_copy("${REL_SOURCE_DIR}/docs/opm-writer.md"      "${pkg_dir}/docs/opm-writer.md")
+rel_copy("${REL_SOURCE_DIR}/docs/opm-record.md"      "${pkg_dir}/docs/opm-record.md")
 
 # ホスト側ツール（残り 2 本は実機調査の解析用なので入れない）
 rel_copy("${REL_SOURCE_DIR}/tools/opm-writer.py" "${pkg_dir}/tools/opm-writer.py")
+rel_copy("${REL_SOURCE_DIR}/tools/opm-record.py" "${pkg_dir}/tools/opm-record.py")
 
 # 同梱した外部ソースのライセンス。README §12 がこの相対パスでリンクしているので、
 # zip の中でもリンクが切れないよう配置をリポジトリと合わせる。

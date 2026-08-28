@@ -1686,7 +1686,7 @@ https://github.com/hyano/pico-opm-writer/releases
 | --- | --- |
 | `pico-opm-writer.uf2` | ファームウェア本体。これを焼く |
 | `README.md` / `docs/` | このドキュメントと内部設計書 |
-| `tools/opm-writer.py` | ホスト側ツール（[§10](#10-ホスト側ツール)） |
+| `tools/opm-writer.py` / `tools/opm-record.py` | ホスト側ツール（[§10](#10-ホスト側ツール)） |
 | `VERSION.txt` | どのコミットをどのオプションでビルドしたか |
 | `SHA256SUMS` | 全ファイルのチェックサム |
 | `LICENSE` / `THIRD-PARTY-LICENSES.md` / `licenses/` / `external/` | ライセンス（[§12](#12-ライセンス)） |
@@ -2424,7 +2424,8 @@ OK
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
-| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。行末コメント / `@KEY@` 置換 / `!capture` によるキャプチャに対応。`!capture` はファームの CDC #1 から PCM をキャプチャする | [docs/opm-writer.md](docs/opm-writer.md) |
+| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。行末コメント / `@KEY@` 置換 / `!capture` `!capture-song` によるキャプチャに対応。どちらもファームの CDC #1 から PCM を直接読む | [docs/opm-writer.md](docs/opm-writer.md) |
+| `tools/opm-record.py` | 実機に入っている曲を 1 曲 1 ファイルで WAV に録る。曲名の指定・`--list` による一覧・`--all` による全曲録音 | [docs/opm-record.md](docs/opm-record.md) |
 | `tools/opm-lfo-period.py` | 実機キャプチャから LFO の更新周期をサンプル数で測る（`--mode am` / `--mode pm`）。結果は 1 ファイル 1 行の TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
@@ -2433,6 +2434,12 @@ OK
 
 ```bash
 ./test/dac_lr/capture_all.py --analyze
+```
+
+曲をまるごと録るなら `opm-record.py` が短い。長さを指定する必要はない。
+
+```bash
+./tools/opm-record.py --all --loop 2 -o out/
 ```
 
 `test/` 以下は、これらを使った実機調査の一次データ生成環境。掃引スクリプトと測定条件は

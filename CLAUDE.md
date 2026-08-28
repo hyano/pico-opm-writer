@@ -36,13 +36,14 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `external/fatfs/` | FatFs R0.16（**上流のまま。改変しない**。出所と適用パッチは `external/README.md`） |
 | `external/miniz/` | miniz 3.1.2（**上流のまま。改変しない**。展開器 `tinfl` だけを使う。設定は `CMakeLists.txt` の `miniz` ターゲットの `MINIZ_NO_*`） |
 
-これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 3 本ある。リファレンスは `docs/` にあり、
+これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 4 本ある。リファレンスは `docs/` にあり、
 ファイル名は拡張子を落とした `docs/<スクリプト名>.md`（`docs/` にはこれらに加えて上記の
 `docs/pico-opm-writer.md` が入る）。
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
-| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。`!capture` でファーム側の CDC #1 から PCM をキャプチャ | [docs/opm-writer.md](docs/opm-writer.md) |
+| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。`!capture <ms>` で時間指定のキャプチャ、`!capture-song <コマンド>` で**曲 1 本ぶん**（頭から余韻が消えるまで）のキャプチャ。後者は WAV のレートを `p` から読む（VGM は φM を切り替えるため） | [docs/opm-writer.md](docs/opm-writer.md) |
+| `tools/opm-record.py` | 実機の曲を 1 曲 1 ファイルで WAV に録る。曲名の指定 / `--list` で一覧 / `--all` で全曲。**一時シーケンスを作って `opm-writer.py` をサブプロセスで起動する**（Serial と WavSink を複製しない） | [docs/opm-record.md](docs/opm-record.md) |
 | `tools/opm-lfo-period.py` | キャプチャから LFO の更新周期をサンプル数で測る（`--mode` で AM/PM を指定）。出力は TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
 | `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
@@ -307,9 +308,10 @@ ninja -C build release
 - `autoplay status` / `autoplay list` コマンド — 自動再生の状態とプレイリスト
 - `s 0` — 統計をリセット
 
-**ホスト側スクリプトの検証**は次の 6 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
+**ホスト側スクリプトの検証**は次の 7 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
 
 ```bash
+./tools/opm-record.py --self-test          # 曲指定 / 出力名 / シーケンス生成 / 一覧の解析（1 秒 / 23 ケース）
 ./tools/opm-lfo-period-testgen.py          # opm-lfo-period.py の回帰テスト（30 秒 / 47 ケース）
 ./test/dac_lr/lr_relation.py --self-test   # L/R 判定器の自己検証（1 秒 / 16 ケース）
 ./test/lfo_noise/analyze_lfo.py --self-test # 段ごとの LFO 値抽出・値列の突き合わせ・段の間隔の自己検証（15 秒 / 46 ケース）
