@@ -66,6 +66,7 @@ void opm_init(void);                        /* GPIO と PIO(φM) を初期化し
 void opm_write(uint8_t addr, uint8_t data); /* 1 レジスタ書き込み（アドレス→データの 2 サイクル） */
 uint8_t opm_read(bool a0);                  /* /RD による 1 バイト読み出し（A0=1 がステータスレジスタ） */
 void opm_reset(void);                       /* /IC によるハードウェアリセット */
+void opm_key_off_all(void);                 /* 最速リリースにしてから全 8ch をキーオフ */
 void opm_clear(void);                       /* ソフトウェアによる全レジスタクリア */
 bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true = H = 非アサート） */
 

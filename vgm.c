@@ -351,32 +351,10 @@ static void vgm_fail(const char *why, uint32_t at)
 
 /* ---- 停止 -------------------------------------------------------------- */
 
+/* 手順とその理由は opm_key_off_all() の側に書いてある。 */
 static void key_off_all(void)
 {
-    /*
-     * 全 8 チャンネルをキーオフする。キーオフだけでは音色の RR 次第で音が長く
-     * 残るので、先に全 32 スロットの RR を 15（最速）にしてから落とす。
-     * (32 + 8) 回 x 32us = 約 1.3ms。
-     *
-     * **RR を全部書いてから、キーオフをまとめて撃つ。** ch ごとに交互に書くと最初と
-     * 最後のチャンネルでキーオフが 1.3ms ずれ、リリースの残りも同じだけ滲む。
-     * この順なら 8 回ぶんの 0.26ms に収まり、残りが明確な幅の窓になる。RR は
-     * リリース位相でしか参照されないので、鳴っている最中に書いても何も起きない。
-     *
-     * opm_reset() は 20ms ブロックして I2S アンダーランが確定するので使わない。
-     */
-    for (uint8_t ch = 0; ch < 8u; ch++)
-    {
-        for (uint8_t slot = 0; slot < 4u; slot++)
-        {
-            /* D1L/RR。リリース中は D1L を見ないので D1L=0 / RR=15 でよい。 */
-            opm_write((uint8_t)(0xe0u + slot * 8u + ch), 0x0fu);
-        }
-    }
-    for (uint8_t ch = 0; ch < 8u; ch++)
-    {
-        opm_write(0x08u, ch);
-    }
+    opm_key_off_all();
 }
 
 static void close_file(void)
