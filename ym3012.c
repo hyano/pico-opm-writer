@@ -39,6 +39,13 @@ static uint s_dma_ch;
 static uint32_t s_last_widx;
 static uint64_t s_write_total;
 
+/*
+ * 最後に「無音でない」フレームを見た時点の総フレーム数（そのフレームの次の番号）。
+ * ym3012_ring_poll() が取り込みのついでに更新する。曲が終わったあと余韻が消えるのを
+ * 待つのに使う（songend.c）。
+ */
+static uint64_t s_last_loud_total;
+
 /* USB キャプチャが使う既定の読み出しカーソル */
 static ym3012_reader_t s_reader;
 
@@ -251,6 +258,7 @@ void ym3012_init(void)
     /* SM を動かす前なので、書き込み位置はまだリング先頭のまま */
     s_last_widx = 0;
     s_write_total = 0;
+    s_last_loud_total = 0;
     ym3012_reader_init(&s_reader, true);
 
     pio_sm_set_enabled(s_pio, s_sm, true);
@@ -277,8 +285,37 @@ void __not_in_flash_func(ym3012_ring_poll)(void)
      * 前回からの進み分を足し込む。呼び出し間隔がリング一周 (65.5ms) より短い限り
      * この差分は一意に決まる。
      */
-    s_write_total += (uint32_t)(widx - s_last_widx) & (YM3012_RING_FRAMES - 1u);
+    uint32_t n = (uint32_t)(widx - s_last_widx) & (YM3012_RING_FRAMES - 1u);
+    uint32_t from = s_last_widx;
+    s_write_total += n;
     s_last_widx = widx;
+
+    /*
+     * 取り込んだぶんを走査して、最後に音があった位置を覚える。
+     *
+     * **消費者の有無に依存しない**のがここに置いた理由。I2S も USB キャプチャも
+     * ym3012_reader_read_pcm() を通るが、どちらも動いていない構成では誰も PCM へ
+     * 変換しない。取り込みそのものは常時走っているので、ここなら必ず更新される。
+     *
+     * 見ているのはミックス前・フェード前の生の DAC 出力、つまり「チップがまだ
+     * 鳴っているか」そのもの。ADPCM は曲の終わりに止まるので取りこぼさない。
+     */
+    for (uint32_t i = 0; i < n; i++)
+    {
+        uint32_t frame = s_ring[(from + i) & (YM3012_RING_FRAMES - 1u)];
+        int16_t l, r;
+        ym3012_frame_to_pcm(frame, &l, &r);
+        if (l > YM3012_QUIET_LEVEL || l < -YM3012_QUIET_LEVEL ||
+            r > YM3012_QUIET_LEVEL || r < -YM3012_QUIET_LEVEL)
+        {
+            s_last_loud_total = s_write_total - (uint64_t)(n - 1u - i);
+        }
+    }
+}
+
+uint64_t ym3012_last_loud_total(void)
+{
+    return s_last_loud_total;
 }
 
 void ym3012_ring_resync(void)

@@ -388,6 +388,9 @@ static void print_stats(void)
            (unsigned)stats_rxstall());
     printf("# RATE    : %u frames/s (expect %u)\n",
            (unsigned)stats_frame_rate(), (unsigned)(opm_clock_hz_actual() / 64u));
+    /* 無音が続いているフレーム数。曲の終わりの余韻を待つ判定と同じ値。 */
+    printf("# QUIET   : %llu frames\n",
+           (unsigned long long)(ym3012_write_total() - ym3012_last_loud_total()));
     printf("# LOOP    : %u passes/s\n", (unsigned)stats_loop_rate());
     print_svc();
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
