@@ -87,6 +87,7 @@ add_executable(pico-opm-writer
         diskio_flash.c
         storage.c
         filelist.c
+        songend.c
         autoplay.c
         vgm.c
         vgz.c

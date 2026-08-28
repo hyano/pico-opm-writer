@@ -13,10 +13,9 @@
 
 #include "filelist.h"
 #include "mdx.h"
-#include "opm.h"
+#include "songend.h"
 #include "storage.h"
 #include "vgm.h"
-#include "ym3012.h"
 
 #if AUTOPLAY_ENABLED
 
@@ -54,7 +53,6 @@ static uint16_t s_prev_idx;  /* 直前に鳴らした s_offs の添字。0xffff 
 /* ---- 状態 -------------------------------------------------------------- */
 
 static autoplay_state_t s_state;
-static uint64_t s_fade_end_us;
 static uint64_t s_gap_end_us;
 
 /*
@@ -83,59 +81,11 @@ static uint32_t cur_idx(void)
     return s_order[s_pos];
 }
 
-static bool cur_is_playing(void)
-{
-    return idx_is_vgm(cur_idx()) ? vgm_is_playing() : mdx_is_playing();
-}
-
-static uint32_t cur_loops(void)
-{
-    return idx_is_vgm(cur_idx()) ? vgm_loop_count() : mdx_loop_count();
-}
-
 /* ---- 停止 -------------------------------------------------------------- */
-
-/*
- * ミリ秒をフレーム数へ。レートは φM/64。i2s_rate_hz() ではなくこちらから引くのは、
- * I2S_ENABLED=0 の構成でも同じ値が要るため。
- */
-static uint32_t ms_to_frames(uint32_t ms)
-{
-    uint32_t rate = opm_clock_hz_actual() / 64u;
-    return (uint32_t)(((uint64_t)ms * (uint64_t)rate) / 1000ull);
-}
-
-/*
- * 鳴っている方を止めて、出力ゲインを 1.0 へ戻す予約を入れる。
- *
- * **解除はキーオフの後**でなければならない。ym3012_fade_release() が戻すのは
- * 「これから取り込むフレーム」以降なので、先に止めておけば戻る対象は消音済みの
- * 区間だけになる。
- *
- * ただし**キーオフの直後ではまだ黙っていない**。key_off_all() は RR を 15 にしてから
- * 落とすが、それでもチップのリリースは実測で最悪 5.5ms 残る。猶予を置かずに戻すと
- * その区間が全音量で出るので、AUTOPLAY_RELEASE_MS だけ待ってからランプで戻す。
- *
- * mdx_state() で囲むのは、MDX_ENABLED=0 のスタブの mdx_stop() が hint を出して
- * "unsupported" を返すため（vgm_play() が同じ理由で同じことをしている）。
- */
-static void stop_playback(void)
-{
-    if (vgm_state() != VGM_STATE_STOPPED)
-    {
-        vgm_stop();
-    }
-    if (mdx_state() != MDX_STATE_STOPPED)
-    {
-        mdx_stop();
-    }
-    ym3012_fade_release(ms_to_frames(AUTOPLAY_RELEASE_MS),
-                        ms_to_frames(AUTOPLAY_RELEASE_RAMP_MS));
-}
 
 static void stop_internal(void)
 {
-    stop_playback();
+    songend_stop_playback();
     s_state = AUTOPLAY_STOPPED;
 }
 
@@ -208,11 +158,11 @@ static const char *start_track(void)
         if (err == NULL)
         {
             /*
-             * 停止側が置いた猶予を、曲が始まる時点まで引き戻す。GAP を挟まない
-             * autoplay next / prev や gap 0 では、猶予の大半が新しい曲の頭に被る。
-             * 境界は前へしか動かないので、猶予が済んでいればこれは何もしない。
+             * 曲の終わり方は songend が見る。自動再生には手動再生とは別の既定値が
+             * あるので（AUTOPLAY_LOOP_DEFAULT は 2、SONGEND_LOOP_DEFAULT は 0）、
+             * トラックごとにこちらの値を渡して上書きする。
              */
-            ym3012_fade_release(0u, ms_to_frames(AUTOPLAY_RELEASE_RAMP_MS));
+            songend_arm(s_loop, s_fade_ms);
             s_state = AUTOPLAY_PLAYING;
             return NULL;
         }
@@ -226,26 +176,15 @@ static const char *start_track(void)
     return err;
 }
 
+/*
+ * 曲間の無音へ入る。**曲は songend が既に止めている**（余韻も消えている）ので、
+ * ここで止めるのは autoplay next / prev のように途中で送るときだけ。
+ */
 static void begin_gap(void)
 {
-    stop_playback();
+    songend_stop_playback();
     s_gap_end_us = time_us_64() + (uint64_t)s_gap_ms * 1000ull;
     s_state = AUTOPLAY_GAP;
-}
-
-static void begin_fade(void)
-{
-    uint32_t frames = ms_to_frames(s_fade_ms);
-
-    /*
-     * 起点はいま取り込み終えたフレーム。消費者はここより後ろを読んでいるので、
-     * フェードは取りこぼしなく全部に掛かる。
-     */
-    ym3012_fade_start(ym3012_write_total(), frames);
-    s_fade_end_us = time_us_64() + (uint64_t)s_fade_ms * 1000ull;
-    s_state = AUTOPLAY_FADING;
-
-    printf("# autoplay: fade out %s\n", idx_name(cur_idx()));
 }
 
 /* ---- 初期化とサービス -------------------------------------------------- */
@@ -278,33 +217,12 @@ bool autoplay_service(void)
     switch (s_state)
     {
     case AUTOPLAY_PLAYING:
-        if (!cur_is_playing())
-        {
-            /* 曲が終わったか、途中で壊れて ERROR に落ちた。どちらも次へ送る。 */
-            begin_gap();
-            did = true;
-        }
-        else if (s_loop != 0u && cur_loops() >= s_loop)
-        {
-            if (s_fade_ms == 0u)
-            {
-                begin_gap();
-            }
-            else
-            {
-                begin_fade();
-            }
-            did = true;
-        }
-        break;
-
-    case AUTOPLAY_FADING:
         /*
-         * 期限は壁時計で見る。I2S の先行は 1024 フレーム（約 16ms）しかなく、
-         * その時点で鳴らし残しているのはゲインがほぼ 0 の区間なので足りる。
-         * 曲の方が先に終わったときもここで拾う。
+         * 曲が終わるのを待つ枝はこれ 1 本。ループ回数での打ち切りもフェードアウトも
+         * songend が行い、**余韻が消えるまで active のまま**なので、曲間の無音は
+         * 静かになってから数え始まる。曲が壊れて ERROR に落ちたときも同じ道を通る。
          */
-        if (time_us_64() >= s_fade_end_us || !cur_is_playing())
+        if (!songend_is_active())
         {
             begin_gap();
             did = true;
@@ -432,7 +350,11 @@ const char *autoplay_skip(int dir)
         printf("# hint    : autoplay is not running; run autoplay start first\n");
         return "wrong state";
     }
-    stop_playback();
+    /*
+     * 余韻は待たずに切り替える。songend_stop_playback() が余韻待ちへ移すが、
+     * 直後の start_track() が新しいトラックとして PLAYING へ引き戻す。
+     */
+    songend_stop_playback();
     advance(dir);
     return start_track();
 }
@@ -530,9 +452,8 @@ const char *autoplay_state_name(void)
     switch (s_state)
     {
     case AUTOPLAY_PLAYING:
+        /* 曲の終わり方（フェード中 / 余韻待ち）は songend_state_name() の側に出る。 */
         return "PLAYING";
-    case AUTOPLAY_FADING:
-        return "FADING";
     case AUTOPLAY_GAP:
         return "GAP";
     case AUTOPLAY_STOPPED:

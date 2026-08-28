@@ -256,14 +256,15 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 | `h` | `h` / `?` / `help` | コマンド一覧を表示 |
 | `clock` | `clock` / `clock status` / `clock 4` / `clock 3.58` / `clock auto` / `clock fixed` | φM の表示と切り替え（[§3.16](#316-clockクロック切り替え)） |
 | `storage` | `storage` / `storage status` / `storage host` / `storage player` / `storage format [force] yes` / `storage trace` | ストレージの状態表示とモード切り替え（[§3.13](#313-storageストレージ)） |
-| `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <path>` / `vgm stop` | VGM の状態表示・一覧・再生（[§3.14](#314-vgmvgm-再生)） |
-| `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <path>` / `mdx stop` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
+| `vgm` | `vgm` / `vgm status` / `vgm list` / `vgm play <path>` / `vgm stop` / `vgm loop [<n>]` / `vgm fade [<ms>]` | VGM の状態表示・一覧・再生、演奏の終わり方（[§3.14](#314-vgmvgm-再生)） |
+| `mdx` | `mdx` / `mdx status` / `mdx list` / `mdx play <path>` / `mdx stop` / `mdx loop [<n>]` / `mdx fade [<ms>]` / `mdx pcm [on\|off]` | MDX の状態表示・一覧・再生、演奏の終わり方、ADPCM ミキシングの表示と切り替え（[§3.15](#315-mdxmdx-再生)） |
 | `autoplay` | `autoplay` / `autoplay status` / `autoplay list` / `autoplay start` / `autoplay stop` / `autoplay next` / `autoplay prev` / `autoplay mode <list\|random>` / `autoplay loop <n>` / `autoplay fade <ms>` / `autoplay gap <ms>` / `autoplay source <vgm\|mdx\|both>` | VGM と MDX の自動連続再生（[§3.17](#317-autoplay自動再生)） |
 
 コマンド体系の規則:
 
 - **引数を省くと状態表示になる。** `p` / `clock` / `storage` / `vgm` / `mdx` / `mdx pcm` /
-  `autoplay` は引数なしで現在の状態を返す。`clock status` / `storage status` /
+  `vgm loop` / `vgm fade` / `mdx loop` / `mdx fade` / `autoplay` は引数なしで現在の状態を
+  返す。`clock status` / `storage status` /
   `vgm status` / `mdx status` / `autoplay status` は引数なしの形と同じ（打ちやすい方を
   使えばよい）。
 - **状態を変えるコマンドは、変えたあとの状態を返す。** `p 1` / `p 0` / `storage host` /
@@ -665,18 +666,30 @@ ERR wrong state
 | `vgm` / `vgm status` | 再生状態を表示する |
 | `vgm list` | `/VGM/` **以下**の `.vgm` と `.vgz` を並べる。サブフォルダも辿る |
 | `vgm play <path>` | `/VGM/<path>` を再生する。`/VGM/` は付けない。`<path>` は `/VGM/` からの相対パス |
-| `vgm stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
+| `vgm stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`。曲が自然に終わったあとの余韻もこれで消せる） |
+| `vgm loop` / `vgm loop <n>` | 何周したらフェードアウトして終わるかの表示 / 設定。10 進、`0`-`99`。**`0` は無限**（既定）で、ループを持つ曲は止まらない |
+| `vgm fade` / `vgm fade <ms>` | フェードアウトの長さの表示 / 設定。10 進、`0`-`60000`（既定 `2000`）。`0` はフェードせず即停止 |
 
 ```
 > vgm
 # vgm     : PLAYING AFTERBURNER.VGM
 # pos     : 507150/2205000 samples  loop 7
 # lag     : reslip 0  gz reload 0
+# end     : loop endless  fade 2000 ms
+# song    : PLAYING
 OK
 ```
 
-`.vgz` を再生中なら 1 行目の末尾に `(gzip)` が付く。同じ内容は `s` の `VGM` /
-`VGM POS` / `VGM LAG` の 3 行にもある（[§3.11](#311-s統計)）。
+`.vgz` を再生中なら 1 行目の末尾に `(gzip)` が付く。`# pos` / `# lag` と同じ内容は
+`s` の `VGM` / `VGM POS` / `VGM LAG` の 3 行にもある（[§3.11](#311-s統計)）。
+`# end` は上の `vgm loop` / `vgm fade` の現在値、`# song` は曲の終わり方の状態で、
+どちらも [§3.22](#322-曲の終わり方) を参照。
+
+```
+> vgm loop 2
+# end     : loop 2  fade 2000 ms
+OK
+```
 
 ```
 > vgm list
@@ -788,7 +801,9 @@ ERR not found
 | `mdx` / `mdx status` | 再生状態を表示する |
 | `mdx list` | `/MDX/` **以下**の `.mdx` を並べる。サブフォルダも辿る。256 件で打ち切る |
 | `mdx play <path>` | `/MDX/<path>` を再生する。`/MDX/` は付けない。`<path>` は `/MDX/` からの相対パス |
-| `mdx stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`） |
+| `mdx stop` | 再生を止めて全チャンネルをキーオフする。RR を 15 にしてから落とすので速やかに消える。**冪等**（停止中でも `OK`。曲が自然に終わったあとの余韻もこれで消せる） |
+| `mdx loop` / `mdx loop <n>` | 何周したらフェードアウトして終わるかの表示 / 設定。10 進、`0`-`99`。**`0` は無限**（既定） |
+| `mdx fade` / `mdx fade <ms>` | フェードアウトの長さの表示 / 設定。10 進、`0`-`60000`（既定 `2000`）。`0` はフェードせず即停止 |
 | `mdx pcm` | ADPCM ミキシングの状態を表示する |
 | `mdx pcm on` / `mdx pcm off` | ADPCM を足す / 足さない（FM だけの音と聴き比べる用） |
 
@@ -798,6 +813,8 @@ ERR not found
 # title   : グラディウス / KONAMI
 # pos     : 12345 clocks  loop 0  ch 9
 # tick    : @t 200  14336 us  reslip 0
+# end     : loop endless  fade 2000 ms
+# song    : PLAYING
 OK
 ```
 
@@ -937,6 +954,11 @@ VGM 再生中は拒否しない。レジスタを叩くわけではなく、変�
 指定した周回数に達したことをファームウェア側で見張るので、ホストは `autoplay start` を
 1 回打つだけでよい。
 
+曲の終わり方そのものは [§3.22](#322-曲の終わり方) の状態機械が持っていて、こちらは
+その `IDLE` を待って次の曲へ送るだけ。`autoplay loop` / `autoplay fade` は
+自動再生中だけ `vgm loop` / `mdx loop` の代わりに使われる（既定値が違うので
+2 系統に分けてある。手動再生は `0` = 無限、自動再生は `2`）。
+
 | コマンド | 説明 |
 | --- | --- |
 | `autoplay` / `autoplay status` | 状態を表示する |
@@ -988,6 +1010,8 @@ OK
 
 #### 次の曲へ移る条件
 
+**`# song` が `IDLE` になったら次へ送る**（[§3.22](#322-曲の終わり方)）。そこへ至る道は 2 つ。
+
 - **曲が終わった。** ループを持たない VGM の終端、MDX の全チャンネルの演奏終了、
   どちらも再生系が自分で止まるのをそのまま使う。再生中に壊れていると分かって
   `ERROR` に落ちた場合も次へ送る。
@@ -996,11 +1020,16 @@ OK
   `autoplay fade <ms>` の時間をかけて落としてから止める。`autoplay loop 0` に
   すると周回では止めず、曲の終端でだけ次へ進む。
 
-どちらの場合も、次の曲を始める前に `autoplay gap <ms>` の無音を挟む。
+どちらの場合も、**曲の余韻（`RINGOUT`）が消えるのを待ってから** `autoplay gap <ms>` の
+無音を数え始める。曲間の無音は「余韻 → 間隔」の順で、次の曲の頭に前の曲の尾が被らない。
 
 ```
-# autoplay: fade out BOS01.MDX
+# mdx     : end of data
 # mdx     : BOS02.MDX
+...
+# song    : fade out (loop 2)
+# song    : end of fadeout
+# vgm     : version 1.51  samples 2205000  loop yes
 ...
 ```
 
@@ -1083,7 +1112,10 @@ ERR unsupported
 | --- | --- |
 | `# vgm     : end of data` | ループを持たない VGM がデータの終端に達して止まった（[§3.14](#314-vgmvgm-再生)） |
 | `# mdx     : end of data` | MDX の全チャンネルが演奏終了（`0xF1 0x00`）に達して止まった（[§3.15](#315-mdxmdx-再生)） |
-| `# mdx     : end of fadeout` | MDX のフェードアウトが完了して止まった |
+| `# mdx     : end of fadeout` | MDX が MML のフェードアウト（`0xE7 0x01`）を完了して止まった |
+| `# song    : fade out (loop <n>)` | ループ回数が上限に達したのでフェードアウトを始めた（[§3.22](#322-曲の終わり方)） |
+| `# song    : end of fadeout` | 上のフェードアウトが終わって演奏を止めた |
+| `# warn    : ringout cut at <ms> ms` | 曲の終わりの余韻が上限まで消えなかったので強制的に消音した（[§3.22](#322-曲の終わり方)） |
 | `# autoplay: fade out <名前>` | 自動再生がループ回数に達してフェードアウトを始めた（[§3.17](#317-autoplay自動再生)） |
 | `# autoplay: skip <名前> (<理由>)` | 自動再生がその曲を開けなかったので次へ送った |
 | `# autoplay: stopped` | 自動再生が降りた。手動の `vgm play` / `mdx play` / `*_stop` でも出る |
@@ -1333,6 +1365,63 @@ VGM / MDX を鳴らしたままステータスを覗ける。
 （`OPM_T_DATA_US` = 25µs）待つ方式のままで、ステータスはポーリングしない
 （[docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)、
 [test/opm_busy/](test/opm_busy/README.md)）。
+
+### 3.22 曲の終わり方
+
+VGM も MDX も、曲がどう終わるかは 1 つの状態機械で決まる。`vgm status` /
+`mdx status` / `autoplay status` の `# song` 行がその状態。
+
+```
+            play                 loop 上限          fade 期限
+  IDLE ───────────> PLAYING ─────────────────> FADING ─────────┐
+   ▲                  │                                        │
+   │                  │ 自然終了 / stop / 壊れていた             │
+   │                  ▼                                        ▼
+   └───── 無音 ──── RINGOUT <───────────────────────────────────┘
+```
+
+| 状態 | 意味 |
+| --- | --- |
+| `IDLE` | 鳴っていない |
+| `PLAYING` | 演奏中 |
+| `FADING` | ループ回数が `loop` に達してフェードアウト中。演奏はまだ続いている |
+| `RINGOUT` | 演奏は止まった。**余韻が消えるのを待っている** |
+
+#### ループ回数で終わらせる
+
+`vgm loop <n>` / `mdx loop <n>` を `0` 以外にすると、その回数だけ周回したところで
+`fade` ミリ秒かけてフェードアウトし、演奏を止める。**既定は `0`（無限）**なので、
+何も設定しなければ従来どおりループを持つ曲は止まらない。
+
+フェードアウトは出力ゲインで作るので、**I2S 出力と USB キャプチャにしか効かない。**
+YM3012 のアナログ出力はフェードが終わるまで元の音量のままで、音が消えるのは
+そのあとのキーオフ（[§5](#5-i2s-出力)）。
+
+自動再生には `autoplay loop` / `autoplay fade` という別の設定があり、自動再生中は
+そちらが優先される（[§3.17](#317-autoplay自動再生)）。既定値が違う（手動再生は
+`0` = 無限、自動再生は `2`）ので 2 系統に分けてある。
+
+#### 曲の終わりの余韻
+
+**曲データが尽きたとき、ファームウェアは OPM に何も書かない。** 最後の音は音色本来の
+RR で自然に減衰する（[§9.1](#91-対応範囲)）。`RINGOUT` はその減衰が終わるのを待つ状態で、
+出力が 100ms のあいだ無音のままなら `IDLE` へ移る。100ms 必要なのは、波形が 1 周期に
+2 回ゼロを通るため（可聴下限の 20Hz = 50ms 周期を跨ぐ長さが要る）。
+
+RR が小さい音色が鳴ったまま曲が終わると減衰しないので、**5 秒で打ち切って強制的に
+消音する**。このとき `# warn : ringout cut at 5000 ms` を出す。
+
+`vgm stop` / `mdx stop` は状態に関わらず消音するので、余韻の途中でも即座に止められる。
+次の曲を `play` したときも、その先頭で全レジスタがクリアされて切れる。
+
+#### 誰がこの状態を見るか
+
+- **自動再生の曲送り** — `IDLE` になってから曲間の無音（`autoplay gap`）を数え始める。
+  次の曲の頭に前の曲の尾が被らない
+- **演奏に連動したキャプチャ**（`p 2`）— `IDLE` になった時点で WAV を閉じる
+  （[§3.10](#310-ppcm-出力)）
+
+どちらも同じ状態を見ているので、**キャプチャの終端と曲送りの時刻は必ず一致する。**
 
 ## 4. PCM 出力
 
@@ -1863,7 +1952,8 @@ OK
 | 処理するコマンド | `0x54`（YM2151 書き込み） / `0x61` `0x62` `0x63` `0x70`-`0x7F`（wait） / `0x80`-`0x8F`（DAC。書き込みは飛ばし wait だけ効かせる） / `0x66`（終端） / `0x67`（データブロックを飛ばす） |
 | 読み飛ばすもの | 上記以外の既知コマンドを仕様上の長さぶん |
 | 中断するもの | 未知のオペコード（`0x00`-`0x2F` / `0x60` / `0x65` / `0x69`-`0x6F` / `0x96`-`0x9F`）、ファイルの途中終端。`# ERR vgm bad file (...)` を出して `ERROR` へ（[§3.18](#318-非同期通知)） |
-| ループ | ヘッダのループオフセットが有効ならそこへ戻って無限に繰り返す。`vgm stop` するまで続く |
+| ループ | ヘッダのループオフセットが有効ならそこへ戻って繰り返す。`vgm loop <n>` を設定していなければ `vgm stop` するまで続く（[§3.22](#322-曲の終わり方)） |
+| 終端 | ループを持たないファイルが終端に達したら**レジスタには何も書かずに**止まる。最後の音は音色本来の RR で自然に減衰する（[§3.22](#322-曲の終わり方)） |
 | 圧縮 | `.vgz`（gzip）を一時ファイルを作らずストリームのまま展開して再生する（[§8.5](#85-vgzgzipの再生)） |
 | 非対応 | GD3 タグ（曲名・作者）の表示 |
 
@@ -2044,6 +2134,11 @@ ADPCM チャンネルは**シーケンサとしては FM と同じように回�
 `.mdx` を gzip したものには対応しない。MDX 本体は数 KB〜数十 KB しかないので、
 `.vgz` のような圧縮の利点が小さい。
 
+**曲データが尽きたときレジスタには何も書かない。** 参照実装 (MXDRV) の演奏終了処理は
+END_FLG を落として PCM8 を止めるだけで OPM を触らないので、それに合わせてある。
+最後の音は音色本来の RR で自然に減衰し、消えるのは `mdx stop` を打つか次の曲を
+`play` したときになる（[§3.22](#322-曲の終わり方)）。
+
 ### 9.2 タイミング
 
 MDX のテンポは **OPM の Timer-B 由来**で、`@t`（`0xFF`）が書く 1 バイトがそのまま
@@ -2120,7 +2215,7 @@ PCM キャプチャ（`p 1`）と I2S 出力は再生中も動く。`mdx play` �
 ### 9.6 MXDRV との相違点
 
 レジスタへの書き込み内容と順序は MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b に合わせてある
-（一部の機能だけ MXDRV 2.06+16 Rel.3+25。[§12](#12-ライセンス)）。違うのは 1 点だけ。
+（一部の機能だけ MXDRV 2.06+16 Rel.3+25。[§12](#12-ライセンス)）。違うのは 2 点。
 
 **BUSY 待ちをしない。** MXDRV は書き込みのたびに OPM のステータスレジスタを読んで
 bit7 が下りるのを待つが、本機は固定ウェイト（アドレス後 5µs / データ後 25µs、
@@ -2128,6 +2223,11 @@ bit7 が下りるのを待つが、本機は固定ウェイト（アドレス後
 書き込み経路では見ない（[test/opm_busy/](test/opm_busy/README.md)）。
 X68000 実機より遅い方向なので、詰まるとすれば書き込みが間に合わない側に出る。
 `s` の `MDX TICK` の `reslip` と I2S のアンダーランで検出できる。
+
+**余韻が消えない曲を 5 秒で打ち切る。** 参照実装は演奏終了後の音を止めないので、
+RR が 0 の音色が鳴ったままだと減衰せずに残り続ける。本機は 5 秒待っても無音に
+ならなければ強制的に消音し、`# warn : ringout cut at 5000 ms` を出す
+（[§3.22](#322-曲の終わり方)）。それ以外の場面での消音のタイミングは参照実装と同じ。
 
 ADPCM については、X68000 では PCM8（江藤啓氏の ADPCM 多重再生ドライバ）が
 MSM6258 を叩く。本機はその PCM8 に相当する処理をソフトウェアで持っている

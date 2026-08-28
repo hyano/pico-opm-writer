@@ -14,7 +14,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `opm.c` / `opm.h` | YM2151 バス制御（GPIO / PIO） |
 | `opm_clock.pio` | φM 生成（PIO） |
 | `clockmode.c` / `clockmode.h` | φM プリセットの実行時切り替え（sys_clk と PIO 分周比の張り替え順序） |
-| `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 |
+| `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 / 出力ゲイン（フェード）。`ym3012_ring_poll()` が取り込みのついでに「最後に音があったフレーム」を覚えていて、余韻の判定はこれを見る |
 | `capture.c` / `capture.h` | キャプチャ状態機械 |
 | `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
 | `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
@@ -27,7 +27,8 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
 | `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b の仕様に準拠**（一部の機能のみ 2.06+16 Rel.3+25。ソースは同梱していない） |
 | `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない**。**発音状態を変える関数は `flush_now()` でミックスリングを実時刻まで描き切ってから変える**（これが FM との発音時刻を合わせている。[test/pcm8_sync/](test/pcm8_sync/README.md)） |
-| `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。フェードアウトは `ym3012_fade_start()` の出力ゲインで作るので **I2S と USB キャプチャにしか効かない**（YM3012 のアナログ出力は素通り） |
+| `songend.c` / `songend.h` | 曲の終わり方。IDLE / PLAYING / FADING / RINGOUT の 1 本の状態機械で、ループ回数での打ち切り・フェードアウト・**終わったあとの余韻待ち**を持つ。**外に出す観測は `songend_is_active()` の 1 つ**で、autoplay の曲送りも `p 2` のキャプチャの終端もこれを見る（だから必ず同じ時刻で動く）。ループ上限は手動再生用と autoplay 用で既定値が違うため 2 系統あり、autoplay はトラックごとに `songend_arm()` で差し込む |
+| `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。**曲の終わり方は `songend.c` に委譲**していて、`songend_is_active()` が落ちるのを待って次の曲へ送るだけ（余韻が消えてから曲間の無音を数える） |
 | `button.c` / `button.h` | GP21 (SW1) / GP22 (SW2) の取り込み。デバウンス・短押し / 長押しの状態機械・深さ 1 のメールボックス。**autoplay も storage も知らない**（`service_all()` が再入的に呼ばれるため、消化は `pico-opm-writer.c` の `button_dispatch()` がメインループのトップレベルで行う）。SW3 は RUN 端子でファームからは見えない |
 | `led.c` / `led.h` | LED 表示 |
 | `stats.c` / `stats.h` | 実行時統計 |

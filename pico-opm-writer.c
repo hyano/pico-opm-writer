@@ -25,6 +25,7 @@
 #include "opm.h"
 #include "pcm8.h"
 #include "stats.h"
+#include "songend.h"
 #include "storage.h"
 #include "usb_pcm.h"
 #include "vgm.h"
@@ -212,9 +213,12 @@ static void service_all(void)
         STATS_SVC(STATS_SVC_VGM, vgm_service());
         STATS_SVC(STATS_SVC_MDX, mdx_service());
         /*
-         * 曲送りはシーケンサの後。同じ周回で更新された再生状態をそのまま見られる。
-         * 判定は比較が数回で済むので STATS_SVC では包まない。
+         * 曲の終わり方と曲送りはシーケンサの後。同じ周回で更新された再生状態を
+         * そのまま見られる。songend は autoplay より前（autoplay は songend が
+         * 出した結論を見て曲を送る）。判定は比較が数回で済むので STATS_SVC では
+         * 包まない。
          */
+        songend_service();
         autoplay_service();
     }
 
@@ -445,10 +449,14 @@ static void print_help(void)
     puts("# vgm list                            : list /VGM/**/*.vgm and *.vgz");
     puts("# vgm play <path>                     : play /VGM/<path>, subfolders ok");
     puts("# vgm stop                            : stop playback");
+    puts("# vgm loop | vgm loop <n>             : show / set loops before fade-out, 0 = endless");
+    puts("# vgm fade | vgm fade <ms>            : show / set fade-out length, 0 = stop at once");
     puts("# mdx | mdx status                    : show MDX playback state");
     puts("# mdx list                            : list /MDX/**/*.mdx");
     puts("# mdx play <path>                     : play /MDX/<path>, subfolders ok");
     puts("# mdx stop                            : stop playback");
+    puts("# mdx loop | mdx loop <n>             : show / set loops before fade-out, 0 = endless");
+    puts("# mdx fade | mdx fade <ms>            : show / set fade-out length, 0 = stop at once");
     puts("# mdx pcm | mdx pcm on | mdx pcm off  : show / toggle ADPCM (PCM8) mixing");
     puts("# autoplay | autoplay status          : show autoplay state");
     puts("# autoplay list                       : show the playlist");
@@ -1122,6 +1130,56 @@ static void cmd_storage(char **cursor)
  *
  * ファイル名は行の残り全部を 1 引数として受けるので、空白を含む名前も扱える。
  */
+/*
+ * `vgm loop` / `vgm fade` と MDX 版の共通部。曲の終わり方の設定は種別ごとに
+ * songend が持っていて、ここは表示と入力の検査だけを行う。
+ */
+static void print_songend_setting(songend_kind_t kind)
+{
+    /* loop 0 は無限。数値のままだと「0 周でフェード」と読めるので語で出す。 */
+    uint32_t loops = songend_loop(kind);
+    if (loops == 0u)
+    {
+        printf("# end     : loop endless  fade %u ms\n", (unsigned)songend_fade_ms(kind));
+    }
+    else
+    {
+        printf("# end     : loop %u  fade %u ms\n", (unsigned)loops,
+               (unsigned)songend_fade_ms(kind));
+    }
+}
+
+/* 引数なしなら表示だけ。あれば設定してから変更後の状態を返す。 */
+static void cmd_songend_setting(char **cursor, songend_kind_t kind, bool is_loop)
+{
+    char *arg = next_token(cursor);
+    if (arg != NULL)
+    {
+        if (!expect_no_args(cursor))
+        {
+            return;
+        }
+        uint32_t v;
+        const char *err =
+            parse_dec_u32(arg, is_loop ? SONGEND_LOOP_MAX : SONGEND_FADE_MS_MAX, &v);
+        if (err != NULL)
+        {
+            reply_err(err);
+            return;
+        }
+        if (is_loop)
+        {
+            songend_set_loop(kind, v);
+        }
+        else
+        {
+            songend_set_fade_ms(kind, v);
+        }
+    }
+    print_songend_setting(kind);
+    reply_ok();
+}
+
 /* `vgm`（引数なし）と `vgm status` の出力。統計本体は `s` に置いたまま。 */
 static void print_vgm_status(void)
 {
@@ -1133,6 +1191,8 @@ static void print_vgm_status(void)
            (unsigned)vgm_loop_count());
     printf("# lag     : reslip %u  gz reload %u\n",
            (unsigned)vgm_reslip_count(), (unsigned)vgm_gz_reload_count());
+    print_songend_setting(SONGEND_KIND_VGM);
+    printf("# song    : %s\n", songend_state_name());
     reply_ok();
 }
 
@@ -1195,6 +1255,12 @@ static void cmd_vgm(char **cursor)
         return;
     }
 
+    if (tok_is(sub, "loop") || tok_is(sub, "fade"))
+    {
+        cmd_songend_setting(cursor, SONGEND_KIND_VGM, tok_is(sub, "loop"));
+        return;
+    }
+
     if (tok_is(sub, "stop"))
     {
         if (!expect_no_args(cursor))
@@ -1236,6 +1302,8 @@ static void print_mdx_status(void)
            (unsigned)mdx_channels());
     printf("# tick    : @t %u  %u us  reslip %u\n",
            (unsigned)mdx_tempo(), (unsigned)mdx_tick_us(), (unsigned)mdx_reslip_count());
+    print_songend_setting(SONGEND_KIND_MDX);
+    printf("# song    : %s\n", songend_state_name());
     reply_ok();
 }
 
@@ -1293,6 +1361,12 @@ static void cmd_mdx(char **cursor)
         {
             reply_ok();
         }
+        return;
+    }
+
+    if (tok_is(sub, "loop") || tok_is(sub, "fade"))
+    {
+        cmd_songend_setting(cursor, SONGEND_KIND_MDX, tok_is(sub, "loop"));
         return;
     }
 
@@ -1381,6 +1455,8 @@ static void print_autoplay_status(void)
 {
     printf("# autoplay: %s  mode %s  source %s\n", autoplay_state_name(),
            autoplay_mode_name(), autoplay_source_name());
+
+    printf("# song    : %s\n", songend_state_name());
 
     const char *name = autoplay_current_name();
     if (name[0] != '\0')
@@ -2016,6 +2092,8 @@ int main(void)
     storage_init();
     vgm_init();
     mdx_init();
+    /* 曲の終わり方。vgm/mdx の状態を見るだけなので init の順はこの後ろでよい。 */
+    songend_init();
     autoplay_init();
 
     /*
