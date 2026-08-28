@@ -25,6 +25,11 @@ static capture_state_t s_state;
 /* p 0 を受けた時点の書き込み総フレーム数。ここまで送ったらドレイン完了。 */
 static uint64_t s_drain_target;
 
+/* p 2（演奏連動）の状態 */
+static bool s_auto;           /* 曲の終わりで自分から止まるモードか */
+static uint32_t s_track_seq;  /* 見張っているトラックの通し番号 */
+static uint64_t s_start_total; /* 録り始めた時点の書き込み総フレーム数 */
+
 /* stats へフレーム数を渡すときの前回値 */
 static uint64_t s_counted_total;
 
@@ -36,6 +41,9 @@ void capture_init(void)
     s_state = CAPTURE_STATE_IDLE;
     s_drain_target = 0;
     s_counted_total = 0;
+    s_auto = false;
+    s_track_seq = 0;
+    s_start_total = 0;
     led_set_state(LED_STATE_IDLE);
 }
 
@@ -44,12 +52,19 @@ capture_state_t capture_state(void)
     return s_state;
 }
 
+bool capture_is_auto(void)
+{
+    return s_auto;
+}
+
 const char *capture_state_name(void)
 {
     switch (s_state)
     {
     case CAPTURE_STATE_IDLE:
         return "IDLE";
+    case CAPTURE_STATE_WAITING:
+        return "WAITING";
     case CAPTURE_STATE_CAPTURING:
         return "CAPTURING";
     case CAPTURE_STATE_DRAINING:
@@ -61,9 +76,22 @@ const char *capture_state_name(void)
     }
 }
 
-const char *capture_start(void)
+/* 「ここから先の DMA データだけを送る」に揃えてから CAPTURING へ入る。 */
+static void begin_capturing(void)
 {
-    if (s_state == CAPTURE_STATE_CAPTURING || s_state == CAPTURE_STATE_DRAINING)
+    ym3012_ring_poll();
+    ym3012_ring_sync();
+    usb_pcm_clear();
+
+    s_start_total = ym3012_write_total();
+    s_state = CAPTURE_STATE_CAPTURING;
+    led_set_state(LED_STATE_CAPTURE);
+}
+
+const char *capture_start(bool auto_stop, uint32_t track_seq)
+{
+    if (s_state == CAPTURE_STATE_WAITING || s_state == CAPTURE_STATE_CAPTURING ||
+        s_state == CAPTURE_STATE_DRAINING)
     {
         printf("# hint    : already capturing; run p 0 first\n");
         return "wrong state";
@@ -78,14 +106,56 @@ const char *capture_start(void)
         return "not connected";
     }
 
-    /* p 1 以降に DMA が書いたデータだけを送る */
-    ym3012_ring_poll();
-    ym3012_ring_sync();
-    usb_pcm_clear();
+    s_auto = auto_stop;
+    if (auto_stop)
+    {
+        /* 「次の play」の基準。いま鳴っている曲は録らない。 */
+        s_track_seq = track_seq;
 
-    s_state = CAPTURE_STATE_CAPTURING;
-    led_set_state(LED_STATE_CAPTURE);
+        /*
+         * まだ何も送らない。**待っている間の無音を WAV に入れないため**で、
+         * 録り始めるのは次に play が成功した周回（capture_note_track）。
+         * LED は待ちの時点から点ける（キャプチャが仕掛かっているのが見える）。
+         */
+        s_state = CAPTURE_STATE_WAITING;
+        led_set_state(LED_STATE_CAPTURE);
+        return NULL;
+    }
+
+    begin_capturing();
     return NULL;
+}
+
+void capture_note_track(bool active, uint32_t seq)
+{
+    if (!s_auto)
+    {
+        return;
+    }
+
+    if (s_state == CAPTURE_STATE_WAITING)
+    {
+        if (seq != s_track_seq)
+        {
+            s_track_seq = seq;
+            begin_capturing();
+        }
+        return;
+    }
+
+    if (s_state != CAPTURE_STATE_CAPTURING)
+    {
+        return;
+    }
+
+    /*
+     * 次の曲が始まった、または今の曲が終わって余韻も消えた。どちらも打ち切る。
+     * 1 キャプチャ = 1 曲にしておくと、ホストは WAV を閉じる位置を迷わない。
+     */
+    if (seq != s_track_seq || !active)
+    {
+        capture_request_stop();
+    }
 }
 
 /*
@@ -97,6 +167,12 @@ const char *capture_request_stop(void)
 {
     if (s_state == CAPTURE_STATE_IDLE)
     {
+        return NULL;
+    }
+    if (s_state == CAPTURE_STATE_WAITING)
+    {
+        /* まだ 1 フレームも送っていないので、送り切るものが無い。 */
+        capture_abort();
         return NULL;
     }
     if (s_state == CAPTURE_STATE_ERROR)
@@ -131,6 +207,7 @@ void capture_resync_after_blackout(void)
 void capture_abort(void)
 {
     s_state = CAPTURE_STATE_IDLE;
+    s_auto = false;
     ym3012_ring_sync();
     led_set_state(LED_STATE_IDLE);
 }
@@ -138,7 +215,17 @@ void capture_abort(void)
 /* 送信をやめて IDLE へ。CDC #1 の切断はエラーではないのでこちらを使う。 */
 static void capture_to_idle(void)
 {
+    if (s_auto)
+    {
+        /*
+         * 演奏連動のときだけ、録れた長さを通知する。ホストは WAV を閉じる合図に
+         * これを使う。`#` 始まりなので「1 コマンド 1 応答」は崩れない。
+         */
+        printf("# capture : done %llu frames\n",
+               (unsigned long long)(ym3012_read_total() - s_start_total));
+    }
     s_state = CAPTURE_STATE_IDLE;
+    s_auto = false;
     ym3012_ring_sync();
     led_set_state(LED_STATE_IDLE);
 }
@@ -172,10 +259,20 @@ bool capture_service(void)
     stats_ring_update(unread);
     stats_usb_tx_update(usb_pcm_pending());
 
-    /* 送らない状態では読み捨てて、未処理を溜めない（誤 overrun を防ぐ） */
-    if (s_state == CAPTURE_STATE_IDLE || s_state == CAPTURE_STATE_ERROR)
+    /*
+     * 送らない状態では読み捨てて、未処理を溜めない（誤 overrun を防ぐ）。
+     * WAITING は「まだ送っていない」だけなので IDLE と同じ扱いでよい。
+     */
+    if (s_state == CAPTURE_STATE_IDLE || s_state == CAPTURE_STATE_ERROR ||
+        s_state == CAPTURE_STATE_WAITING)
     {
         ym3012_ring_sync();
+        /* 待っている間に CDC #1 が閉じたら、演奏を待たずに降りる。 */
+        if (s_state == CAPTURE_STATE_WAITING && !usb_pcm_connected())
+        {
+            capture_abort();
+            return true;
+        }
         return false;
     }
 
@@ -193,6 +290,7 @@ bool capture_service(void)
     if (unread >= YM3012_RING_FRAMES)
     {
         s_state = CAPTURE_STATE_ERROR;
+        s_auto = false;
         stats_count_overrun();
         ym3012_ring_sync();
         led_set_state(LED_STATE_ERROR);

@@ -16,7 +16,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [clockmode.h](../clockmode.h) / [clockmode.c](../clockmode.c) | φM プリセットの実行時切り替え。sys_clk と PIO 分周比の張り替え順序（[§2.3](#23-実行時の切り替え)） |
 | [ym3012.h](../ym3012.h) / [ym3012.c](../ym3012.c) | YM3012 の PIO + DMA リング初期化、リング位置の管理、PCM 変換、自己診断 |
 | [ym3012.pio](../ym3012.pio) | キャプチャ用 PIO プログラムと `ym3012_capture_program_init()` |
-| [capture.h](../capture.h) / [capture.c](../capture.c) | キャプチャの状態機械と、リング → PCM → CDC #1 の送出 |
+| [capture.h](../capture.h) / [capture.c](../capture.c) | キャプチャの状態機械と、リング → PCM → CDC #1 の送出。演奏に連動する `p 2` もここ（[§4.7](#47-演奏に連動したキャプチャ-p-2)） |
 | [i2s.h](../i2s.h) / [i2s.c](../i2s.c) | I2S 出力の PIO + DMA リング初期化、先行量の維持、アンダーラン復帰 |
 | [i2s.pio](../i2s.pio) | I2S 出力用 PIO プログラムと `i2s_out_program_init()` |
 | [usb_pcm.h](../usb_pcm.h) / [usb_pcm.c](../usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
@@ -646,6 +646,41 @@ typedef struct {
 `YM3012_LOOPBACK_ENABLED` の既定値は `I2S_ENABLED` から決まり、I2S が有効なら診断を
 行わず結果は `SKIP (disabled)` になる。DAC を外して診断だけ試すときは
 `-DYM3012_LOOPBACK=1` で再コンフィグする。
+
+### 4.7 演奏に連動したキャプチャ (`p 2`)
+
+`p 1` との違いは**録り始めと録り終わりだけ**で、送信の実装はどちらも同じ経路を通る。
+状態が 1 つ増える。
+
+```
+IDLE --p 1--> CAPTURING --p 0--> DRAINING --送り切り--> IDLE
+IDLE --p 2--> WAITING --play--> CAPTURING --曲の終わり--> DRAINING --> IDLE
+```
+
+`WAITING` は IDLE と同じくリングを読み捨てるだけで、CDC #1 へは 1 バイトも出さない。
+**待っている間の無音を WAV に入れないため。** ここで溜め込むとリング 65.5ms 分で
+overrun するので、読み捨ては省けない。
+
+**開始と終了の合図はどちらも `capture_note_track(active, seq)` で外から渡す。**
+
+- `seq` は `songend_track_seq()`（`vgm_play_seq() + mdx_play_seq()`）。`p 2` の時点の値を
+  控えておき、変わったら「次の play が起きた」。**レベル（鳴っているか）では拾えない** —
+  鳴っている最中に別の曲を `play` しても再生状態は落ちないため。`WAITING` 中に変われば
+  録り始め、`CAPTURING` 中に変われば打ち切る（1 キャプチャ = 1 曲）
+- `active` は `songend_is_active()`（[§11](#11-曲の終わり方-songend)）。**余韻が消えるまで
+  true** なので、`p 2` の録り終わりは自動再生が次の曲へ送るのと必ず同じ時刻になる
+
+**[capture.c](../capture.c) は vgm / mdx / songend を include しない。** 判定を持ち込むと、
+`storage host` の排他をコマンド層に置いたのと同じ理由で層が濁る。渡ってくるのは
+`bool` と番号だけ。
+
+呼び出しは [pico-opm-writer.c](../pico-opm-writer.c) の `service_all()` で、**シーケンサの
+間引き（`due()`）の外**に置く。比較が数回で済むうえ、間引くと待機から録り始めるまでの
+遅れがそのまま WAV の頭の欠けになる。
+
+終了は `# capture : done <n> frames` で通知する。`#` 始まりの情報行なので「1 コマンド
+1 応答」（[README §3.3](../README.md#33-応答)）は崩れない。`n` は
+`ym3012_read_total() - s_start_total`、つまり CDC #1 へ積んだフレーム数そのもの。
 
 ## 5. I2S 出力
 
@@ -1692,7 +1727,7 @@ MDX にもそのまま掛かる。MDX はファイルを丸ごと RAM に載せ�
 しかない。** 利用者側の仕様は [README §3.22](../README.md#322-曲の終わり方)。
 
 **外に出す観測は実質 `songend_is_active()` の 1 つ。** 自動連続再生の曲送り
-（[§12](#12-自動連続再生-autoplay)）も、演奏に連動したキャプチャ（[§4](#4-ym3012-dac-キャプチャ)）も
+（[§12](#12-自動連続再生-autoplay)）も、演奏に連動したキャプチャ（[§4.7](#47-演奏に連動したキャプチャ-p-2)）も
 これを見る。両者が必ず同じ時刻で動くのはこのため。
 
 ### 11.1 状態機械

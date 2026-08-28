@@ -222,6 +222,13 @@ static void service_all(void)
         autoplay_service();
     }
 
+    /*
+     * 演奏連動キャプチャ（`p 2`）へ「曲が続いているか」を渡す。比較が数回で済むので
+     * due() では間引かない。**待機から録り始めるまでの遅れをメインループ 1 周に
+     * 抑える**ためで、ここを間引くと WAV の先頭に曲の頭が欠ける。
+     */
+    capture_note_track(songend_is_active(), songend_track_seq());
+
     if (due(&s_storage_last_us, t1, STORAGE_SERVICE_INTERVAL_US))
     {
         STATS_SVC(STATS_SVC_STORAGE, storage_service());
@@ -435,6 +442,7 @@ static void print_help(void)
     puts("# c                                   : clear all registers (software)");
     puts("# d <ms>                              : delay, decimal 0-60000");
     puts("# p | p 1 | p 0                       : show / start / stop PCM output on CDC #1");
+    puts("# p 2                                 : start on the next play, stop when the song ends");
     puts("# s | s 0                             : show / reset statistics");
     puts("# t                                   : run self tests (pcm / piotest / mdx / adpcm)");
     puts("# i                                   : show info");
@@ -775,7 +783,7 @@ static void cmd_delay(char **cursor)
 }
 
 /*
- * p 1 / p 0
+ * p 1 / p 2 / p 0
  *
  * PIO と DMA は常時動いているので、ここで制御しているのは CDC #1 への送信だけ。
  */
@@ -783,6 +791,7 @@ static void cmd_delay(char **cursor)
 static void print_capture_status(void)
 {
     printf("# capture : %s\n", capture_state_name());
+    printf("# auto    : %s\n", capture_is_auto() ? "on" : "off");
     printf("# cdc1    : %s\n", usb_pcm_connected() ? "connected" : "not connected");
     printf("# rate    : %u Hz\n", (unsigned)(opm_clock_hz_actual() / 64u));
     reply_ok();
@@ -802,14 +811,14 @@ static void cmd_pcm(char **cursor)
     }
 
     uint32_t mode;
-    const char *err = parse_dec_u32(tok, 1u, &mode);
+    const char *err = parse_dec_u32(tok, 2u, &mode);
     if (err != NULL)
     {
         reply_err(err);
         return;
     }
 
-    if (mode == 1u)
+    if (mode != 0u)
     {
         /*
          * HOST モード中はフラッシュの消去でメインループが数十 ms 止まるので、
@@ -822,7 +831,7 @@ static void cmd_pcm(char **cursor)
             reply_err("wrong state");
             return;
         }
-        err = capture_start();
+        err = capture_start(mode == 2u, songend_track_seq());
         if (err != NULL)
         {
             reply_err(err);

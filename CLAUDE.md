@@ -15,7 +15,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `opm_clock.pio` | φM 生成（PIO） |
 | `clockmode.c` / `clockmode.h` | φM プリセットの実行時切り替え（sys_clk と PIO 分周比の張り替え順序） |
 | `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 / 出力ゲイン（フェード）。`ym3012_ring_poll()` が取り込みのついでに「最後に音があったフレーム」を覚えていて、余韻の判定はこれを見る |
-| `capture.c` / `capture.h` | キャプチャ状態機械 |
+| `capture.c` / `capture.h` | キャプチャ状態機械。`p 1`（即時）と `p 2`（演奏連動）で、違うのは録り始めと録り終わりだけ。**vgm / mdx / songend は include しない**（`capture_note_track()` で bool と通し番号だけ受け取る） |
 | `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
 | `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
 | `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ上のブロックデバイス（領域定数・ライトバックキャッシュ） |
