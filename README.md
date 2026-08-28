@@ -654,7 +654,7 @@ OK
 # region  : flash 0x040000 + 3836 KiB  (LBA 512 B x 7672)
 # firmware: end 0x1001c654 (116308 B)  gap 142 KiB
 # fs      : FAT12  cluster 4096 B  free 3808/3816 KiB
-# label   : OPMVGM
+# label   : PICOOPM
 # cache   : 8 lines  dirty 0
 # flash   : WRITE 13   BLACKOUT max 39976 us
 OK
@@ -1751,7 +1751,7 @@ Raspberry Pi Pico 2 に載っている **内蔵 QSPI フラッシュ 4MiB** の�
 | 領域 | フラッシュ先頭から 0x40000、サイズ 3836KiB（3,928,064 バイト） |
 | フォーマット | FAT12 / クラスタ 4096 バイト / SFD（MBR 無し） |
 | 論理セクタ | 512 バイト（FatFs と USB MSC で共通） |
-| ボリュームラベル | `OPMVGM` |
+| ボリュームラベル | `PICOOPM` |
 | VGM の置き場所 | `/VGM/` |
 | MDX の置き場所 | `/MDX/` |
 
@@ -1832,7 +1832,7 @@ OK
 （[§3.20](#320-ボタンgp21--gp22)）。PC を繋ぐ前にファイルシステムを渡しておけるので、
 初めて曲を入れるときはこちらが早い。HOST 中は LED が 200ms ON / 800ms OFF になる。
 
-PC にリムーバブルディスク `OPMVGM` が現れるので、`/VGM/` へ `.vgm` / `.vgz` を、
+PC にリムーバブルディスク `PICOOPM` が現れるので、`/VGM/` へ `.vgm` / `.vgz` を、
 `/MDX/` へ `.mdx` を置く。終わったら **PC 側で取り出し（eject）する**。それだけで
 Pico 側へ所有権が戻り、FatFs が自動でマウントし直される。
 

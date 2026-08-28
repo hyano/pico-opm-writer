@@ -381,7 +381,7 @@ PDX の読み出しや音色の展開でメインループが 1 回の音声チ�
 
 ```bash
 # ファーム側: storage host
-cp SYNC.MDX SYNC2.MDX SYNC.PDX /Volumes/OPMVGM/MDX/
+cp SYNC.MDX SYNC2.MDX SYNC.PDX /Volumes/PICOOPM/MDX/
 # ホスト側で取り出してから、ファーム側: storage player
 ```
 

@@ -99,7 +99,7 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
 
     /* SCSI の規定どおり空白詰めの固定長。終端は入れない。 */
     memcpy(vendor_id, "PicoOPM ", 8);
-    memcpy(product_id, "VGM Storage     ", 16);
+    memcpy(product_id, "OPM Storage     ", 16);
     memcpy(product_rev, "0001", 4);
     trace('I', 0, 0, 0);
 }

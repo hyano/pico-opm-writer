@@ -524,12 +524,12 @@ const char *storage_format(void)
         return "io error";
     }
 
-    if (f_setlabel("OPMVGM") != FR_OK)
+    if (f_setlabel("PICOOPM") != FR_OK)
     {
         return "io error";
     }
 
-    if (f_mkdir("/VGM") != FR_OK)
+    if (f_mkdir(VGM_DIR) != FR_OK)
     {
         return "io error";
     }
