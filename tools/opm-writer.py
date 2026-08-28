@@ -78,6 +78,9 @@ DEFAULT_SONG_MAX_MS = 900000
 # ファームが `p 2` のキャプチャを終えたときに CDC #0 へ出す行
 CAPTURE_DONE_PREFIX = "# capture : done"
 
+# `p` が返すサンプリングレートの行。`!capture-song` はここから WAV のレートを取る
+RATE_LINE_RE = re.compile(r"^#\s*rate\s*:\s*(\d+)\s*Hz")
+
 # WAV へ書く既定値
 DEFAULT_PHIM = 4000000.0
 DEFAULT_ZSTD_LEVEL = 22
@@ -529,8 +532,11 @@ def reply_timeout(line):
     return REPLY_TIMEOUT_S
 
 
-def send_line(ser, line):
-    """1 行送って終端応答まで読む。エラーなら理由の文字列、正常なら None。"""
+def send_line(ser, line, info=None):
+    """1 行送って終端応答まで読む。エラーなら理由の文字列、正常なら None。
+
+    info にリストを渡すと、途中の `#` 情報行をそこへ集める。
+    """
     print(f"> {line}", flush=True)
     ser.write_line(line)
 
@@ -542,10 +548,31 @@ def send_line(ser, line):
             return "timeout"
         print(f"< {reply}", flush=True)
         if reply.startswith("#"):
+            if info is not None:
+                info.append(reply)
             continue  # 情報行。終端はこの後に来る
         if reply == "OK":
             return None
         return reply
+
+
+def query_rate(ser, args):
+    """いまの PCM のサンプリングレートをファームに聞く。取れなければ --phim から。
+
+    `!capture-song` では、曲を始めた時点で φM が切り替わっていることがある
+    （VGM がファイル側のクロックを要求した場合。README §3.16）。その WAV に
+    `--phim` 由来のレートを書くと、時間軸が黙って狂う。
+    """
+    info = []
+    if send_line(ser, "p", info) is None:
+        for line in info:
+            m = RATE_LINE_RE.match(line)
+            if m:
+                return int(m.group(1))
+    fallback = pcm_rate(args)
+    print(f"! レートを読めなかったので --phim の {fallback} Hz を使う",
+          file=sys.stderr, flush=True)
+    return fallback
 
 
 def capture_command(step, args):
@@ -574,7 +601,7 @@ def expected_bytes(step, args):
     return int(rate * step.ms / 1000.0) if rate else None
 
 
-def report_output(step, args, captured):
+def report_output(step, args, captured, rate_hz=None):
     """キャプチャ長を検査して結果を表示する。エラーなら理由の文字列。
 
     captured は実際に受け取ったバイト数。ホストが PCM を読み落としても `p 0` の応答は
@@ -587,7 +614,7 @@ def report_output(step, args, captured):
     if not step.output.exists():
         return f"キャプチャファイルが生成されていない: {step.output}"
 
-    rate = capture_byte_rate(args)
+    rate = (rate_hz * PCM_FRAME_BYTES) if rate_hz else capture_byte_rate(args)
     if step.kind == "capture-song":
         if captured == 0:
             return discard_output(step, "キャプチャが空: PCM が 1 バイトも届かなかった")
@@ -621,6 +648,7 @@ def run_capture(step, args, ser):
     fp = closers = sink = None
     captured = 0
     overrun = False
+    rate = pcm_rate(args)
     try:
         # 前回の取りこぼしが残っていることがあるので、開始前に捨てる
         pcm.drain_bytes(0.2)
@@ -630,20 +658,23 @@ def run_capture(step, args, ser):
         if err is not None:
             return f"{start} が失敗した: {err}"
 
-        try:
-            fp, closers = open_output(step.output, args.zstd_level)
-        except OSError as e:
-            send_line(ser, "p 0")
-            return str(e)
-        sink = WavSink(fp, 2, 2, pcm_rate(args))
-
         if step.kind == "capture-song":
             # `p 2` は待機しているだけなので、ここで演奏を始めて録り始めさせる
             err = send_line(ser, step.cmd)
             if err is not None:
                 send_line(ser, "p 0")
                 return f"{step.cmd} が失敗した: {err}"
+            # 曲が φM を切り替えていることがあるので、実際のレートを聞く
+            rate = query_rate(ser, args)
 
+        try:
+            fp, closers = open_output(step.output, args.zstd_level)
+        except OSError as e:
+            send_line(ser, "p 0")
+            return str(e)
+        sink = WavSink(fp, 2, 2, rate)
+
+        if step.kind == "capture-song":
             # 曲が終わるとファームが自分で停止して done を出す。それまで読み続ける
             deadline = time.monotonic() + step.ms / 1000.0
             done = False
@@ -717,7 +748,7 @@ def run_capture(step, args, ser):
             step, f"曲が {step.ms} ms 以内に終わらなかった"
                   "（--song-max-ms で伸ばすか、vgm loop / mdx loop を設定すること）")
 
-    return report_output(step, args, captured)
+    return report_output(step, args, captured, rate)
 
 
 def discard_output(step, err):
