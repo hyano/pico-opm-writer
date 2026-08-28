@@ -290,7 +290,6 @@ bool capture_service(void)
     if (unread >= YM3012_RING_FRAMES)
     {
         s_state = CAPTURE_STATE_ERROR;
-        s_auto = false;
         stats_count_overrun();
         ym3012_ring_sync();
         led_set_state(LED_STATE_ERROR);
@@ -302,6 +301,19 @@ bool capture_service(void)
          * 状態そのものは `s` の state と OVERRUN からも読める。
          */
         printf("# ERR dma overrun\n");
+
+        /*
+         * **演奏連動 (`p 2`) では終わったことも必ず伝える。** ホストは
+         * `# capture : done` を待って WAV を閉じるが、この経路では 1 フレームも
+         * 送れないまま止まるので done は出せない。合図が無いとホストは上限まで
+         * 待ち続けることになるので、打ち切りの行をここで出す。s_auto を落とすのは
+         * その後（capture_note_track() がこれ以上何もしないようにする）。
+         */
+        if (s_auto)
+        {
+            printf("# capture : abort (dma overrun)\n");
+        }
+        s_auto = false;
         return true;
     }
 

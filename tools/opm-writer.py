@@ -78,6 +78,10 @@ DEFAULT_SONG_MAX_MS = 900000
 # ファームが `p 2` のキャプチャを終えたときに CDC #0 へ出す行
 CAPTURE_DONE_PREFIX = "# capture : done"
 
+# ファームが `p 2` のキャプチャを異常終了させたときに CDC #0 へ出す行。
+# これを見ずに待つと `--song-max-ms` を使い切るまで気付けない
+CAPTURE_ABORT_PREFIX = "# capture : abort"
+
 # `p` が返すサンプリングレートの行。`!capture-song` はここから WAV のレートを取る
 RATE_LINE_RE = re.compile(r"^#\s*rate\s*:\s*(\d+)\s*Hz")
 
@@ -483,6 +487,28 @@ class Serial:
             if chunk:
                 self.buf += chunk
 
+    def poll_line(self):
+        """溜まっている行を 1 行返す。揃っていなければ None。**待たない。**
+
+        PCM を読みながら片手間にコマンドポートを覗くための版。read_line() は
+        行が来るまで select で待つので、キャプチャ中に混ぜると 1 周ごとに
+        その待ち時間ぶん PCM を読まない時間ができる。62500Hz / 16bit / stereo は
+        250KB/s あり、数 ms でも読まない時間があると取りこぼしてファーム側の
+        DMA リング (65.5ms) が溢れる。
+        """
+        while True:
+            nl = self.buf.find(b"\n")
+            if nl >= 0:
+                line, self.buf = self.buf[:nl], self.buf[nl + 1:]
+                return line.rstrip(b"\r").decode("utf-8", "replace")
+            try:
+                chunk = os.read(self.fd, 4096)
+            except BlockingIOError:
+                return None
+            if not chunk:
+                return None
+            self.buf += chunk
+
     def read_bytes(self, timeout):
         """届いているバイト列をそのまま返す。何も来なければ b""。
 
@@ -648,6 +674,7 @@ def run_capture(step, args, ser):
     fp = closers = sink = None
     captured = 0
     overrun = False
+    aborted = None
     rate = pcm_rate(args)
     try:
         # 前回の取りこぼしが残っていることがあるので、開始前に捨てる
@@ -675,23 +702,32 @@ def run_capture(step, args, ser):
         sink = WavSink(fp, 2, 2, rate)
 
         if step.kind == "capture-song":
-            # 曲が終わるとファームが自分で停止して done を出す。それまで読み続ける
+            # 曲が終わるとファームが自分で停止して done を出す。それまで読み続ける。
+            #
+            # **コマンドポートは poll_line() で覗くだけにする。** read_line() で
+            # 待つと 1 周ごとにその待ち時間だけ PCM を読まなくなり、250KB/s を
+            # 捌けずにファーム側の DMA リングが溢れる（`# ERR dma overrun`）。
             deadline = time.monotonic() + step.ms / 1000.0
             done = False
             while not done:
                 if time.monotonic() >= deadline:
                     overrun = True
                     break
-                chunk = pcm.read_bytes(0.01)
+                chunk = pcm.read_bytes(0.02)
                 if chunk:
                     sink.writeframes(chunk)
                     captured += len(chunk)
-                line = ser.read_line(time.monotonic() + 0.005)
-                if line is None:
-                    continue
-                print(f"< {line}", flush=True)
-                if line.startswith(CAPTURE_DONE_PREFIX):
-                    done = True
+                while True:
+                    line = ser.poll_line()
+                    if line is None:
+                        break
+                    print(f"< {line}", flush=True)
+                    if line.startswith(CAPTURE_DONE_PREFIX):
+                        done = True
+                    elif line.startswith(CAPTURE_ABORT_PREFIX):
+                        # ファームがキャプチャを打ち切った。待っても done は来ない
+                        aborted = line
+                        done = True
         else:
             deadline = time.monotonic() + step.ms / 1000.0
             while True:
@@ -708,19 +744,19 @@ def run_capture(step, args, ser):
         ser.write_line("p 0")
         reply = None
         drain_end = time.monotonic() + PCM_DRAIN_TIMEOUT_S
-        while time.monotonic() < drain_end:
-            chunk = pcm.read_bytes(0.01)
+        while reply is None and time.monotonic() < drain_end:
+            chunk = pcm.read_bytes(0.02)
             if chunk:
                 sink.writeframes(chunk)
                 captured += len(chunk)
-            line = ser.read_line(time.monotonic() + 0.005)
-            if line is None:
-                continue
-            print(f"< {line}", flush=True)
-            if line.startswith("#"):
-                continue
-            reply = line
-            break
+            while True:
+                line = ser.poll_line()
+                if line is None:
+                    break
+                print(f"< {line}", flush=True)
+                if not line.startswith("#"):
+                    reply = line
+                    break
 
         # 応答の後もホスト側のバッファに残っていることがあるので拾い切る
         quiet_end = time.monotonic() + PCM_TAIL_QUIET_S
@@ -743,6 +779,9 @@ def run_capture(step, args, ser):
         pcm.close()
 
     # 出力を消すのは sink を閉じたあと（閉じる側が書き戻すので順序を逆にできない）
+    if aborted is not None:
+        return discard_output(step, f"ファームがキャプチャを打ち切った: {aborted}")
+
     if overrun:
         return discard_output(
             step, f"曲が {step.ms} ms 以内に終わらなかった"
