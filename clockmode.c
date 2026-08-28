@@ -159,8 +159,14 @@ const char *clockmode_set(clock_preset_t p)
     /*
      * キャプチャ中に切り替えると、ホストへ流している PCM のサンプリングレートが
      * ストリームの途中で変わってしまい、出来上がる WAV の時間軸が黙って狂う。
+     *
+     * **WAITING は通す。** `p 2` は次の play を待っているだけでまだ 1 フレームも
+     * 流していないので、ここで切り替わっても途中で変わるストリームが存在しない。
+     * 通さないと、φM の違う VGM を `p 2` で録ろうとした時点で必ず失敗する
+     * （`vgm play` が clockmode_follow_file() で弾かれる）。
      */
-    if (capture_state() != CAPTURE_STATE_IDLE)
+    if (capture_state() != CAPTURE_STATE_IDLE &&
+        capture_state() != CAPTURE_STATE_WAITING)
     {
         printf("# hint    : cannot switch phiM while capturing PCM; run p 0 first\n");
         return "wrong state";
