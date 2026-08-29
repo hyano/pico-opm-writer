@@ -14,7 +14,11 @@ _autosave*.kicad_pcb
 board/fabrication-toolkit-options.json
 board/temp-freerouting.dsn
 board/pico-opm-writer-backups/
+board_pcba/pico-opm-writer_pcba-backups/
 board/production/
 board/base/*.FCBak
 
 reference/
+
+# KiCad GUI が出す ERC レポート
+*-erc.rpt

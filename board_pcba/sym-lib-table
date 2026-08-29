@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "pico-opm-writer") (type "KiCad") (uri "${KIPRJMOD}/pico-opm-writer.kicad_sym") (options "") (descr "このプロジェクト固有のシンボル"))
+)

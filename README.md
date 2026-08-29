@@ -71,7 +71,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 ### 1.3 配線上の注意
 
 **Pico 2 と OPM は全線を直結する。** レベル変換器も分圧も挟まない。
-[board/](board/) の基板もこの前提で起こしてある。
+[board/](board/) の基板もこの前提で起こしてある。モジュールを使わず RP2350A と PCM5102A を
+直接実装する改版が [board_pcba/](board_pcba/README.md) にある（回路図のみ）。
 
 - **入力側（Pico → OPM）**: OPM は 5V デバイス、Pico 2 の GPIO は 3.3V。RP2350 の 3.3V 出力を
   OPM が H / L として判別できることは実機で確認済みで、[test/](test/) の実測データはすべて
