@@ -124,7 +124,7 @@ endif()
 set(I2S_ENABLED "1" CACHE STRING "I2S output: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE I2S_ENABLED=${I2S_ENABLED})
 
-# .vgz（gzip 圧縮された VGM）の再生。0 にすると展開器と約 86KB の
+# .vgz（gzip 圧縮された VGM）の再生。0 にすると展開器と約 84KiB の
 # バッファがリンクされず、.vgz は bad file になる。
 set(VGM_VGZ_ENABLED "1" CACHE STRING "gzip (.vgz) playback: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE VGM_VGZ_ENABLED=${VGM_VGZ_ENABLED})

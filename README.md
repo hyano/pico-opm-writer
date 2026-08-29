@@ -2490,6 +2490,7 @@ OK
 | [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形（`LFRQ` / `NFRQ` の掃引） |
 | [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのもの（NE でノイズを直接 DAC へ出す） |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係 |
+| [test/pcm8_sync/](test/pcm8_sync/README.md) | FM と ADPCM の発音タイミング |
 | [test/opm_busy/](test/opm_busy/README.md) | BUSY フラグと `opm_write()` の待ち時間 |
 
 ## 11. 将来の拡張（本仕様の範囲外）

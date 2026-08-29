@@ -2,75 +2,91 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チップのレジスタを
+書き込むためのファームウェア。
+
+**このファイルには「Claude Code が判断を誤ると壊すこと」だけを置く。** 手順や仕様の
+一次情報は README と `docs/` にあり、ここからはポインタで参照する。二重に書かない。
+
 ## プロジェクト概要
 
-Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チップのレジスタを書き込むためのファームウェア。
+*事実。*
 
-使い方・配線・コマンド仕様は [README.md](README.md) に、ファームウェアの内部設計と実装は [docs/pico-opm-writer.md](docs/pico-opm-writer.md) に記載されている。ファームウェアの主要ファイル（`external/` の 2 行以外は `src/` 以下）：
+### どこに何が書いてあるか
+
+| 資料 | 内容 |
+| --- | --- |
+| [README.md](README.md) | 使い方・配線・コマンド仕様・ビルドと書き込みの手順・リリース |
+| [docs/pico-opm-writer.md](docs/pico-opm-writer.md) | ファームウェアの内部設計と実装（ソース構成・PIO・DMA・各機能の仕組み・ビルド構成） |
+| `docs/<スクリプト名>.md` | `tools/` の各スクリプトのリファレンス |
+| `test/*/README.md` | 実機調査のレポート（下記「技術解析レポートの構成」に従う） |
+| [external/README.md](external/README.md) | 上流コードの出所・適用パッチ・意図的に置いていないファイル |
+| `board/` | 基板・回路図（KiCad）とベースプレート（FreeCAD）。配線の前提は README §1.3 |
+
+### ファームウェアのソース索引
+
+`src/` 以下。**各ファイルの役割と設計の詳細は docs §1。** ここは「どれを開くか」の索引。
 
 | ファイル | 役割 |
 | --- | --- |
-| `pico-opm-writer.c` | main・コマンドパーサ |
-| `opm.c` / `opm.h` | YM2151 バス制御（GPIO / PIO） |
-| `opm_clock.pio` | φM 生成（PIO） |
-| `clockmode.c` / `clockmode.h` | φM プリセットの実行時切り替え（sys_clk と PIO 分周比の張り替え順序） |
-| `ym3012.c` / `ym3012.h` / `ym3012.pio` | YM3012 DAC キャプチャ / DMA リング / PCM 変換 / 出力ゲイン（フェード）。`ym3012_ring_poll()` が取り込みのついでに「最後に音があったフレーム」を覚えていて、余韻の判定はこれを見る |
-| `capture.c` / `capture.h` | キャプチャ状態機械。`p 1`（即時）と `p 2`（演奏連動）で、違うのは録り始めと録り終わりだけ。**vgm / mdx / songend は include しない**（`capture_note_track()` で bool と通し番号だけ受け取る） |
-| `i2s.c` / `i2s.h` / `i2s.pio` | I2S 出力（PCM5102A、GP26-GP28） |
-| `usb_pcm.c` / `usb_pcm.h` | CDC #1 PCM 出力 |
-| `flash_disk.c` / `flash_disk.h` | 内蔵フラッシュ上のブロックデバイス（領域定数・ライトバックキャッシュ） |
+| `pico-opm-writer.c` | main・メインループ・コマンドパーサ |
+| `opm.c` / `.h` / `opm_clock.pio` | YM2151 バス制御と φM 生成 |
+| `clockmode.c` / `.h` | φM プリセットの実行時切り替え |
+| `ym3012.c` / `.h` / `.pio` | YM3012 DAC キャプチャ・DMA リング・PCM 変換・出力ゲイン |
+| `capture.c` / `.h` | キャプチャ状態機械（`p 1` 即時 / `p 2` 演奏連動） |
+| `i2s.c` / `.h` / `.pio` | I2S 出力（PCM5102A、GP26-GP28） |
+| `usb_pcm.c` / `.h` | CDC #1 PCM 出力 |
+| `flash_disk.c` / `.h` | 内蔵フラッシュ上のブロックデバイス |
 | `ffconf.h` / `diskio_flash.c` | FatFs の設定と disk I/O 実装 |
-| `storage.c` / `storage.h` | ストレージのモード状態機械 / マウント / フォーマット |
-| `filelist.c` / `filelist.h` | FatFs 上のファイル一覧。`/VGM` `/MDX` **以下を深さ優先で再帰**し、ルートからの相対パスを扱う（深さ 8 段 / パス 127 文字まで）。出力（`vgm list` / `mdx list`）と、RAM へ集める `filelist_collect()`（autoplay 用）と、パスの検査 `filelist_path_ok()`。**前の 2 本は `FILINFO` と走査バッファを共用していて再入できない** |
+| `storage.c` / `.h` | ストレージのモード状態機械・マウント・フォーマット |
+| `filelist.c` / `.h` | `/VGM` `/MDX` 以下の再帰的なファイル一覧 |
 | `usb_msc.c` | USB マスストレージの `tud_msc_*` コールバック |
-| `vgm.c` / `vgm.h` | VGM の解析・再生・一覧 |
-| `vgz.c` / `vgz.h` | `.vgz`（gzip）のストリーム展開。一時ファイルは作らない |
-| `mdx.c` / `mdx.h` | MDX (X68000 / MXDRV) の解析・再生・一覧。解釈は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b の仕様に準拠**（一部の機能のみ 2.06+16 Rel.3+25。ソースは同梱していない） |
-| `pcm8.c` / `pcm8.h` | MDX の ADPCM パート。PDX を FatFs からストリーミングし、MSM6258 の ADPCM をソフトウェアでデコードして FM の PCM に加算する。解釈は **PCM8 (江藤啓) v0.48 の技術資料に準拠**（資料・ソース・バイナリとも同梱していない）。出力レートは ADPCM レートの整数倍になるので**補間しない**。**発音状態を変える関数は `flush_now()` でミックスリングを実時刻まで描き切ってから変える**（これが FM との発音時刻を合わせている。[test/pcm8_sync/](test/pcm8_sync/README.md)） |
-| `songend.c` / `songend.h` | 曲の終わり方。IDLE / PLAYING / FADING / RINGOUT の 1 本の状態機械で、ループ回数での打ち切り・フェードアウト・**終わったあとの余韻待ち**を持つ。**外に出す観測は `songend_is_active()` の 1 つ**で、autoplay の曲送りも `p 2` のキャプチャの終端もこれを見る（だから必ず同じ時刻で動く）。ループ上限は手動再生用と autoplay 用で既定値が違うため 2 系統あり、autoplay はトラックごとに `songend_arm()` で差し込む |
-| `autoplay.c` / `autoplay.h` | VGM / MDX の自動連続再生。プレイリスト・曲順・曲送りの状態機械。**曲の終わり方は `songend.c` に委譲**していて、`songend_is_active()` が落ちるのを待って次の曲へ送るだけ（余韻が消えてから曲間の無音を数える） |
-| `button.c` / `button.h` | GP21 (SW1) / GP22 (SW2) の取り込み。デバウンス・短押し / 長押しの状態機械・深さ 1 のメールボックス。**autoplay も storage も知らない**（`service_all()` が再入的に呼ばれるため、消化は `pico-opm-writer.c` の `button_dispatch()` がメインループのトップレベルで行う）。SW3 は RUN 端子でファームからは見えない |
-| `led.c` / `led.h` | LED 表示 |
-| `stats.c` / `stats.h` | 実行時統計 |
+| `vgm.c` / `.h` | VGM の解析・再生・一覧 |
+| `vgz.c` / `.h` | `.vgz`（gzip）のストリーム展開 |
+| `mdx.c` / `.h` | MDX (X68000 / MXDRV) の解析・再生・一覧 |
+| `pcm8.c` / `.h` | MDX の ADPCM パート（PDX のストリーム読み・MSM6258 デコード） |
+| `songend.c` / `.h` | 曲の終わり方（打ち切り・フェード・余韻待ち） |
+| `autoplay.c` / `.h` | VGM / MDX の自動連続再生 |
+| `button.c` / `.h` | GP21 (SW1) / GP22 (SW2) の取り込み |
+| `led.c` / `.h` | LED 表示 |
+| `stats.c` / `.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
-| `external/fatfs/` | FatFs R0.16（**上流のまま。改変しない**。出所と適用パッチは `external/README.md`） |
-| `external/miniz/` | miniz 3.1.2（**上流のまま。改変しない**。展開器 `tinfl` だけを使う。設定は `CMakeLists.txt` の `miniz` ターゲットの `MINIZ_NO_*`） |
+| `external/fatfs/` | FatFs R0.16（上流のまま） |
+| `external/miniz/` | miniz 3.1.2（上流のまま。展開器 `tinfl` だけを使う） |
 
-これとは別に、ホスト PC 側の Python スクリプトが `tools/` に 4 本ある。リファレンスは `docs/` にあり、
-ファイル名は拡張子を落とした `docs/<スクリプト名>.md`（`docs/` にはこれらに加えて上記の
-`docs/pico-opm-writer.md` が入る）。
+**準拠先の仕様**（ソースもバイナリも同梱していない）:
+`mdx.c` は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b**（一部の機能のみ 2.06+16 Rel.3+25）、
+`pcm8.c` は **PCM8 (江藤啓) v0.48 の技術資料**。
+
+### ホスト側スクリプト
+
+`tools/` に置く。リファレンスは拡張子を落とした `docs/<スクリプト名>.md`。
 
 | スクリプト | 役割 | ドキュメント |
 | --- | --- | --- |
-| `tools/opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。`!capture <ms>` で時間指定のキャプチャ、`!capture-song <コマンド>` で**曲 1 本ぶん**（頭から余韻が消えるまで）のキャプチャ。後者は WAV のレートを `p` から読む（VGM は φM を切り替えるため） | [docs/opm-writer.md](docs/opm-writer.md) |
-| `tools/opm-record.py` | 実機の曲を 1 曲 1 ファイルで WAV に録る。曲名の指定 / `--list` で一覧 / `--all` で全曲。**一時シーケンスを作って `opm-writer.py` をサブプロセスで起動する**（Serial と WavSink を複製しない） | [docs/opm-record.md](docs/opm-record.md) |
-| `tools/opm-lfo-period.py` | キャプチャから LFO の更新周期をサンプル数で測る（`--mode` で AM/PM を指定）。出力は TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
-| `tools/opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
+| `opm-writer.py` | シーケンスファイルを USB CDC 経由でファームへ流し込む。`!capture <ms>` で時間指定、`!capture-song <コマンド>` で曲 1 本ぶん（頭から余韻が消えるまで）のキャプチャ | [docs/opm-writer.md](docs/opm-writer.md) |
+| `opm-record.py` | 実機の曲を 1 曲 1 ファイルで WAV に録る。**一時シーケンスを作って `opm-writer.py` をサブプロセスで起動する**（Serial と WavSink を複製しない） | [docs/opm-record.md](docs/opm-record.md) |
+| `opm-lfo-period.py` | キャプチャから LFO の更新周期をサンプル数で測る。出力は TSV | [docs/opm-lfo-period.md](docs/opm-lfo-period.md) |
+| `opm-lfo-period-testgen.py` | `opm-lfo-period.py` の回帰テスト（実機不要） | [docs/opm-lfo-period-testgen.md](docs/opm-lfo-period-testgen.md) |
 
-`board/` はこのファームウェアを載せる基板と、そのベースプレートの設計データ。配線の前提は
-[README.md](README.md) §1.3 にあり、基板もその前提で起こしてある。
+### 実機調査 (`test/`)
 
-| ファイル | 内容 |
+上記を使った一次データ生成環境。結論と根拠は各 README にある。
+
+| ディレクトリ | 調査結果の要点 |
 | --- | --- |
-| `board/pico-opm-writer.kicad_pro` / `.kicad_sch` / `.kicad_pcb` | KiCad のプロジェクト・回路図・基板 |
-| `board/YM2151.kicad_sym` / `gy-pcm5102_audio.kicad_sym` | 自作シンボル（`sym-lib-table` で登録） |
-| `board/RPi_Pico_SMD.kicad_mod` / `GY-PCM5102_BOARD.kicad_mod` | 自作フットプリント（`fp-lib-table` で登録） |
-| `board/base/*.FCStd` / `*.stl` | FreeCAD のベースプレートと、そこから出力した STL |
-
-`board/production/`（製造用出力）と `board/pico-opm-writer-backups/`（KiCad の自動バックアップ）、
-KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitignore` で除外してある。
-
-`test/` 以下は上記を使った実機調査の一次データ生成環境。
-
-| ディレクトリ | 内容 |
-| --- | --- |
-| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形の調査（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済みで、結論と根拠は README §1〜§3、実測値は `result/`、README に貼る図は `plot_lfo.py` が `fig/` へ生成。`wav_w1/`（矩形）は**意図的にスコープ外**で、一次データを残すだけで解析しない（README §4.11） |
-| [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのものの調査。NE (`0x0F` bit7) でノイズを ch7 の C2 に直接出すと **DAC 出力が 2 値**になり、符号列がノイズ発生器のビット列そのものになる |
+| [test/lfo_noise/](test/lfo_noise/README.md) | LFO ノイズ波形（`LFRQ` / `NFRQ` の掃引）。掃引・解析とも完了済み。`wav_w1/`（矩形）は**意図的にスコープ外**で、一次データを残すだけで解析しない（README §4.11） |
+| [test/noise_period/](test/noise_period/README.md) | ノイズ発生器そのもの。NE (`0x0F` bit7) でノイズを ch7 の C2 に直接出すと **DAC 出力が 2 値**になり、符号列がノイズ発生器のビット列そのものになる |
 | [test/dac_lr/](test/dac_lr/README.md) | DAC の 2 スロット (CH1/CH2) の関係。**L と R は同一にならない**ので、波形解析には片側だけを使う |
-| [test/pcm8_sync/](test/pcm8_sync/README.md) | FM と ADPCM の発音タイミング。**ADPCM は自分でフレーム番号を選ぶので、束ねと間引きのぶんだけ FM より早く出ていた**（実曲で最大 2.0ms）。`flush_now()` で発音の直前に前線を実時刻へ寄せて 0 にした。測定用の MDX / PDX は `gen_testdata.py` が作り、診断コードは `diag.patch` に残してあり本体には入っていない |
-| [test/opm_busy/](test/opm_busy/README.md) | BUSY フラグと `opm_write()` の待ち時間。**BUSY は書き込みから 67 φM サイクルで落ち、レジスタにもチップの状態にも依存しない**ので、ポーリングは φM から待ち時間を算出するのに対して優位が無い。調査に使った診断コードは `diag.patch` に残してあり、本体には入っていない |
+| [test/pcm8_sync/](test/pcm8_sync/README.md) | FM と ADPCM の発音タイミング。**ADPCM は自分でフレーム番号を選ぶので FM より早く出ていた**（実曲で最大 2.0ms）。`flush_now()` で 0 にした |
+| [test/opm_busy/](test/opm_busy/README.md) | BUSY フラグと `opm_write()` の待ち時間。**BUSY は書き込みから 67 φM サイクルで落ち、レジスタにもチップの状態にも依存しない**ので、ポーリングに優位が無い |
+
+`test/opm_busy/` と `test/pcm8_sync/` の `diag.patch` は調査に使った診断コード。
+**本体には入っていない。**
 
 ## 開発上の約束
+
+*ルール（必ず守る）。*
 
 - ユーザーとのやり取り、コミットメッセージ、コード中のコメント、ドキュメントはすべて
   **日本語** で記述する。
@@ -78,13 +94,72 @@ KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitigno
   `# hint` / `# warn` / `# ERR` も含めて例外なく英語で書く（README §3.3）。日本語で
   よいのは `_Static_assert` のメッセージ（開発者向けのコンパイル時診断）だけ。
   `mdx play` の `# title` 行は MDX ファイル中の Shift_JIS をそのまま流している。
+- **C のコードは `.clang-format` に従う**（Allman ブレース / 4 スペース /
+  `ColumnLimit 0` / `SortIncludes Never`）。
 - ホスト側スクリプトのリファレンスは `docs/<スクリプト名>.md` に置く（`.py` は付けない）。
 - ドキュメントには仕様変更の経緯を書かない。常に最新の状態だけを記述する。
+- **`external/` の上流コードを自前の都合で書き換えない。** 設定は自前側で行う
+  （`src/ffconf.h`、`CMakeLists.txt` の `miniz` ターゲットの `MINIZ_NO_*`）。
+  上流の公式パッチを当てるときだけは例外で、**素の vendoring とパッチ適用は
+  コミットを分ける**（手順は external/README.md）。
+- **`CMakeLists.txt` の「DO NOT EDIT」ブロックを手で書き換えない。**
+  `sdkVersion` / `toolchainVersion` / `picotoolVersion` と `pico-vscode.cmake` の
+  include は Pico VS Code 拡張が管理している。
+
+## 触る前に知っておく不変条件
+
+*事実。コードから推測すると間違える設計判断。*
+
+### モジュール間
+
+- **`capture.c` は vgm / mdx / songend を include しない。** `capture_note_track()` で
+  bool と通し番号だけ受け取る。
+- **`filelist.c` の一覧出力（`vgm list` / `mdx list`）と `filelist_collect()` は
+  `FILINFO` と走査バッファを共用していて再入できない**（docs §1.3）。
+- **`button.c` は autoplay も storage も知らない。** `service_all()` が再入的に
+  呼ばれるため、イベントの消化は `pico-opm-writer.c` の `button_dispatch()` が
+  メインループのトップレベルで行う（docs §1.1）。SW3 は RUN 端子でファームからは見えない。
+- **`songend.c` が外に出す観測は `songend_is_active()` の 1 つ。** autoplay の曲送りも
+  `p 2` のキャプチャの終端もこれを見る（だから必ず同じ時刻で動く）。ループ上限は
+  手動再生用と autoplay 用で既定値が違うため 2 系統あり、autoplay はトラックごとに
+  `songend_arm()` で差し込む（docs §11）。
+- **`pcm8.c` の発音状態を変える関数は `flush_now()` でミックスリングを実時刻まで
+  描き切ってから変える。** これが FM との発音時刻を合わせている
+  （docs §10.7、[test/pcm8_sync/](test/pcm8_sync/README.md)）。出力レートは ADPCM
+  レートの整数倍になるので**補間しない**。
+- **余韻の判定は `ym3012_ring_poll()` が取り込みのついでに覚えている
+  「最後に音があったフレーム」を見る。**
+
+### ビルド・クロック
+
+- **sys_clk と φM はペア。片方だけ書き換えない**（小数分周になってジッタが乗る）。
+  `main()` 冒頭の `set_sys_clock_khz(OPM_SYS_CLOCK_KHZ, true)` も消さない
+  （SDK 既定の 150MHz ではどちらのプリセットも小数分周になる）。
+
+  | プリセット | φM | sys_clk | clkdiv |
+  | --- | --- | --- | --- |
+  | `OPM_CLOCK_MODE_4MHZ`（既定） | 4.000000MHz | 144MHz | 18 |
+  | `OPM_CLOCK_MODE_NTSC` | 3.579545MHz | 157.5MHz | 22 |
+
+  クロック依存の遅延はすべて `clock_get_hz(clk_sys)` から実行時に算出しているので、
+  周波数を変えても定数の書き換えは要らない。I2S も φM の分周値から作るため自動で
+  追従する（README §2 / docs §2・§5.2）。
+- **新しい `.pio` を足したら `CMakeLists.txt` に `pico_generate_pio_header()` の行を
+  足して再コンフィグする**（docs §7.1）。`% c-sdk { ... %}` は生成ヘッダへ展開されるので、
+  初期化ヘルパは `.pio` の中に書く。
+- **フラッシュ末尾の 1 セクタ（`FLASH_FATFS_TAIL_RESERVE`）を潰すと、UF2 で焼くたびに
+  ファイルシステムの末尾が壊れる**（picotool が入れる RP2350-E10 の absolute block が
+  4MiB では末尾セクタへ折り返すため。README §7.1）。リンク結果が FatFs 領域と重なる
+  ほうは `cmake/check_flash_region.cmake` が `POST_BUILD` で検査して落とす。
+- **ファームウェアのバージョンの唯一の定義場所は `CMakeLists.txt` の
+  `project(pico-opm-writer VERSION x.y.z ...)`。** ここから `pico_set_program_version`
+  と `-DOPM_WRITER_VERSION` の両方が出る。版を上げるときはこの 1 行を直して
+  **コミットしてから `release/x.y.z` のタグを打つ**（README §6.6）。
 
 ## 技術解析レポートの構成
 
-対象は `test/*/README.md`（実機調査のレポート）。`docs/*.md` はスクリプトのリファレンス
-なのでこの規約の対象外。
+*ルール（必ず守る）。対象は `test/*/README.md`（実機調査のレポート）。`docs/*.md` は
+スクリプトのリファレンスなのでこの規約の対象外。*
 
 **結論を先に、根拠を次に、詳細を後に置く。** 解析を実施した順番とレポートを読む順番は
 一致させない。試行錯誤の時系列ではなく、読者が理解しやすい順に再構成する。
@@ -120,7 +195,6 @@ KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitigno
   「観測できた下限は〜」のように値の側に書く（別行の但し書きにはしない）。
 - **確度は本文の言い回しで書き分ける。** 実測は根拠の置き場を併記、推測は
   「〜と考えられる」、未確認は「未確認」。確度が低い内容を断定しない。
-  確定していない事項が要約に上がらない以上、レポート中に確度のタグや列は要らない。
 - **観測した現象と、そこから推定した内部実装を分ける。** ハードウェアの内部動作を
   推定する節では「観測した現象」「そこから言えること」「そこからは言えないこと」を
   はっきり分けて書く。
@@ -149,63 +223,23 @@ KiCad / FreeCAD のロックファイル・自動保存・`.FCBak` は `.gitigno
 の docstring からも節を指しているので、`grep -rn --include='*.md' --include='*.py' '§' .`
 で残りを確認する。
 
-## ビルド・書き込み
+## ビルド・書き込み・確認
 
-ツールチェーンは `~/.pico-sdk/` 配下にバージョン固定でインストールされている。**システムの cmake / ninja / arm-none-eabi-gcc は使わない。**
+*手順。*
 
-| 用途 | パス |
-| --- | --- |
-| cmake | `~/.pico-sdk/cmake/v4.3.4/bin/cmake` |
-| ninja | `~/.pico-sdk/ninja/v1.13.2/ninja` |
-| toolchain | `~/.pico-sdk/toolchain/15_2_Rel1/bin` |
-| picotool | `~/.pico-sdk/picotool/2.3.0/picotool/picotool` |
-| openocd | `~/.pico-sdk/openocd/0.12.0+dev` |
+**一次情報は README §6。** ツールチェーンのパス、CLI から叩くときに必要な `export`、
+BOOTSEL 経由の書き込み、GUI デバッグ、tty 名の引き直し方、リリース zip の作り方は
+すべてそちらにある。**システムの cmake / ninja / arm-none-eabi-gcc は使わない。**
 
-VS Code のターミナルでは `.vscode/settings.json` の `terminal.integrated.env.osx` がこれらを PATH と環境変数に設定するが、**CLI から直接叩く場合は自分で export する必要がある**:
+### 常用する 2 コマンド
+
+`ninja` も `openocd` も PATH に無いのでフルパスで叩く。
 
 ```bash
-export PICO_SDK_PATH=~/.pico-sdk/sdk/2.3.0
-export PICO_TOOLCHAIN_PATH=~/.pico-sdk/toolchain/15_2_Rel1
-export PATH=~/.pico-sdk/toolchain/15_2_Rel1/bin:~/.pico-sdk/picotool/2.3.0/picotool:~/.pico-sdk/cmake/v4.3.4/bin:~/.pico-sdk/ninja/v1.13.2:$PATH
-```
-
-### 増分ビルド（通常はこれだけで足りる）
-
-```bash
+# 増分ビルド（.vscode/tasks.json の "Compile Project" と等価）
 ~/.pico-sdk/ninja/v1.13.2/ninja -C build
-```
 
-`.vscode/tasks.json` の "Compile Project" と等価。`build/` は Release / `rp2350-arm-s` で構成済み。
-
-### 再コンフィグ（`CMakeLists.txt` や `.pio` の追加時）
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
-```
-
-主なキャッシュ変数（いずれも `-D<名前>=<値>` で再コンフィグして切り替える）:
-
-| 変数 | 既定 | 効果 |
-| --- | --- | --- |
-| `OPM_CLOCK_MODE` | 空（`opm.h` の既定） | φM プリセット（0 = 4MHz / 1 = 3.579545MHz） |
-| `I2S_ENABLED` | 1 | I2S 出力（GP26-GP28） |
-| `VGM_VGZ_ENABLED` | 1 | `.vgz`（gzip）の再生。0 にすると展開器と約 86KB のバッファがリンクされず、`.vgz` は `bad file` になる |
-| `MDX_ENABLED` | 1 | MDX の再生。0 にするとシーケンサと 64KB のファイルバッファがリンクされない |
-| `PCM8_ENABLED` | 空（`MDX_ENABLED` に従う） | MDX の ADPCM パート。0 にするとデコーダとミックスリング（約 27KB）がリンクされず、ADPCM は鳴らない |
-| `AUTOPLAY_ENABLED` | 1 | 自動連続再生。0 にするとプレイリスト（約 26KB）と状態機械がリンクされず、`autoplay` は `unsupported` になる |
-| `BUTTON_ENABLED` | 1 | GP21 / GP22 のボタン操作。0 にすると状態機械がリンクされず、GP21 / GP22 は初期化もされない |
-| `FLASH_TOTAL_BYTES` | 4194304 | FatFs 領域の末尾を決めるための総容量。SDK の `PICO_FLASH_SIZE_BYTES` と一致していることを `flash_disk.c` の `_Static_assert` が検査する |
-| `FLASH_FATFS_RESERVE_KB` | 空（256） | ファームウェアに残す KiB。残りが全部 FatFs になる |
-| `FLASH_FATFS_TAIL_RESERVE` | 4096 | フラッシュ末尾に空けるバイト数（UF2 の RP2350-E10 absolute block 用。0 にすると UF2 で焼くたびに FS の末尾が壊れる） |
-| `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` | 空（オフセットは `FLASH_FATFS_RESERVE_KB × 1024`、サイズは `FLASH_TOTAL_BYTES - FLASH_FATFS_TAIL_RESERVE - オフセット`） | FatFs 領域をバイトで名指し。`FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` は同時指定不可 |
-| `YM3012_LOOPBACK` | 空（`I2S_ENABLED` から自動） | 起動時ループバック自己診断 |
-| `STATS_PROFILE` | 0 | サービスごとの滞在時間の計測。1 にすると `s` に `SVCTIME` 行（µs/s）が増える。区間ごとに時刻を 2 回読むので常用しない |
-
-### 実機への書き込み（SWD / PicoProbe が既定）
-
-PicoProbe (Debugprobe on Pico, CMSIS-DAP, VID:PID `2e8a:000c`) がターゲット pico2 の SWD に常時接続されている。**CLI からはこれで焼くのが既定**（BOOTSEL 操作もターゲットの USB 状態も不要）:
-
-```bash
+# SWD / PicoProbe で書き込み（"Flash" タスクと等価。BOOTSEL 操作は不要）
 ~/.pico-sdk/openocd/0.12.0+dev/openocd \
   -s ~/.pico-sdk/openocd/0.12.0+dev/scripts \
   -f interface/cmsis-dap.cfg \
@@ -213,36 +247,40 @@ PicoProbe (Debugprobe on Pico, CMSIS-DAP, VID:PID `2e8a:000c`) がターゲッ�
   -c "adapter speed 5000; program build/pico-opm-writer.elf verify reset exit"
 ```
 
-`.vscode/tasks.json` の "Flash" タスクと等価。成功時は `** Programming Finished **` / `** Verified OK **` / `** Resetting Target **` が出る。`openocd` は PATH に無いのでフルパスで叩く。DAP に繋がらなくなったら `target/rp2350-rescue.cfg` を使う "Rescue Reset" タスク相当を先に実行する。
+書き込み成功時は `** Programming Finished **` / `** Verified OK **` /
+`** Resetting Target **` が出る。DAP に繋がらなくなったら `target/rp2350-rescue.cfg`
+を使う "Rescue Reset" タスク相当を先に実行する。
 
-代替経路（BOOTSEL 経由）。BOOTSEL を押しながら USB を挿してから実行する:
+### ビルドオプション
+
+再コンフィグは `CMakeLists.txt` や `.pio` を足したときに要る。
 
 ```bash
-picotool load build/pico-opm-writer.uf2
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 ```
 
-または `build/pico-opm-writer.uf2` を BOOTSEL 起動時の RPI-RP2 ドライブへコピーする。
+キャッシュ変数は `OPM_CLOCK_MODE` / `I2S_ENABLED` / `VGM_VGZ_ENABLED` / `MDX_ENABLED` /
+`PCM8_ENABLED` / `AUTOPLAY_ENABLED` / `BUTTON_ENABLED` / `STATS_PROFILE` /
+`YM3012_LOOPBACK` / `FLASH_TOTAL_BYTES` / `FLASH_FATFS_RESERVE_KB` /
+`FLASH_FATFS_TAIL_RESERVE` / `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE`。
+**意味・既定値・「なぜ常にマクロとして渡すか」は docs §7**、宣言は `CMakeLists.txt` の
+各 `set()` 直上のコメント。`-D<名前>=<値>` を付けて再コンフィグして切り替える。
 
-CDC を 2 本にするため TinyUSB のディスクリプタを自前で持っており、`PICO_ENABLE_USB_RESET_VIA_VENDOR_INTERFACE` が無効になるので **`-fx`（BOOTSEL 操作なしの書き込み）は使えない**。
-
-GUI でのステップ実行デバッグは VS Code の "Pico Debug (Cortex-Debug)" 構成を使う。
+**キャッシュ変数を増やしたら `cmake/release_config.cmake.in` の `REL_OPTIONS` にも足す。**
 
 ### シリアル (stdio) の読み取り
 
-| デバイス | 中身 |
-| --- | --- |
-| `/dev/cu.usbmodem112101` | **ターゲット pico2 自身の USB CDC #0** = コマンド / `printf` の出力先 |
-| `/dev/cu.usbmodem112103` | **ターゲット pico2 自身の USB CDC #1** = PCM データ出力（signed 16bit LE ステレオ、サンプリングレート φM/64） |
-| `/dev/cu.usbmodem112202` | PicoProbe 側の CDC-UART ブリッジ（現状の設定では未使用） |
-
-tty 名は USB のポート位置に依存する。変わったら `ioreg -r -c IOSerialBSDClient -l -w 0` の `locationID` と `ioreg -p IOUSB -l -w 0` の `USB Product Name` を突き合わせて引き直す（ターゲットは Product Name `Pico`、プローブは `Debugprobe on Pico _CMSIS_DAP_`）。
-
-読むときの注意:
+コマンドと `printf` の出力先は **`/dev/cu.usbmodem112101`**（CDC #0）。PCM は
+`/dev/cu.usbmodem112103`（CDC #1）。デバイス名は USB のポート位置に依存するので、
+変わったら README §6.5 の手順で引き直す。
 
 - **`/dev/tty.*` ではなく `/dev/cu.*` を使う。** `tty.*` は DCD 待ちで open がブロックする。
-- この Mac には `timeout` / `gtimeout` も pyserial も**入っていない**。時間制限付きの読み取りは python3 標準ライブラリ（`os.open` の `O_NONBLOCK` + `select`）で書く。
-- **SWD の `reset` でターゲットの USB CDC が切断・再列挙される。** 書き込み直後はデバイスノードが数秒消えるので、存在を待ってから開く。
-- `stdio_usb` はホストが開く前の出力を捨てるため、起動直後の行は取り逃す。周期出力で確認する。
+- **この Mac には `timeout` / `gtimeout` も pyserial も入っていない。**
+  時間制限付きの読み取りは python3 標準ライブラリで書く。
+- **SWD の `reset` でターゲットの USB CDC が切断・再列挙される。** 書き込み直後は
+  デバイスノードが数秒消えるので、存在を待ってから開く。
+- `stdio_usb` はホストが開く前の出力を捨てるため、起動直後の行は取り逃す。
+  周期出力で確認する。
 
 ```bash
 python3 - <<'EOF'
@@ -263,52 +301,23 @@ print(buf.decode("utf-8", "replace"))
 EOF
 ```
 
-### 成果物
+### 検証
 
-`build/pico-opm-writer.{uf2,elf,bin,hex,dis}` および `build/compile_commands.json`（`CMAKE_EXPORT_COMPILE_COMMANDS ON`）。SWD 書き込みには `.elf` を使う。
+**ファームウェアの検証は 増分ビルド → SWD で書き込み → CDC #0 の出力を確認 の 3 ステップ
+だけ。ホスト上で走るファームウェアのテストは存在しない。**
 
-### リリース用パッケージ
+ファーム自身の自己診断は `t`（PCM 変換 / MDX の音程・テンポ換算 / ADPCM デコーダの
+既知ベクタ / PIO ループバック）・`s`（実行時統計。`s 0` でリセット）・`storage status`・
+`autoplay status` / `autoplay list`。出力の読み方は README §3.11-3.13 / §3.17。
+**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)`
+になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）。
 
-```bash
-ninja -C build release
-```
+**出力が変わらない機能を触ったときは、その回だけ判別できる文字列**（`__DATE__` /
+`__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を
+出力だけで切り分けられる。
 
-`build/release/pico-opm-writer-<バージョン>.zip` ができる。中身は `.uf2` + README + docs +
-`tools/opm-writer.py` + ライセンス一式 + `VERSION.txt` + `SHA256SUMS`（README §6.6）。
-
-バージョンは `git describe --tags --always` の結果から先頭の `release/` を落としたもの。
-**タグは `release/<バージョン>` の形式**（例 `release/0.3.0` → `pico-opm-writer-0.3.0.zip`）。
-`git describe` はパッケージを作る時点で実行する。`-DRELEASE_VERSION=<文字列>` で上書きできる。
-
-**ファームウェアのバージョンの唯一の定義場所は `CMakeLists.txt` の
-`project(pico-opm-writer VERSION x.y.z ...)`。** ここから `pico_set_program_version`
-（`picotool info` が読む）と `-DOPM_WRITER_VERSION`（起動バナーと `i` が出す文字列）の
-両方が出る。版を上げるときはこの 1 行を直してコミットしてからタグを打つ。
-`make_release.cmake` はタグ由来の版とこの値を照合し、違えば `FATAL_ERROR` で止める
-（タグ無しのビルドと `-DRELEASE_VERSION=` 指定時は照合しない）。
-
-| ファイル | 役割 |
-| --- | --- |
-| `cmake/release_config.cmake.in` | configure 時の値（SDK のパス、各オプションの実効値）を `build/release_config.cmake` へ焼くテンプレート。**キャッシュ変数を増やしたら `REL_OPTIONS` にも足す** |
-| `cmake/make_release.cmake` | `cmake -P` で走るパッケージャ。git を叩き、ステージして `cmake -E tar --format=zip` で固める |
-| `cmake/release/THIRD-PARTY-LICENSES.md` | zip に入れる静的なライセンス索引 |
-| `.github/workflows/build.yml` | 継続ビルド（zip を artifact へ）と `release/*` タグでの Releases 作成 |
-
-`REL_OPTIONS` は名前と値が交互に並んだリストで、**値が空の要素がある**。展開は必ず
-`foreach(... IN LISTS ...)` で行う（`${REL_OPTIONS}` だと空要素が落ちて対が 1 つずれる）。
-
-### テスト
-
-**ファームウェアの検証**は **増分ビルド → SWD で書き込み → `/dev/cu.usbmodem112101` の出力を確認** の 3 ステップで行う（上記の各節そのまま）。ホスト上で走るファームウェアのテストは存在しない。
-
-**ファームウェア自身が持つ自己診断**：
-- `t` コマンド — PCM 変換、MDX の音程 / テンポ換算、ADPCM デコーダの既知ベクタ検証と、起動時の PIO ループバック診断結果を表示。**ループバック診断は GP26-GP28 を使うので、I2S が有効な既定構成では `SKIP (disabled)` になる**（`-DYM3012_LOOPBACK=1` で強制できるが DAC は外すこと）
-- `s` コマンド — 実行時統計を表示（サービス関数に居た時間の割合と `tud_task()` の占有率 / DMA リング使用量と high-water / USB TX 滞留量 / I2S の先行量と low-water / DMA overrun 回数 / PIO の RX FIFO があふれた回数 (`RXSTALL`) / I2S アンダーラン回数 / 禁止コード E=0 の数 / 実測フレームレート / フラッシュ書き出し回数と停止時間 / VGM の再生位置と遅れ / `.vgz` を先頭から展開し直した回数 / MDX の再生位置・テンポ・遅れ / ADPCM の発音チャンネル数と PDX 読み出し回数と飽和数 / メインループ周回数）
-- `storage status` コマンド — ストレージのモード・領域・ファイルシステム・キャッシュの状態
-- `autoplay status` / `autoplay list` コマンド — 自動再生の状態とプレイリスト
-- `s 0` — 統計をリセット
-
-**ホスト側スクリプトの検証**は次の 7 本。いずれも実機は要らず、全ケース `PASS` で終了コード 0:
+**ホスト側スクリプトの検証**は次の 7 本。いずれも実機は要らず、全ケース `PASS` で
+終了コード 0:
 
 ```bash
 ./tools/opm-record.py --self-test          # 曲指定 / 出力名 / シーケンス生成 / 一覧の解析（1 秒 / 23 ケース）
@@ -320,60 +329,17 @@ ninja -C build release
 ./test/pcm8_sync/gen_testdata.py --self-test # 生成する MDX / PDX の書式の自己検証（1 秒 / 27 ケース）
 ```
 
-**実機調査**：`tools/opm-writer.py` は `test/` の掃引スクリプトをそのまま実行できる。
-ファーム側の CDC #1 から PCM を直接読む。ファーム側の DMA リングは
-16KB（62500 フレーム/s で 65.5ms 分）しかないので、取り込み中はホストが読み続ける必要がある。
-
-出力が変わらない機能を触ったときは、**その回だけ判別できる文字列**（`__DATE__` / `__TIME__` や連番）を `printf` に一時的に混ぜると、「新しいバイナリが本当に焼けたか」を出力だけで切り分けられる。2026-08-08 にこの手順で書き込み〜確認まで一巡することを実機で確認済み。
-
-## 構造上の要点
-
-### `CMakeLists.txt` の「DO NOT EDIT」ブロック
-
-`sdkVersion` / `toolchainVersion` / `picotoolVersion` の設定と `pico-vscode.cmake` の include は Pico VS Code 拡張が管理している。手で書き換えない。
-
-### PIO のビルドフロー
-
-`opm_clock.pio` → `pico_generate_pio_header()` → `build/opm_clock.pio.h` が生成され、C 側は `#include "opm_clock.pio.h"` で参照する。`.pio` 内の `% c-sdk { ... %}` ブロックはそのまま生成ヘッダへ展開されるため、`opm_clock_program_init()` のような初期化ヘルパはここに書く。OPM のバス制御を PIO 化する場合も同じ構造を踏襲する。
-
-**新しい `.pio` を追加したら `CMakeLists.txt` に `pico_generate_pio_header()` の行を足して再コンフィグが必要。**
-
-### stdio は USB CDC のみ
-
-`pico_enable_stdio_usb 1` / `pico_enable_stdio_uart 0`。`printf` の出力先は USB シリアル。UART を OPM 制御などに転用する際もこの設定が前提になる。
-
-### ライブラリの追加
-
-`target_link_libraries` に `hardware_*` を追加する（現状は `pico_stdlib` + `hardware_pio` + `hardware_dma` + `hardware_clocks` + `hardware_pll` + `hardware_flash` + `pico_flash` + `pico_rand` + `tinyusb_device` + `fatfs` + `miniz`）。
-
-`external/` の上流コードは `add_library(... STATIC ...)` の別ターゲットにする（`fatfs` / `miniz`）。`-Wall -Wextra` が `pico-opm-writer` に `PRIVATE` で付いているので、これで上流へ波及せず警告抑止も改変も要らなくなる。
-
-### FatFs 領域はリンク後に検査される
-
-`pico_add_extra_outputs()` の後に `cmake/check_flash_region.cmake` が `POST_BUILD` で走り、
-`arm-none-eabi-nm` で読んだ `__flash_binary_end` と FatFs 領域が重なっていればビルドが失敗する。
-重なっていなければ余裕のバイト数を毎回表示する（`-- flash: ... margin N B  OK`）。
-フラッシュ末尾の 1 セクタは領域外に予約してあり、**ここを潰すと UF2 で焼くたびに
-ファイルシステムの末尾が壊れる**（picotool が入れる RP2350-E10 の absolute block が
-0x10FFFF00 狙いで、4MiB では末尾セクタへ折り返すため）。詳細は README §7.1。
-
-### システムクロックは φM とペア（既定 144MHz / φM 4MHz）
-
-`opm.h` に φM と sys_clk のプリセットが 2 組あり、`OPM_CLOCK_MODE` で選ぶ（README §2）:
-
-| プリセット | φM | sys_clk | clkdiv |
-| --- | --- | --- | --- |
-| `OPM_CLOCK_MODE_4MHZ`（既定） | 4.000000MHz | 144MHz | 18 |
-| `OPM_CLOCK_MODE_NTSC` | 3.579545MHz | 157.5MHz | 22 |
-
-`main()` の先頭で `set_sys_clock_khz(OPM_SYS_CLOCK_KHZ, true)` を `stdio_init_all()` より前に呼んでいる。どちらの組も `φM × 偶数 = sys_clk` がちょうど成り立つので整数分周になりジッタが乗らない。**片方だけを書き換えないこと**（小数分周になる）。SDK 既定の 150MHz に戻すとどちらのプリセットも小数分周になるので、この呼び出しも消さないこと。
-
-ヘッダを触らずに切り替えるときは `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DOPM_CLOCK_MODE=1` で再コンフィグする（`-DOPM_CLOCK_MODE=` 空で `opm.h` の既定に戻る）。
-
-クロック依存の遅延はすべて `clock_get_hz(clk_sys)` から実行時に算出しているため、周波数を変えても定数の書き換えは要らない。
-
-I2S の分周比は `i2s_init()` が **φM の分周値（256 倍固定小数）をそのまま 2 倍**して作る（`clkdiv_i2s = sys_clk/φM = 2 × clkdiv_opm`）。丸めを挟まないので、サンプリングレートは φM/64 と厳密に一致する。**φM 側だけを変えても I2S は自動で追従する**（docs §5.2）。
+**実機調査**では `tools/opm-writer.py` が `test/` の掃引スクリプトをそのまま実行できる。
+ファーム側の CDC #1 から PCM を直接読む。**DMA リングは 16KB（62500 フレーム/s で
+65.5ms 分）しかないので、取り込み中はホストが読み続ける必要がある。**
 
 ## Git
 
-`.gitignore` が除外するのはビルド生成物（`build` / `build-*` / `__pycache__` / `*.wav` / `*.bin`）、macOS の `.DS_Store`、KiCad と FreeCAD のロックファイル・自動保存・バックアップ（`*.kicad_*.lck` / `_autosave*` / `board/pico-opm-writer-backups/` / `board/base/*.FCBak`）、基板の製造用出力（`board/production/` と `board/fabrication-toolkit-options.json` / `board/temp-freerouting.dsn`）、そして同梱しない参照資料と試聴用データ（`reference/`。MXDRV / PCM8 の資料と VGM / MDX のファイル置き場）。**`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash / `launch.json` のデバッグ構成、`settings.json` の PATH 設定を共有するため）。`*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は git の管理対象に入る。
+*事実。除外の一覧は [.gitignore](.gitignore) を読む。ここには理由だけ書く。*
+
+- **`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash、`launch.json` の
+  デバッグ構成、`settings.json` の PATH 設定を共有するため）。
+- `reference/` は同梱しない参照資料と試聴用データ（MXDRV / PCM8 の資料と
+  VGM / MDX のファイル置き場）。
+- `*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は
+  git の管理対象に入る。
