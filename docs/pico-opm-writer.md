@@ -22,6 +22,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 | [i2s.pio](../src/i2s.pio) | I2S 出力用 PIO プログラムと `i2s_out_program_init()` |
 | [usb_pcm.h](../src/usb_pcm.h) / [usb_pcm.c](../src/usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
 | [button.h](../src/button.h) / [button.c](../src/button.c) | GP21 / GP22 の取り込み。デバウンス、短押し / 長押しの状態機械、イベントのメールボックス（[§13](#13-ボタン入力)） |
+| [buttonmap.h](../src/buttonmap.h) / [buttonmap.c](../src/buttonmap.c) | ボタン起点の操作。イベントの消化と、起動時のモード選択（[§13.1](#131-検出と消化を分ける)） |
 | [led.h](../src/led.h) / [led.c](../src/led.c) | 非ブロッキングな LED パターン表示 |
 | [stats.h](../src/stats.h) / [stats.c](../src/stats.c) | CPU 使用率・high-water・カウンタ |
 | [flash_disk.h](../src/flash_disk.h) / [flash_disk.c](../src/flash_disk.c) | 内蔵フラッシュ上のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
@@ -43,7 +44,7 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 ### 1.1 メインループ
 
 メインループの 1 周分は [sched.c](../src/sched.c) の `service_all()` が持つ。
-`main()` に残っているのは初期化列と、`service_all()` → `button_dispatch()` →
+`main()` に残っているのは初期化列と、`service_all()` → `buttonmap_dispatch()` →
 接続の確認 → コマンド 1 文字読み、を回す `for(;;)` だけ。
 
 **スケジューラを別ファイルにしてあるのは、`service_all()` から呼んでよいものの
@@ -94,11 +95,11 @@ LED → 統計、をひと回しする。**ボタンの消化**とコマンド 1
 
 **ボタンだけは取り込みと消化が離れている。** `service_all()` の中で行うのは GPIO を読んで
 短押し / 長押しのイベントに変えるところまでで、`autoplay_*` / `storage_*` を呼ぶのは
-`main()` の `for(;;)` 直下に置いた `button_dispatch()` だけ。`service_all()` は上記のとおり
+`main()` の `for(;;)` 直下に置いた `buttonmap_dispatch()` だけ。`service_all()` は上記のとおり
 コマンド処理中の待ちからも呼ばれるので、そこから上位の操作を呼ぶと
 `filelist_collect()`（[§1.3](#13-ファイル一覧の共用) のとおり走査バッファを共用していて
 再入できない）を壊し、コマンドの応答の途中へ別の出力が割り込む。
-`button_dispatch()` を置いた位置は、**`process_line()` の外側であることが構文的に保証される
+`buttonmap_dispatch()` を置いた位置は、**`process_line()` の外側であることが構文的に保証される
 唯一の点**。イベントは深さ 1 のメールボックスで渡す（[§13](#13-ボタン入力)）。
 
 コマンド側の入出力はすべて標準入出力 API 経由で行う。
@@ -1248,7 +1249,7 @@ s_dma_total / s_fill_total ≡ リング内の添字 (mod I2S_RING_FRAMES)
    [i2s.h](../src/i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
 2. **`capture_resync_after_blackout()` で基準点を張り直す。** 呼ぶのは 3 か所で、
    `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）、
-   `storage player` への遷移時、そして `button_boot_apply()` の末尾
+   `storage player` への遷移時、そして `buttonmap_boot_apply()` の末尾
    （[§13.6](#136-起動シーケンス)）
 
 **張り直しは 3 本を 1 本にまとめてある**（[§1.2](#12-主要-api)）。`ym3012_ring_resync()` /
@@ -1989,7 +1990,7 @@ GP21 (SW1) と GP22 (SW2) の 2 個。SW3 は RUN 端子に繋がっていてハ
 
 [button.c](../src/button.c) は **autoplay も storage も include しない**。GPIO を読んで
 短押し / 長押しのイベントに変えるところまでを持ち、何をするかは
-[pico-opm-writer.c](../src/pico-opm-writer.c) の `button_dispatch()` が決める。
+[buttonmap.c](../src/buttonmap.c) の `buttonmap_dispatch()` が決める。
 
 分ける理由は `service_all()` の呼ばれ方（[§1.1](#11-メインループ)）。`d` の待機・
 `p 0` のドレイン待ち・一覧出力の行ごとの tick から**コマンド処理の途中で再入的に
@@ -1998,7 +1999,7 @@ GP21 (SW1) と GP22 (SW2) の 2 個。SW3 は RUN 端子に繋がっていてハ
 （[§1.3](#13-ファイル一覧の共用)）。応答の途中に `# autoplay:` の行が割り込む問題も
 同時に起きる。
 
-`button_dispatch()` は `main()` の `for(;;)` 直下、`service_all()` の次に置く。
+`buttonmap_dispatch()` は `main()` の `for(;;)` 直下、`service_all()` の次に置く。
 ここが `process_line()` の外側であることが構文的に保証される唯一の点。
 
 ### 13.2 デバウンスを時間で測る理由
@@ -2080,7 +2081,7 @@ HOST 中に拒否され、`storage host` はキャプチャ中に拒否される
 初期化と衝突しない。整定は RC で µs オーダーだが当てにせず、`button_init()` の中で
 同じ値が `BUTTON_DEBOUNCE_US` 続くのを確かめてから確定する。
 
-実行（`button_boot_apply()`）は初期化列の最後、`autoplay_init()` の後。
+実行（`buttonmap_boot_apply()`）は初期化列の最後、`autoplay_init()` の後。
 `autoplay_start()` が `storage_init()` のマウントを前提にするため。
 
 **解放待ちのループでは `service_all()` を回す。** 待ち時間は利用者次第で数秒あり得るが、
@@ -2093,7 +2094,7 @@ HOST 中に拒否され、`storage host` はキャプチャ中に拒否される
 `EP_IDLE` / chord = 0 へ戻す。これをやらないと、離した時点で短押しが post されて
 起動モードと二重に発火する。
 
-`button_boot_apply()` の最後に `capture_resync_after_blackout()` を呼ぶ。ホストが CDC を
+`buttonmap_boot_apply()` の最後に `capture_resync_after_blackout()` を呼ぶ。ホストが CDC を
 開く前の `printf` は 1 本あたり最大 `PICO_STDIO_USB_STDOUT_TIMEOUT_US`（10ms）ブロック
 するので、複数行出すと I2S の先行量 16.4ms を超え得るため。
 

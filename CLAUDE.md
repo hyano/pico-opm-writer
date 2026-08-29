@@ -49,6 +49,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `songend.c` / `.h` | 曲の終わり方（打ち切り・フェード・余韻待ち） |
 | `autoplay.c` / `.h` | VGM / MDX の自動連続再生 |
 | `button.c` / `.h` | GP21 (SW1) / GP22 (SW2) の取り込み |
+| `buttonmap.c` / `.h` | ボタン起点の操作（何に割り当てるか）。取り込みとは別ファイル |
 | `led.c` / `.h` | LED 表示 |
 | `stats.c` / `.h` | 実行時統計 |
 | `tusb_config.h` / `usb_descriptors.c` | USB CDC 2 本 + MSC 1 本 |
@@ -117,9 +118,10 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
   bool と通し番号だけ受け取る。
 - **`filelist.c` の一覧出力（`vgm list` / `mdx list`）と `filelist_collect()` は
   `FILINFO` と走査バッファを共用していて再入できない**（docs §1.3）。
-- **`button.c` は autoplay も storage も知らない。** `service_all()` が再入的に
-  呼ばれるため、イベントの消化は `pico-opm-writer.c` の `button_dispatch()` が
-  メインループのトップレベルで行う（docs §1.1）。SW3 は RUN 端子でファームからは見えない。
+- **`button.c` は autoplay も storage も知らない。** 割り当ては `buttonmap.c` が持つ。
+  `service_all()` が再入的に呼ばれるため、イベントの消化は `buttonmap_dispatch()` を
+  `main()` の `for(;;)` 直下で呼ぶ形にしてある（docs §1.1）。
+  SW3 は RUN 端子でファームからは見えない。
 - **`songend.c` が外に出す観測は `songend_is_active()` の 1 つ。** autoplay の曲送りも
   `p 2` のキャプチャの終端もこれを見る（だから必ず同じ時刻で動く）。ループ上限は
   手動再生用と autoplay 用で既定値が違うため 2 系統あり、autoplay はトラックごとに

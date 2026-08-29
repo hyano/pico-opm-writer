@@ -83,6 +83,7 @@ add_executable(pico-opm-writer
         src/usb_pcm.c
         src/led.c
         src/button.c
+        src/buttonmap.c
         src/stats.c
         src/flash_disk.c
         src/diskio_flash.c

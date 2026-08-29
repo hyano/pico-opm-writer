@@ -210,7 +210,7 @@ void service_all(void)
     /*
      * ボタンは取り込むだけで、autoplay / storage は触らない。この関数はコマンド
      * 処理中からも再入的に呼ばれるので、ここから上位の操作を呼ぶと filelist の
-     * 走査バッファを壊す。消化は main() のトップレベルの button_dispatch()。
+     * 走査バッファを壊す。消化は main() のトップレベルの buttonmap_dispatch()。
      *
      * led_service() の直前に置いてあるのは、長押しが成立した周回のうちに
      * LED の合図を反映させるため。判定は比較が数回で済むので STATS_SVC では
