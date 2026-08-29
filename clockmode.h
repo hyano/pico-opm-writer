@@ -54,7 +54,10 @@ void clockmode_set_auto(bool enabled);
 /*
  * プリセットを切り替える。成功なら NULL、失敗ならエラー文字列。
  * 既に同じプリセットなら何もせず NULL を返す。
- * PCM キャプチャ中はサンプリングレートが途中で変わってしまうので拒否する。
+ *
+ * PCM を流している間はサンプリングレートが途中で変わってしまうので拒否する。
+ * ただし `p 2` の待機中（CAPTURE_STATE_WAITING）はまだ 1 フレームも流していないので
+ * 通す（そうしないと φM の違う曲を `p 2` で録れない）。
  */
 const char *clockmode_set(clock_preset_t p);
 

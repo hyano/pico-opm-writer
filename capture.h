@@ -31,7 +31,7 @@ typedef enum
     CAPTURE_STATE_WAITING,   /* p 2。次の演奏が始まるのを待っている（まだ送らない） */
     CAPTURE_STATE_CAPTURING, /* 送信中 */
     CAPTURE_STATE_DRAINING,  /* 送り切っている最中 */
-    CAPTURE_STATE_ERROR,     /* DMA overrun。p 1 / p 2 が来るまで止まる */
+    CAPTURE_STATE_ERROR,     /* DMA overrun。次の p 1 / p 2（または p 0）まで止まる */
 } capture_state_t;
 
 void capture_init(void);
