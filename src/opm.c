@@ -37,6 +37,10 @@ static uint32_t s_clock_hz_actual;
 /* OPM_T_SETUP_NS 相当のシステムクロックサイクル数 */
 static uint32_t s_setup_cycles;
 
+/* OPM_BUSY_CYCLES（φM サイクル）相当のシステムクロックサイクル数と、その ns 表示 */
+static uint32_t s_data_wait_cycles;
+static uint32_t s_data_wait_ns;
+
 /*
  * φM の分周比と、それに付随する sys_clk 依存の値を算出する。
  *
@@ -73,6 +77,21 @@ static void opm_clock_compute(uint32_t sys_hz, uint32_t phim_hz, bool round_up)
     /* ns 指定のセットアップ時間をサイクル数へ（切り上げ） */
     s_setup_cycles =
         (uint32_t)(((uint64_t)sys_hz * OPM_T_SETUP_NS + 999999999u) / 1000000000u);
+
+    /*
+     * データサイクル後の BUSY 待ち。φM サイクル数で持っているので、
+     * sys_clk と φM の比を掛ければ sys クロックのサイクル数になる（切り上げ）。
+     *
+     * **目標値 phim_hz ではなく、上で求めた実 φM を使う。** round_up の経路では
+     * 実 φM が目標以下になるので、目標で割ると BUSY が明ける前に待ちが終わる。
+     * 実 φM で割っておけば、どの経路から呼ばれても待ちが足りなくなることはない。
+     */
+    s_data_wait_cycles = (uint32_t)(((uint64_t)sys_hz * OPM_BUSY_CYCLES +
+                                     s_clock_hz_actual - 1u) /
+                                    s_clock_hz_actual);
+    s_data_wait_ns = (uint32_t)(((uint64_t)OPM_BUSY_CYCLES * 1000000000u +
+                                 s_clock_hz_actual - 1u) /
+                                s_clock_hz_actual);
 }
 
 /*
@@ -178,9 +197,13 @@ void opm_write(uint8_t addr, uint8_t data)
     opm_bus_cycle(false, addr);
     busy_wait_us_32(OPM_T_ADDR_US);
 
-    /* データサイクル。BUSY は opm_read() で読めるが、書き込み経路では見ずに固定時間待つ。 */
+    /*
+     * データサイクル。BUSY は opm_read() で読めるが、書き込み経路では見ずに待つ。
+     * 待つ長さは φM サイクル数から実行時に算出してあるので、クロックを
+     * 切り替えても自動で追従する（opm.h の OPM_BUSY_CYCLES）。
+     */
     opm_bus_cycle(true, data);
-    busy_wait_us_32(OPM_T_DATA_US);
+    busy_wait_at_least_cycles(s_data_wait_cycles);
 
 #if STATS_PROFILE
     /*
@@ -304,6 +327,11 @@ uint32_t opm_clock_div_int(void)
 uint32_t opm_clock_div_frac(void)
 {
     return s_div_frac;
+}
+
+uint32_t opm_data_wait_ns(void)
+{
+    return s_data_wait_ns;
 }
 
 bool opm_irq_level(void)

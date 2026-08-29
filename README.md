@@ -323,7 +323,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 # preset  : 4  (vgm auto)
 # pins    : D0-D7=GP2-GP9 A0=GP10 /CS=GP11 /WR=GP12 /RD=GP13 /IC=GP14
 # pins    : phiM=GP15 /IRQ=GP16
-# timing  : t_wr=1us t_addr=5us t_data=25us t_rd=1us
+# timing  : t_wr=1us t_addr=5us t_data=18.0us (72 phiM) t_rd=1us
 # ym3012  : SO=GP17 phi1=GP18 SH1=GP19 SH2=GP20
 # pins    : SW1=GP21 SW2=GP22 (pull-up, active low)
 # button  : long 1000 ms  boot none
@@ -1437,10 +1437,12 @@ OK
 **レジスタを変えないので、再生中でも拒否しない**（[§3.19](#319-状態による拒否の一覧)）。
 VGM / MDX を鳴らしたままステータスを覗ける。
 
-**`w` の BUSY 待ちには使っていない。** `opm_write()` はデータサイクル後に固定時間
-（`OPM_T_DATA_US` = 25µs）待つ方式のままで、ステータスはポーリングしない
+**`w` の BUSY 待ちには使っていない。** `opm_write()` はデータサイクル後に
+`OPM_BUSY_CYCLES`（72 φM サイクル = 4MHz で 18.0µs / 3.579545MHz で 20.1µs）待つ方式で、
+ステータスはポーリングしない。BUSY 長が**レジスタにもチップの状態にも依存せず一定**
+であることが実測で確定しているため、ポーリングには副作用しか無い
 （[docs §3.1](docs/pico-opm-writer.md#31-タイミング定数)、
-[test/opm_busy/](test/opm_busy/README.md)）。
+[test/opm_busy/](test/opm_busy/README.md)）。実効値は `i` の `# timing` 行に出る。
 
 ### 3.22 曲の終わり方
 

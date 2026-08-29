@@ -44,8 +44,12 @@ void report_info(void)
            OPM_PIN_D0, OPM_PIN_D0 + 7, OPM_PIN_A0, OPM_PIN_CS, OPM_PIN_WR, OPM_PIN_RD, OPM_PIN_IC);
     printf("# pins    : phiM=GP%d /IRQ=GP%d\n",
            OPM_PIN_PHIM, OPM_PIN_IRQ);
-    printf("# timing  : t_wr=%dus t_addr=%dus t_data=%dus t_rd=%dus\n",
-           OPM_T_WR_US, OPM_T_ADDR_US, OPM_T_DATA_US, OPM_T_RD_US);
+    /* t_data だけは φM から実行時に算出しているので、実効値を出す */
+    uint32_t data_ns = opm_data_wait_ns();
+    printf("# timing  : t_wr=%dus t_addr=%dus t_data=%u.%uus (%u phiM) t_rd=%dus\n",
+           OPM_T_WR_US, OPM_T_ADDR_US,
+           (unsigned)(data_ns / 1000u), (unsigned)((data_ns % 1000u) / 100u),
+           (unsigned)OPM_BUSY_CYCLES, OPM_T_RD_US);
     printf("# ym3012  : SO=GP%d phi1=GP%d SH1=GP%d SH2=GP%d\n",
            YM3012_PIN_SO, YM3012_PIN_PHI1, YM3012_PIN_SH1, YM3012_PIN_SH2);
 #if BUTTON_ENABLED

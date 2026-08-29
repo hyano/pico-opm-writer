@@ -54,11 +54,29 @@
 #define OPM_T_SETUP_NS   100 /* データ確定から /WR 立ち下がりまで */
 #define OPM_T_WR_US      1   /* /WR の L 期間 */
 #define OPM_T_ADDR_US    5   /* アドレスラッチ後の待機 */
-#define OPM_T_DATA_US    25  /* データ書き込み後の BUSY 待ち */
 #define OPM_T_RD_US      1   /* /RD の L 期間（データが出揃うまでを含む） */
 #define OPM_T_FLOAT_US   1   /* /RD を H に戻してからバスを出力へ戻すまで */
 #define OPM_T_IC_LOW_MS  10  /* /IC の L 保持時間 */
 #define OPM_T_IC_WAIT_MS 10  /* /IC を H に戻してから最初の書き込みまで */
+
+/*
+ * データサイクル後の BUSY 待ち。**µs ではなく φM サイクルで持つ。**
+ *
+ * BUSY は書き込みから **67.1 ± 0.2 φM サイクル**で落ちる。レジスタアドレスにも
+ * 書き込む値にもチップの発音状態にも依存しない（[test/opm_busy/](../test/opm_busy/README.md)
+ * の実測。データシート由来の 68 サイクルと 1 サイクル以内で一致する）。
+ *
+ * φM を単位にしておくと、待ち時間は `s_setup_cycles` と同じく実行時に
+ * clk_sys から算出でき、φM プリセットを切り替えても定数の書き換えが要らない
+ * （4MHz で 18.0µs / 3.579545MHz で 20.1µs）。
+ *
+ * 72 は実測の 67.1 に約 7% の余裕を足した値。67 と 68 のどちらなのかは
+ * 測定で分離できておらず、BUSY 長の個体差・温度依存も未確認なため。
+ * この値は test/opm_busy が実機で検証した 18µs（φM=4MHz）と同じ。
+ * **BUSY ポーリングには置き換えない。** 効果は同じで副作用だけが増えることが
+ * 実測で分かっている（同 README の「案 C を採る理由が無い」）。
+ */
+#define OPM_BUSY_CYCLES 72
 
 /* ---- API --------------------------------------------------------------- */
 
@@ -73,6 +91,7 @@ bool opm_irq_level(void);                   /* /IRQ の現在のレベル（true
 uint32_t opm_clock_hz_actual(void); /* 実際に生成されている φM 周波数 */
 uint32_t opm_clock_div_int(void);   /* PIO 分周比の整数部 */
 uint32_t opm_clock_div_frac(void);  /* PIO 分周比の小数部（/256） */
+uint32_t opm_data_wait_ns(void);    /* 現在の φM での t_DATA（`i` の timing 行が出す） */
 
 /*
  * 走ったまま φM の分周比を張り替える（clockmode.c が使う）。
