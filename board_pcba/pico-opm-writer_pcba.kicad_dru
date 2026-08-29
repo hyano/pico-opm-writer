@@ -1,0 +1,8 @@
+(version 1)
+
+# YM2151 の DIP ソケットは列間が開いているので、その内側に小型部品を置く。
+# C25 (U6 VDD の 100nF) と R11 (/CS プルアップ) は意図的に U6 の
+# コートヤードの中にある。board_pcba/README.md §5 を参照。
+(rule "socket_inner_parts"
+	(condition "A.Reference == 'U6' && (B.Reference == 'C25' || B.Reference == 'R11')")
+	(constraint courtyard_clearance (min -2mm)))

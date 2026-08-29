@@ -22,7 +22,7 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 | `test/*/README.md` | 実機調査のレポート（下記「技術解析レポートの構成」に従う） |
 | [external/README.md](external/README.md) | 上流コードの出所・適用パッチ・意図的に置いていないファイル |
 | `board/` | 基板・回路図（KiCad）とベースプレート（FreeCAD）。Pico 2 と GY-PCM5102 をモジュールとして載せる。配線の前提は README §1.3 |
-| [board_pcba/README.md](board_pcba/README.md) | RP2350A / PCM5102A を直接実装する改版基板（JLCPCB Economic PCBA 向け）。回路図のみで基板レイアウトは未着手。部品選定の根拠と価格入り BOM もここ |
+| [board_pcba/README.md](board_pcba/README.md) | RP2350A / PCM5102A を直接実装する改版基板（JLCPCB Economic PCBA 向け、46×47.5mm / 2 層）。回路図・配置・配線・GND ベタまで完成（ERC / DRC エラーとも 0 件）。部品選定の根拠、価格入り BOM、配置と配線の意図もここ |
 
 ### ファームウェアのソース索引
 
