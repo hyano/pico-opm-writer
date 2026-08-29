@@ -317,7 +317,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 ### 3.6 `i`（情報表示）の出力例
 
 ```
-# pico-opm-writer 0.2.0
+# pico-opm-writer 0.3.0
 # phiM    : 4000000 Hz (clkdiv 18 + 0/256)
 # sys_clk : 144000000 Hz
 # preset  : 4  (vgm auto)
@@ -362,7 +362,7 @@ USB CDC の接続を検出した時点で `i` と同じ内容を出力する（�
 
 ```
 > i
-# pico-opm-writer 0.2.0
+# pico-opm-writer 0.3.0
 ...
 OK
 > reset

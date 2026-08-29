@@ -30,7 +30,7 @@ include(pico_sdk_import.cmake)
 
 # ファームウェアのバージョンの唯一の定義場所。picotool のメタデータ・起動バナー・
 # リリースパッケージはすべてここの VERSION から導出する（他の場所に書かない）。
-project(pico-opm-writer VERSION 0.2.0 LANGUAGES C CXX ASM)
+project(pico-opm-writer VERSION 0.3.0 LANGUAGES C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()

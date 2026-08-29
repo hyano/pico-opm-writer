@@ -301,7 +301,7 @@ def self_test():
 
     # 一覧の解析
     sample = "\n".join([
-        "< # pico-opm-writer 0.2.0",
+        "< # pico-opm-writer 0.3.0",
         "> mdx list",
         "< # file    :       937 BOSCONIAN/BOS01.MDX",
         "< # file    :      2436 SUB/A B.MDX",
