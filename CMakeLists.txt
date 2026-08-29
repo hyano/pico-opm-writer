@@ -75,6 +75,8 @@ target_compile_definitions(miniz PUBLIC
 add_executable(pico-opm-writer
         src/pico-opm-writer.c
         src/sched.c
+        src/console.c
+        src/report.c
         src/opm.c
         src/clockmode.c
         src/ym3012.c

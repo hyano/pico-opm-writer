@@ -10,7 +10,9 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 
 | ファイル | 役割 |
 | --- | --- |
-| [pico-opm-writer.c](../src/pico-opm-writer.c) | `main()`、システムクロック設定、初期化列、行入力とコマンドパーサ、応答出力、ボタン方針 |
+| [pico-opm-writer.c](../src/pico-opm-writer.c) | `main()`。システムクロック設定、初期化列、メインループの骨格（4 行） |
+| [console.h](../src/console.h) / [console.c](../src/console.c) | コマンドの受け口。CDC #0 からの行入力、パーサ、各コマンドのハンドラ、応答（`OK` / `ERR`） |
+| [report.h](../src/report.h) / [report.c](../src/report.c) | `i` / `s` / `h` の状態表示。本文だけを出し、末尾の `OK` は出さない |
 | [sched.h](../src/sched.h) / [sched.c](../src/sched.c) | メインループの協調スケジューラ。`service_all()` と、各グループを回す最短間隔（[§1.1](#11-メインループ)） |
 | [opm.h](../src/opm.h) / [opm.c](../src/opm.c) | OPM のピン割り当て・タイミング定数・φM の分周比算出と張り替え、バス制御 |
 | [opm_clock.pio](../src/opm_clock.pio) | φM 生成用 PIO プログラムと `opm_clock_program_init()` |
@@ -44,13 +46,23 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 ### 1.1 メインループ
 
 メインループの 1 周分は [sched.c](../src/sched.c) の `service_all()` が持つ。
-`main()` に残っているのは初期化列と、`service_all()` → `buttonmap_dispatch()` →
-接続の確認 → コマンド 1 文字読み、を回す `for(;;)` だけ。
+`main()` に残っているのは初期化列と、次の 4 行を回す `for(;;)` だけ。
+
+```c
+service_all();          // USB・音声・シーケンサ・ストレージをひと回し（sched.c）
+buttonmap_dispatch();   // ボタンのイベントを 1 個消化する（buttonmap.c）
+console_poll_connect(); // ホストが CDC #0 を開いたか（100ms ごと。console.c）
+console_service();      // コマンドを 1 文字読む（console.c）
+```
 
 **スケジューラを別ファイルにしてあるのは、`service_all()` から呼んでよいものの
 境界がこのファームウェアで最も壊しやすい不変条件だから**（再入・順序・間引きの
 3 つが同時に掛かる）。コマンドパーサや状態表示と同居していると、その境界が
 1 ファイル 2000 行の中に埋もれる。
+
+**`report.c` が `OK` を出さないのも同じ理由。** 「1 コマンド 1 応答」
+（[README §3.3](../README.md#33-応答)）を守る責任を `console.c` の
+1 か所に閉じてあるので、`report_info()` は起動バナーとしても同じものを使える。
 
 `service_all()` は `tud_task()` → キャプチャリング位置の取り込み → ADPCM のレンダリング →
 キャプチャの送出 → I2S への供給 → VGM の発行 → MDX の発行 → 曲の終わり方の判定 →
@@ -110,7 +122,7 @@ LED → 統計、をひと回しする。**ボタンの消化**とコマンド 1
   先に見る
 - 接続検出: `stdio_usb_connected()`（100ms ごと）
 
-パーサ側の上限は [pico-opm-writer.c](../src/pico-opm-writer.c) に定義がある。1 行の最大長が
+パーサ側の上限は [console.c](../src/console.c) に定義がある。1 行の最大長が
 `LINE_MAX_LEN`（255 文字）、`d` に指定できる待機時間の上限が `DELAY_MAX_MS`（60000 ms）。
 
 ### 1.2 主要 API

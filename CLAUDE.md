@@ -29,7 +29,9 @@ Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チ�
 
 | ファイル | 役割 |
 | --- | --- |
-| `pico-opm-writer.c` | main・初期化列・コマンドパーサ・状態表示・ボタン方針 |
+| `pico-opm-writer.c` | main。初期化列とメインループの骨格だけ |
+| `console.c` / `.h` | コマンドの受け口。行入力・パーサ・各ハンドラ・応答（`OK` / `ERR`） |
+| `report.c` / `.h` | `i` / `s` / `h` の状態表示。本文だけで `OK` は出さない |
 | `sched.c` / `.h` | メインループの協調スケジューラ（`service_all()` と各グループの呼び出し間隔） |
 | `opm.c` / `.h` / `opm_clock.pio` | YM2151 バス制御と φM 生成 |
 | `clockmode.c` / `.h` | φM プリセットの実行時切り替え |
