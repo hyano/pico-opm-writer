@@ -147,6 +147,17 @@ static uint32_t s_seq_last_us;
 static uint32_t s_storage_last_us;
 static uint32_t s_button_last_us;
 
+/*
+ * service_all() を最後に呼んだ時刻と、基準が揃ったかどうか。
+ *
+ * リアルタイムの余裕を決めるのは「サービスが最大どれだけ空いたか」なので、
+ * その間隔を stats へ渡す（stats.h の「メインループの周期」）。**起動から
+ * 最初の 1 回は渡さない。** 上の基準時刻はどれも 0 から始まるため、1 回目の
+ * 差分は間隔ではなく起動からの経過時間になり、high-water を汚す。
+ */
+static uint32_t s_loop_mark_us;
+static bool s_loop_marked;
+
 /* ---- メインループの 1 周分 --------------------------------------------- */
 
 /*
@@ -180,6 +191,12 @@ static void service_all(void)
 {
     uint32_t t0 = time_us_32();
 
+    if (s_loop_marked)
+    {
+        stats_loop_period_add(t0 - s_loop_mark_us);
+    }
+    s_loop_mark_us = t0;
+
     if (due(&s_usb_last_us, t0, USB_TASK_INTERVAL_US))
     {
         tud_task();
@@ -195,8 +212,14 @@ static void service_all(void)
      * PCM を受け取るので、そこまでに描き終わっていなければならない。
      * 間隔を空けても**この順序は変えない**。
      */
+    uint32_t audio_prev_us = s_audio_last_us;
     if (due(&s_audio_last_us, t1, AUDIO_SERVICE_INTERVAL_US))
     {
+        if (s_loop_marked)
+        {
+            stats_audio_gap_add(t1 - audio_prev_us);
+        }
+
         ym3012_ring_poll();
         STATS_SVC(STATS_SVC_PCM8, pcm8_service());
 
@@ -253,6 +276,9 @@ static void service_all(void)
     stats_usb_busy_add(t1 - t0);
     stats_busy_add(time_us_32() - t1);
     stats_service();
+
+    /* ここまで来れば全グループの基準時刻が入っている。次回から差分を取る。 */
+    s_loop_marked = true;
 }
 
 /* ---- 応答 -------------------------------------------------------------- */
@@ -366,6 +392,19 @@ static void print_svc(void)
         n += (size_t)w;
     }
     printf("# SVCTIME : %s  us per s\n", line);
+
+    /*
+     * OPM バス。avg が 1 レジスタ書き込みの実費用そのものなので、タイミング定数を
+     * 変えたときの前後比較はここを見る。avg は 1/100us まで出す。
+     */
+    uint32_t writes = stats_opm_writes();
+    uint32_t avg100 = (writes != 0u)
+                          ? (uint32_t)(((uint64_t)stats_opm_write_us() * 100u) / writes)
+                          : 0u;
+    printf("# OPMW    : %u writes/s  %u us/s  avg %u.%02u us  max %u us\n",
+           (unsigned)writes, (unsigned)stats_opm_write_us(),
+           (unsigned)(avg100 / 100u), (unsigned)(avg100 % 100u),
+           (unsigned)stats_opm_write_max_us());
 #endif
 }
 
@@ -402,7 +441,13 @@ static void print_stats(void)
     /* 無音が続いているフレーム数。曲の終わりの余韻を待つ判定と同じ値。 */
     printf("# QUIET   : %llu frames\n",
            (unsigned long long)(ym3012_write_total() - ym3012_last_loud_total()));
-    printf("# LOOP    : %u passes/s\n", (unsigned)stats_loop_rate());
+    /*
+     * LOOP の MAX と AUDIO GAP がリアルタイム余裕の直接の指標。I2S の MIN は
+     * 余裕が削られた結果、SEQ LAG はその症状で、原因はこちらに出る。
+     */
+    printf("# LOOP    : %u passes/s  MAX %u us  AUDIO GAP max %u us\n",
+           (unsigned)stats_loop_rate(), (unsigned)stats_loop_period_max_us(),
+           (unsigned)stats_audio_gap_max_us());
     print_svc();
     printf("# FRAMES  : %llu\n", (unsigned long long)stats_frames());
     printf("# FLASH   : WRITE %u   BLACKOUT max %u us\n",

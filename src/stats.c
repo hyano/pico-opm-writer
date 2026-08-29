@@ -210,11 +210,45 @@ static struct
     uint32_t flash_write;           /* 4KiB ブロックの書き出し回数 */
     uint32_t flash_blackout_max_us; /* 書き出しでメインループが止まった最大時間 */
     uint32_t seq_lag_max_us;        /* シーケンサの遅れの最大値 */
+    uint32_t loop_period_max_us;    /* service_all() の呼び出し間隔の最大値 */
+    uint32_t audio_gap_max_us;      /* 音声チェーンが回った間隔の最大値 */
 } s_ext = {
     .flash_write = 0,
     .flash_blackout_max_us = 0,
     .seq_lag_max_us = 0,
+    .loop_period_max_us = 0,
+    .audio_gap_max_us = 0,
 };
+
+/* ---- OPM バス（STATS_PROFILE のみ）------------------------------------- */
+
+#if STATS_PROFILE
+/* 窓の中の生カウント。窓が閉じたときに 1 秒あたりへ直して s_opm へ移す。 */
+static struct
+{
+    uint32_t writes;
+    uint32_t busy_us;
+} s_opm_win;
+
+static struct
+{
+    uint32_t writes;  /* 直近窓の書き込み回数 [writes/s] */
+    uint32_t busy_us; /* 直近窓の滞在時間 [us/s] */
+    uint32_t max_us;  /* リセット以降の 1 回の最大値 [us] */
+} s_opm;
+#endif
+
+/* 起動時と `s 0` で 0 に戻す。STATS_PROFILE=0 では何も持たないので空になる。 */
+static void opm_clear_stats(void)
+{
+#if STATS_PROFILE
+    s_opm_win.writes = 0;
+    s_opm_win.busy_us = 0;
+    s_opm.writes = 0;
+    s_opm.busy_us = 0;
+    s_opm.max_us = 0;
+#endif
+}
 
 /* ---- CPU 使用率 -------------------------------------------------------- */
 
@@ -269,6 +303,14 @@ void stats_service(void)
 
     /* サービスごとの呼び出し回数と実仕事回数 */
     svc_close_window(elapsed_us);
+
+#if STATS_PROFILE
+    /* OPM バスも同じく 1 秒あたりへ直す（最大値は窓をまたいで残す） */
+    s_opm.writes = (uint32_t)(((uint64_t)s_opm_win.writes * 1000000u) / elapsed_us);
+    s_opm.busy_us = (uint32_t)(((uint64_t)s_opm_win.busy_us * 1000000u) / elapsed_us);
+    s_opm_win.writes = 0;
+    s_opm_win.busy_us = 0;
+#endif
 
     /* 次の窓へ */
     s_window.window_start_us = now_us;
@@ -469,6 +511,63 @@ uint32_t stats_seq_lag_max_us(void)
     return s_ext.seq_lag_max_us;
 }
 
+/* ---- メインループの周期 ------------------------------------------------ */
+
+void __not_in_flash_func(stats_loop_period_add)(uint32_t us)
+{
+    if (us > s_ext.loop_period_max_us)
+    {
+        s_ext.loop_period_max_us = us;
+    }
+}
+
+void __not_in_flash_func(stats_audio_gap_add)(uint32_t us)
+{
+    if (us > s_ext.audio_gap_max_us)
+    {
+        s_ext.audio_gap_max_us = us;
+    }
+}
+
+uint32_t stats_loop_period_max_us(void)
+{
+    return s_ext.loop_period_max_us;
+}
+
+uint32_t stats_audio_gap_max_us(void)
+{
+    return s_ext.audio_gap_max_us;
+}
+
+/* ---- OPM バス ---------------------------------------------------------- */
+
+#if STATS_PROFILE
+void stats_opm_write_add(uint32_t us)
+{
+    s_opm_win.writes++;
+    s_opm_win.busy_us += us;
+    if (us > s_opm.max_us)
+    {
+        s_opm.max_us = us;
+    }
+}
+
+uint32_t stats_opm_writes(void)
+{
+    return s_opm.writes;
+}
+
+uint32_t stats_opm_write_us(void)
+{
+    return s_opm.busy_us;
+}
+
+uint32_t stats_opm_write_max_us(void)
+{
+    return s_opm.max_us;
+}
+#endif
+
 /* ---- 初期化・リセット -------------------------------------------------- */
 
 void stats_init(void)
@@ -502,6 +601,10 @@ void stats_init(void)
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
     s_ext.seq_lag_max_us = 0;
+    s_ext.loop_period_max_us = 0;
+    s_ext.audio_gap_max_us = 0;
+
+    opm_clear_stats();
 }
 
 void stats_reset(void)
@@ -525,6 +628,10 @@ void stats_reset(void)
     s_ext.flash_write = 0;
     s_ext.flash_blackout_max_us = 0;
     s_ext.seq_lag_max_us = 0;
+    s_ext.loop_period_max_us = 0;
+    s_ext.audio_gap_max_us = 0;
+
+    opm_clear_stats();
 
     /* 窓をリセット */
     s_window.window_start_us = time_us_32();

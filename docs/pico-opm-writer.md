@@ -970,7 +970,7 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   [button.h](../src/button.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にすると GP21 / GP22 に一切触らない。[§13.7](#137-無効化)）
 - キャッシュ変数 `STATS_PROFILE`（既定 0）は**常に**マクロとして渡す。1 で `s` に
-  `SVCTIME` 行が増える（[README §3.11.1](../README.md#3111-サービスの呼び出し間隔)）
+  `SVCTIME` と `OPMW` の 2 行が増える（[README §3.11.1](../README.md#3111-サービスの呼び出し間隔)）
 - FatFs 領域は `FLASH_FATFS_RESERVE_KB`（ファームウェアに残す KiB。既定 256）から
   オフセットとサイズを CMake 側で計算し、`FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` /
   `FLASH_FATFS_TAIL_RESERVE` を**常に**マクロとして渡す。後段のリンク後チェックが

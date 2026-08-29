@@ -164,6 +164,43 @@ uint32_t stats_flash_blackout_max_us(void);
 void stats_seq_lag_update(uint32_t us);
 uint32_t stats_seq_lag_max_us(void);
 
+/* ---- メインループの周期 ------------------------------------------------ */
+
+/*
+ * service_all() の呼び出し間隔と、音声チェーンが実際に回った間隔。
+ * どちらも最大値だけを残す。
+ *
+ * **リアルタイムの余裕を決めているのはこの 2 つ。** I2S の先行量
+ * (stats_i2s_depth_min) は余裕が削られた「結果」、SEQ LAG は削られたことの
+ * 「症状」で、どちらも原因そのものではない。サービスが最大どれだけ空いたかを
+ * 直接見られるようにしておく。
+ *
+ * 間隔なので、起動から最初の 1 回は渡さない（それは間隔ではなく起動からの
+ * 経過時間になる）。呼び出し側が基準時刻を持つまで待つこと。
+ */
+void stats_loop_period_add(uint32_t us);
+void stats_audio_gap_add(uint32_t us);
+
+uint32_t stats_loop_period_max_us(void); /* service_all() の呼び出し間隔の最大値 */
+uint32_t stats_audio_gap_max_us(void);   /* 音声チェーンが回った間隔の最大値 */
+
+/* ---- OPM バス ---------------------------------------------------------- */
+
+#if STATS_PROFILE
+/*
+ * opm_write() 1 回の滞在時間を通知する。回数と合計は 1 秒窓、最大は high-water。
+ *
+ * 平均 (us/s ÷ writes/s) が 1 レジスタ書き込みの実費用そのものになるので、
+ * タイミング定数を変えたときの前後比較はこれで行う。1 回あたり time_us_32() を
+ * 2 回読むので STATS_PROFILE のときだけ持つ。
+ */
+void stats_opm_write_add(uint32_t us);
+
+uint32_t stats_opm_writes(void);       /* 直近 1 秒窓の書き込み回数 [writes/s] */
+uint32_t stats_opm_write_us(void);     /* 直近 1 秒窓の滞在時間 [us/s] */
+uint32_t stats_opm_write_max_us(void); /* リセット以降の 1 回の最大値 [us] */
+#endif
+
 /* ---- 初期化・リセット -------------------------------------------------- */
 
 void stats_init(void);  /* 起動時に 1 回。全項目を 0 にする */

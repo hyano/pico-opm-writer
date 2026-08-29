@@ -11,6 +11,7 @@
 #include "pico/platform.h"
 
 #include "opm_clock.pio.h"
+#include "stats.h"
 
 /* GPIO マスク */
 #define OPM_MASK_DATA ((uint32_t)0xffu << OPM_PIN_D0)
@@ -169,6 +170,10 @@ void opm_init(void)
 
 void opm_write(uint8_t addr, uint8_t data)
 {
+#if STATS_PROFILE
+    uint32_t t0 = time_us_32();
+#endif
+
     /* アドレスサイクル */
     opm_bus_cycle(false, addr);
     busy_wait_us_32(OPM_T_ADDR_US);
@@ -176,6 +181,14 @@ void opm_write(uint8_t addr, uint8_t data)
     /* データサイクル。BUSY は opm_read() で読めるが、書き込み経路では見ずに固定時間待つ。 */
     opm_bus_cycle(true, data);
     busy_wait_us_32(OPM_T_DATA_US);
+
+#if STATS_PROFILE
+    /*
+     * 1 レジスタ書き込みの実費用。タイミング定数を変えたときの前後比較は
+     * `s` の OPMW 行の平均（us/s ÷ writes/s）で見る。
+     */
+    stats_opm_write_add(time_us_32() - t0);
+#endif
 }
 
 /*

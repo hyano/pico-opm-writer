@@ -512,7 +512,7 @@ OK
 # OVERRUN : 0   E0 : 0   RXSTALL : 0
 # RATE    : 62508 frames/s (expect 62500)
 # QUIET   : 0 frames
-# LOOP    : 714554 passes/s
+# LOOP    : 468607 passes/s  MAX 1511 us  AUDIO GAP max 1561 us
 # SVC     : pcm8 612/1991  cap 794/1991  i2s 781/1991  vgm 0/18430  mdx 110/18430  sto 0/998  worked/calls per s
 # FRAMES  : 56263161
 # FLASH   : WRITE 76   BLACKOUT max 42711 us
@@ -541,7 +541,7 @@ OK
 | `RXSTALL` | PIO の RX FIFO があふれた回数。あふれると L/R の並びが崩れる |
 | `RATE` | 直近 1 秒で数えた実測フレームレートと期待値 φM/64 |
 | `QUIET` | DAC の出力が無音のまま続いているフレーム数。曲の終わりの余韻が消えたかを判定するのと同じ値で、鳴っていれば 0（[§3.22](#322-曲の終わり方)） |
-| `LOOP` | 直近 1 秒のメインループ周回数。1 周あたりの固定費を見積もるのに使う |
+| `LOOP` | 直近 1 秒のメインループ周回数。1 周あたりの固定費を見積もるのに使う。`MAX` は `service_all()` の呼び出し間隔の最大値、`AUDIO GAP max` は音声チェーンが実際に回った間隔の最大値で、**どちらもリアルタイムの余裕を直接表す**（[§3.11.1](#3111-サービスの呼び出し間隔)） |
 | `SVC` | サービスごとの「実仕事をした回数 / 呼ばれた回数」（どちらも毎秒）。呼ばれた回数は[§3.11.1](#3111-サービスの呼び出し間隔)の間引き間隔で決まり、実仕事の側はその中で本当に処理があった回数。分子が分母に対して極端に小さければ、そのサービスは間引きを緩めても構わない |
 | `FRAMES` | 取り込んだ総フレーム数 |
 | `FLASH` | 内蔵フラッシュへ 4KiB ブロックを書き出した回数と、その間メインループが止まった最大時間（[§3.13](#313-storageストレージ)） |
@@ -564,10 +564,13 @@ OK
 元に戻る。**この値だけを見て負荷が減った / 増えたと判断しないこと。** 実際に使っている
 時間の絶対量を見たいときは `STATS_PROFILE=1` で焼く（[§3.11.1](#3111-サービスの呼び出し間隔)）。
 
-**余裕の有無は `I2S` の `MIN` と `UNDERRUN`、それに `RATE` で見ること。**
+**余裕の有無は `LOOP` の `MAX` / `AUDIO GAP max` と、`I2S` の `MIN` / `UNDERRUN`、
+それに `RATE` で見ること。** 前者が原因（サービスが最大どれだけ空いたか）、
+後者が結果（そのぶん先行量がどこまで削れたか）にあたる。`AUDIO GAP max` が
+I2S の先行量 1024 フレーム（16.4ms）に近づいてきたら余裕が尽きかけている。
 
-`s 0` は high-water とカウンタに加えて、`MDX PCM` 行の `keyon` / `miss` / `reads` /
-`CLIP` も 0 に戻す（`keyon` / `miss` / `reads` は `mdx play` でも 0 に戻る）。
+`s 0` は high-water / low-water とカウンタ（`LOOP MAX` / `AUDIO GAP max` / `OPMW` を
+含む）に加えて、`MDX PCM` 行の `keyon` / `miss` / `reads` / `CLIP` も 0 に戻す（`keyon` / `miss` / `reads` は `mdx play` でも 0 に戻る）。
 
 #### 3.11.1 サービスの呼び出し間隔
 
@@ -586,18 +589,31 @@ OK
 いずれもリング一周 65.5ms よりはるかに短いので、DMA の位置は見失わない。
 値はソースの `AUDIO_SERVICE_INTERVAL_US` などの `#define` 1 箇所で決まる。
 
+**ここに書いてあるのは「最短でもこの間隔を空ける」であって、上限ではない。**
+コマンドの応答やシーケンサの予算ループで 1 周が伸びれば、実際の間隔はこれより
+長くなる。**実際にどこまで空いたかは `s` の `LOOP MAX` と `AUDIO GAP max` に出る**
+（実測で公称 500µs に対し 1.5ms 前後）。I2S の先行量 1024 フレーム = 16.4ms が
+その上限なので、`AUDIO GAP max` がそこへ近づいてきたら間隔か処理量を見直すこと。
+
 サービスごとの滞在時間を絶対量 (µs/s) で見たいときは、プロファイルを有効にして焼く。
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 -DSTATS_PROFILE=1
 ```
 
-`s` に `SVCTIME` の行が増える。区間ごとに時刻を 2 回読むぶん本体より重くなるので、
-**常用はしない**。
+`s` に `SVCTIME` と `OPMW` の 2 行が増える。どちらも区間ごとに時刻を 2 回読むぶん
+本体より重くなるので、**常用はしない**。
 
 ```
-# SVCTIME : pcm8 20512  cap 37191  i2s 23962  vgm 3833  mdx 34504  sto 130  us per s
+# SVCTIME : pcm8 18302  cap 3042  i2s 23610  vgm 4886  mdx 34447  sto 169  us per s
+# OPMW    : 727 writes/s  23407 us/s  avg 32.19 us  max 46 us
 ```
+
+`OPMW` は OPM バスの 1 レジスタ書き込みの実費用。**`avg`（`us/s` ÷ `writes/s`）が
+`opm_write()` 1 回の所要時間そのもの**なので、[opm.h](src/opm.h) のタイミング定数を
+変えたときの前後比較はここで行う（[test/opm_busy/](test/opm_busy/README.md) の
+ベンチマークと同じ量を実再生で測ったもの）。`max` は 1 回の最大値で、
+USB の割り込みが挟まった回が出る。
 
 ### 3.12 `t`（自己テスト）
 
