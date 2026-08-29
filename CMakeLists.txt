@@ -74,6 +74,7 @@ target_compile_definitions(miniz PUBLIC
 
 add_executable(pico-opm-writer
         src/pico-opm-writer.c
+        src/sched.c
         src/opm.c
         src/clockmode.c
         src/ym3012.c
@@ -155,8 +156,9 @@ target_compile_definitions(pico-opm-writer PRIVATE AUTOPLAY_ENABLED=${AUTOPLAY_E
 set(BUTTON_ENABLED "1" CACHE STRING "GPIO buttons on GP21/GP22: 1 = enabled, 0 = disabled")
 target_compile_definitions(pico-opm-writer PRIVATE BUTTON_ENABLED=${BUTTON_ENABLED})
 
-# サービスごとの滞在時間の計測。1 にすると service_all() の各呼び出しが
-# time_us_32() を 2 回読むようになり、`s` に SVCTIME 行（us/s）が増える。
+# サービスごとの滞在時間の計測。1 にすると service_all()（src/sched.c）の各呼び出しと
+# opm_write() が time_us_32() を 2 回読むようになり、`s` に SVCTIME 行（us/s）と
+# OPMW 行（writes/s・us/s・1 回あたりの平均）が増える。
 # 常設するには重いので、内訳を見たいときだけ 1 で焼く。
 set(STATS_PROFILE "0" CACHE STRING "per-service timing profile: 1 = on, 0 = off")
 target_compile_definitions(pico-opm-writer PRIVATE STATS_PROFILE=${STATS_PROFILE})
