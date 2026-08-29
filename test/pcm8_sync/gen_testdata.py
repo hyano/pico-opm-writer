@@ -14,7 +14,7 @@ FM 1 本と ADPCM 1 本が **同じ tick で同時にキーオンする**だけ�
 | `SYNC.MDX` | quiet | 音と音のあいだ、ADPCM は 1ch も鳴っていない |
 | `SYNC2.MDX` | busy | ほぼ無音のドローンを ADPCM ch9 で鳴らし続ける |
 
-2 条件が要るのは、[pcm8.c](../../pcm8.c) の `pcm8_service()` が
+2 条件が要るのは、[pcm8.c](../../src/pcm8.c) の `pcm8_service()` が
 **発音中だけ 64 フレーム束ねて描く**（`s_sounding && behind < PCM8_BATCH_FRAMES`）ため。
 quiet では束ねが働かず、busy では働く。ドローンは `active` を立て続けるためだけのもので、
 振幅は解析の閾値のはるか下に置く（[analyze_sync.py](analyze_sync.py) の `--threshold`）。
@@ -32,7 +32,7 @@ quiet では束ねが働かず、busy では働く。ドローンは `active` �
 
 - FM は OPM のレジスタ `0x20+ch` の `RL` で片側だけに出す。反対側のスロットには
   何も加算されない。
-- ADPCM は [pcm8.c](../../pcm8.c) の `render_block()` が `pan & 1` で L、`pan & 2` で R に
+- ADPCM は [pcm8.c](../../src/pcm8.c) の `render_block()` が `pan & 1` で L、`pan & 2` で R に
   振り分ける。ミックスリングの段階で片側は 0 のままになる。
 
 **波形を鋭くしてある**のは、立ち上がりのフレームを 1 フレーム単位で決めたいため。
@@ -43,7 +43,7 @@ ADPCM に ADPCM 形式（mode 0-4）を使うと、MSM6258 のステップ幅が
 ## 書式
 
 MDX のヘッダは [docs §10.2](../../docs/pico-opm-writer.md#102-データ構造とローダ)、
-PDX のエントリ表は [pcm8.h](../../pcm8.h) の `PDX_*` の定義に従う。どちらも
+PDX のエントリ表は [pcm8.h](../../src/pcm8.h) の `PDX_*` の定義に従う。どちらも
 ビッグエンディアン。
 
 ## 使い方
@@ -142,7 +142,7 @@ def loop_to(here, target):
     `here` にある 0xF1 から `target` へ戻るループを組む。
 
     ファーム側は 2 バイトのワードを読んだあとの位置から `~w + 1` だけ戻る
-    （[mdx.c](../../mdx.c) の `case 0xF1u`）。ワードの上位バイトが 0 になると
+    （[mdx.c](../../src/mdx.c) の `case 0xF1u`）。ワードの上位バイトが 0 になると
     「演奏終了」と区別が付かなくなるので、戻り幅が 0x0100 未満であることも確かめる。
     """
     after = here + 3  # 0xF1 と 2 バイトのワードを読み終えた位置
@@ -162,7 +162,7 @@ def make_voice(number):
     """
     27 バイトの音色レコードを作る。並びは
     番号 / FL・CON / スロットマスク / DT1・MUL x4 / TL x4 / KS・AR x4 /
-    AME・D1R x4 / DT2・D2R x4 / D1L・RR x4（[mdx.c](../../mdx.c) の `snd_voice()`）。
+    AME・D1R x4 / DT2・D2R x4 / D1L・RR x4（[mdx.c](../../src/mdx.c) の `snd_voice()`）。
     オペレータの順は M1 / M2 / C1 / C2。
 
     CON=7（4 オペレータすべてキャリア）にして、C2 だけ TL=0 で鳴らし残り 3 個は

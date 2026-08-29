@@ -1,6 +1,6 @@
 # pico-opm-writer（ファームウェア内部設計）
 
-[pico-opm-writer.c](../pico-opm-writer.c) ほかリポジトリ直下の `.c` / `.h` / `.pio`
+[pico-opm-writer.c](../src/pico-opm-writer.c) ほか `src/` 以下の `.c` / `.h` / `.pio`
 
 Raspberry Pi Pico 2 (RP2350) 上のファームウェアが、OPM のバス制御と YM3012 の
 DAC キャプチャをどう実装しているかの説明。**使い方・配線・コマンド仕様は
@@ -10,32 +10,32 @@ DAC キャプチャをどう実装しているかの説明。**使い方・配�
 
 | ファイル | 役割 |
 | --- | --- |
-| [pico-opm-writer.c](../pico-opm-writer.c) | `main()`、システムクロック設定、初期化、メインループ、行入力とコマンドパーサ、応答出力 |
-| [opm.h](../opm.h) / [opm.c](../opm.c) | OPM のピン割り当て・タイミング定数・φM の分周比算出と張り替え、バス制御 |
-| [opm_clock.pio](../opm_clock.pio) | φM 生成用 PIO プログラムと `opm_clock_program_init()` |
-| [clockmode.h](../clockmode.h) / [clockmode.c](../clockmode.c) | φM プリセットの実行時切り替え。sys_clk と PIO 分周比の張り替え順序（[§2.3](#23-実行時の切り替え)） |
-| [ym3012.h](../ym3012.h) / [ym3012.c](../ym3012.c) | YM3012 の PIO + DMA リング初期化、リング位置の管理、PCM 変換、自己診断 |
-| [ym3012.pio](../ym3012.pio) | キャプチャ用 PIO プログラムと `ym3012_capture_program_init()` |
-| [capture.h](../capture.h) / [capture.c](../capture.c) | キャプチャの状態機械と、リング → PCM → CDC #1 の送出。演奏に連動する `p 2` もここ（[§4.7](#47-演奏に連動したキャプチャ-p-2)） |
-| [i2s.h](../i2s.h) / [i2s.c](../i2s.c) | I2S 出力の PIO + DMA リング初期化、先行量の維持、アンダーラン復帰 |
-| [i2s.pio](../i2s.pio) | I2S 出力用 PIO プログラムと `i2s_out_program_init()` |
-| [usb_pcm.h](../usb_pcm.h) / [usb_pcm.c](../usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
-| [button.h](../button.h) / [button.c](../button.c) | GP21 / GP22 の取り込み。デバウンス、短押し / 長押しの状態機械、イベントのメールボックス（[§13](#13-ボタン入力)） |
-| [led.h](../led.h) / [led.c](../led.c) | 非ブロッキングな LED パターン表示 |
-| [stats.h](../stats.h) / [stats.c](../stats.c) | CPU 使用率・high-water・カウンタ |
-| [flash_disk.h](../flash_disk.h) / [flash_disk.c](../flash_disk.c) | 内蔵フラッシュ上のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
-| [ffconf.h](../ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
-| [diskio_flash.c](../diskio_flash.c) | FatFs の `disk_*` 実装 |
-| [storage.h](../storage.h) / [storage.c](../storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
-| [filelist.h](../filelist.h) / [filelist.c](../filelist.c) | FatFs 上のファイル一覧。`vgm list` / `mdx list` の出力、autoplay のプレイリストへ集める `filelist_collect()`、パスの検査 `filelist_path_ok()` で共用（[§1.3](#13-ファイル一覧の共用)） |
-| [usb_msc.c](../usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
-| [vgm.h](../vgm.h) / [vgm.c](../vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
-| [vgz.h](../vgz.h) / [vgz.c](../vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
-| [mdx.h](../mdx.h) / [mdx.c](../mdx.c) | MDX のヘッダ解析、MML の解釈、チャンネル状態機械、tick スケジューラ、一覧（[§10](#10-mdx-再生)） |
-| [pcm8.h](../pcm8.h) / [pcm8.c](../pcm8.c) | MDX の ADPCM パート。PDX のストリーム読み出し、MSM6258 デコード、FM への加算（[§10.7](#107-adpcm-pcm8-の再生)） |
-| [songend.h](../songend.h) / [songend.c](../songend.c) | 曲の終わり方。ループ回数での打ち切り、フェードアウト、終わったあとの余韻待ち（[§11](#11-曲の終わり方-songend)） |
-| [autoplay.h](../autoplay.h) / [autoplay.c](../autoplay.c) | VGM / MDX の自動連続再生。プレイリスト、曲順、曲送りの状態機械（[§12](#12-自動連続再生-autoplay)） |
-| [tusb_config.h](../tusb_config.h) / [usb_descriptors.c](../usb_descriptors.c) | USB CDC 2 本 + MSC 1 本の TinyUSB 設定とディスクリプタ |
+| [pico-opm-writer.c](../src/pico-opm-writer.c) | `main()`、システムクロック設定、初期化、メインループ、行入力とコマンドパーサ、応答出力 |
+| [opm.h](../src/opm.h) / [opm.c](../src/opm.c) | OPM のピン割り当て・タイミング定数・φM の分周比算出と張り替え、バス制御 |
+| [opm_clock.pio](../src/opm_clock.pio) | φM 生成用 PIO プログラムと `opm_clock_program_init()` |
+| [clockmode.h](../src/clockmode.h) / [clockmode.c](../src/clockmode.c) | φM プリセットの実行時切り替え。sys_clk と PIO 分周比の張り替え順序（[§2.3](#23-実行時の切り替え)） |
+| [ym3012.h](../src/ym3012.h) / [ym3012.c](../src/ym3012.c) | YM3012 の PIO + DMA リング初期化、リング位置の管理、PCM 変換、自己診断 |
+| [ym3012.pio](../src/ym3012.pio) | キャプチャ用 PIO プログラムと `ym3012_capture_program_init()` |
+| [capture.h](../src/capture.h) / [capture.c](../src/capture.c) | キャプチャの状態機械と、リング → PCM → CDC #1 の送出。演奏に連動する `p 2` もここ（[§4.7](#47-演奏に連動したキャプチャ-p-2)） |
+| [i2s.h](../src/i2s.h) / [i2s.c](../src/i2s.c) | I2S 出力の PIO + DMA リング初期化、先行量の維持、アンダーラン復帰 |
+| [i2s.pio](../src/i2s.pio) | I2S 出力用 PIO プログラムと `i2s_out_program_init()` |
+| [usb_pcm.h](../src/usb_pcm.h) / [usb_pcm.c](../src/usb_pcm.c) | CDC #1 の接続判定・書き込み・滞留量 |
+| [button.h](../src/button.h) / [button.c](../src/button.c) | GP21 / GP22 の取り込み。デバウンス、短押し / 長押しの状態機械、イベントのメールボックス（[§13](#13-ボタン入力)） |
+| [led.h](../src/led.h) / [led.c](../src/led.c) | 非ブロッキングな LED パターン表示 |
+| [stats.h](../src/stats.h) / [stats.c](../src/stats.c) | CPU 使用率・high-water・カウンタ |
+| [flash_disk.h](../src/flash_disk.h) / [flash_disk.c](../src/flash_disk.c) | 内蔵フラッシュ上のブロックデバイス。領域定数、ライトバックキャッシュ、消去と書き込み |
+| [ffconf.h](../src/ffconf.h) | FatFs の設定（上流の `external/fatfs/` には置かない。[§8.1](#81-ffconfh-をプロジェクト側に置く仕組み)） |
+| [diskio_flash.c](../src/diskio_flash.c) | FatFs の `disk_*` 実装 |
+| [storage.h](../src/storage.h) / [storage.c](../src/storage.c) | ストレージのモード状態機械、マウント、フォーマット、状態表示 |
+| [filelist.h](../src/filelist.h) / [filelist.c](../src/filelist.c) | FatFs 上のファイル一覧。`vgm list` / `mdx list` の出力、autoplay のプレイリストへ集める `filelist_collect()`、パスの検査 `filelist_path_ok()` で共用（[§1.3](#13-ファイル一覧の共用)） |
+| [usb_msc.c](../src/usb_msc.c) | USB マスストレージの `tud_msc_*` コールバック |
+| [vgm.h](../src/vgm.h) / [vgm.c](../src/vgm.c) | VGM のヘッダ解析、コマンド解釈、スケジューラ、一覧 |
+| [vgz.h](../src/vgz.h) / [vgz.c](../src/vgz.c) | gzip ストリームの展開。`FIL` から読み、展開したバイト列を前から順に返す（[§9.4](#94-vgz-のストリーム展開)） |
+| [mdx.h](../src/mdx.h) / [mdx.c](../src/mdx.c) | MDX のヘッダ解析、MML の解釈、チャンネル状態機械、tick スケジューラ、一覧（[§10](#10-mdx-再生)） |
+| [pcm8.h](../src/pcm8.h) / [pcm8.c](../src/pcm8.c) | MDX の ADPCM パート。PDX のストリーム読み出し、MSM6258 デコード、FM への加算（[§10.7](#107-adpcm-pcm8-の再生)） |
+| [songend.h](../src/songend.h) / [songend.c](../src/songend.c) | 曲の終わり方。ループ回数での打ち切り、フェードアウト、終わったあとの余韻待ち（[§11](#11-曲の終わり方-songend)） |
+| [autoplay.h](../src/autoplay.h) / [autoplay.c](../src/autoplay.c) | VGM / MDX の自動連続再生。プレイリスト、曲順、曲送りの状態機械（[§12](#12-自動連続再生-autoplay)） |
+| [tusb_config.h](../src/tusb_config.h) / [usb_descriptors.c](../src/usb_descriptors.c) | USB CDC 2 本 + MSC 1 本の TinyUSB 設定とディスクリプタ |
 | [external/fatfs/](../external/fatfs/) | FatFs R0.16（上流のまま。[external/README.md](../external/README.md)） |
 | [external/miniz/](../external/miniz/) | miniz 3.1.2（上流のまま。展開器 `tinfl` だけを使う。[external/README.md](../external/README.md)） |
 
@@ -99,7 +99,7 @@ LED → 統計 → **ボタンの消化** → コマンド 1 文字読み、を�
   先に見る
 - 接続検出: `stdio_usb_connected()`（100ms ごと）
 
-パーサ側の上限は [pico-opm-writer.c](../pico-opm-writer.c) に定義がある。1 行の最大長が
+パーサ側の上限は [pico-opm-writer.c](../src/pico-opm-writer.c) に定義がある。1 行の最大長が
 `LINE_MAX_LEN`（255 文字）、`d` に指定できる待機時間の上限が `DELAY_MAX_MS`（60000 ms）。
 
 ### 1.2 主要 API
@@ -172,7 +172,7 @@ void led_boot_pattern(uint32_t blinks); // 起動待ち。点滅の回数で選�
 ### 1.3 ファイル一覧の共用
 
 `vgm list` と `mdx list` は、ディレクトリ・拡張子・件数上限を除いて同じ処理をするので
-[filelist.c](../filelist.c) にまとめてある。`vgm_list()` / `mdx_list()` は引数を渡すだけ。
+[filelist.c](../src/filelist.c) にまとめてある。`vgm_list()` / `mdx_list()` は引数を渡すだけ。
 
 ```c
 const char *filelist_print(const char *dir, const char *const *exts, uint32_t n_exts,
@@ -289,7 +289,7 @@ PIO ステートマシン 1 基で GPIO をトグルする（1 命令 1 サイ�
 ### 2.1 システムクロックを φM に合わせる理由
 
 φM とシステムクロックは**整数分周（ジッタなし）になる組**でしか意味を持たないため、
-両者をペアにしたプリセットとして [opm.h](../opm.h) に持たせている。
+両者をペアにしたプリセットとして [opm.h](../src/opm.h) に持たせている。
 
 `φM × 偶数 = sys_clk` がちょうど成り立つ組でのみ `clkdiv` が整数（小数部 0）になり、
 ジッタのない φM が得られる。RP2350 の既定値 150MHz のままだと 4MHz は
@@ -300,7 +300,7 @@ PIO ステートマシン 1 基で GPIO をトグルする（1 命令 1 サイ�
 
 起動時に `set_sys_clock_khz(OPM_SYS_CLOCK_KHZ, true)` を **`stdio_init_all()` より前に**
 呼んでいる（ここで決まるのは起動時のプリセットだけで、以後は
-[clockmode.c](../clockmode.c) が張り替える）。USB は独立した USB PLL から給電されるため、この変更の影響を受けない。
+[clockmode.c](../src/clockmode.c) が張り替える）。USB は独立した USB PLL から給電されるため、この変更の影響を受けない。
 既定の 144MHz は RP2350 の定格 150MHz 以内なのでオーバークロックにあたらない。
 `OPM_CLOCK_MODE_NTSC` の 157.5MHz は定格に対して約 5% のオーバークロックになるが、
 電圧設定の変更なしで動作する範囲。
@@ -318,14 +318,14 @@ PIO ステートマシン 1 基で GPIO をトグルする（1 命令 1 サイ�
 
 4MHz と 3.579545MHz (= 315/88 MHz) の**両方**が整数分周になる sys_clk は 2520MHz が
 最小で、RP2350 では実現できない。したがって φM を変えるには sys_clk ごと張り替えるしかない。
-[clockmode.c](../clockmode.c) がこれを行う。
+[clockmode.c](../src/clockmode.c) がこれを行う。
 
 守るべきは 1 つ。**φM・BCK・LRCK の H/L 期間を公称値より短くしないこと。**
 YM2151 と PCM5102A が短いパルスを取りこぼしたり誤判定したりするのを避ける。
 
 #### 短いパルスが出る条件
 
-φM の H/L 期間は `clkdiv` 個の clk_sys サイクルに等しい（[opm_clock.pio](../opm_clock.pio) は
+φM の H/L 期間は `clkdiv` 個の clk_sys サイクルに等しい（[opm_clock.pio](../src/opm_clock.pio) は
 2 命令ループ）。BCK も同じで、H/L = `clkdiv_i2s` 個。したがって:
 
 - clk_sys 自体には欠けたサイクルが出ない。clk_sys は **glitchless mux** を持つ
@@ -370,22 +370,22 @@ pio_sm_set_enabled(pio, sm, true);
 ```
 
 `pio_sm_clkdiv_restart()` は `CTRL.CLKDIV_RESTART` を立てるだけで PC / X / Y / ISR / OSR
-には触らない。**`pio_sm_restart()` は使わない**（[i2s.pio](../i2s.pio) の注意書きのとおり、
+には触らない。**`pio_sm_restart()` は使わない**（[i2s.pio](../src/i2s.pio) の注意書きのとおり、
 PC を先頭へ戻すと X が中途半端なまま位相が恒久的に狂う）。
 
 #### 影響を受けない部分
 
 | | 理由 |
 | --- | --- |
-| ym3012 キャプチャ | [ym3012.pio](../ym3012.pio) は clkdiv 固定 1 で、SO / φ1 / SH1 / SH2 のエッジ駆動。12MHz の窓のあいだだけ φ1 に対する余裕が減って数フレーム壊れうるが、毎フレーム SH1 で再同期する |
+| ym3012 キャプチャ | [ym3012.pio](../src/ym3012.pio) は clkdiv 固定 1 で、SO / φ1 / SH1 / SH2 のエッジ駆動。12MHz の窓のあいだだけ φ1 に対する余裕が減って数フレーム壊れうるが、毎フレーム SH1 で再同期する |
 | VGM のテンポ | `time_us_64()` 基準。タイマのティックは clk_ref (XOSC) 系なので sys_clk と無関係（[§9.2](#92-スケジューラ)） |
 | USB | `clk_usb` は pll_usb 系で、pll_sys の再構成に影響されない |
 | `OPM_T_DATA_US` = 25µs | 68 φM サイクルは 4MHz で 17µs / 3.579545MHz で 19µs。φM を下げる方向なので余裕は増える |
 | I2S の先行量 | 切り替え中はメインループが約 300µs 止まるが、先行 `I2S_TARGET_FRAMES` = 16.4ms に対して十分短い。アンダーランしない |
 | フラッシュ (QMI) | 分周は `PICO_FLASH_SPI_CLKDIV = 4` 固定で clk_sys に追従する。遷移の両端 36MHz / 39.4MHz はどちらも起動時に実績のある構成 |
 
-`sys_clk` に依存して実行時に算出している値（[opm.c](../opm.c) の `s_setup_cycles` と
-φM の分周比、[i2s.c](../i2s.c) の `s_div256`）は、切り替えのたびに計算し直す。
+`sys_clk` に依存して実行時に算出している値（[opm.c](../src/opm.c) の `s_setup_cycles` と
+φM の分周比、[i2s.c](../src/i2s.c) の `s_div256`）は、切り替えのたびに計算し直す。
 I2S 側は `clkdiv_i2s = 2 × clkdiv_opm`（[§5.2](#52-サンプリングレートのロック)）の関係だけで決まるので、
 B で使う切り上げた分周比にもそのまま追従する。
 
@@ -426,7 +426,7 @@ OPM への 1 レジスタ書き込みは「アドレスラッチ」→「デー�
 
 ### 3.1 タイミング定数
 
-[opm.h](../opm.h) の定数で調整する。クロック依存の待ち時間は `clock_get_hz(clk_sys)` から
+[opm.h](../src/opm.h) の定数で調整する。クロック依存の待ち時間は `clock_get_hz(clk_sys)` から
 実行時に算出しているため、φM プリセットを変えても定数の書き換えは要らない。
 
 | 定数 | 既定値 | 考え方 |
@@ -511,7 +511,7 @@ SH2 が CH1 の、SH1 が CH2 のサンプルホールドである。したが�
 
 ### 4.2 PIO によるビット取り込み
 
-[ym3012.pio](../ym3012.pio) の 7 命令。入力は in_base (GP17) から連続 4 本で、
+[ym3012.pio](../src/ym3012.pio) の 7 命令。入力は in_base (GP17) から連続 4 本で、
 ピンはすべて in_base からのオフセットで参照する（GPIO 番号は現れない）。
 **SO / φ1 / SH1 / SH2 を GP17 から連続で割り当てないといけないのはこのため。**
 
@@ -536,8 +536,8 @@ bitloop:
 - TX FIFO は使わないので `PIO_FIFO_JOIN_RX` で RX を深さ 8 にする
 - 分周なし。φ1 (2MHz) に対して sys_clk (144MHz) は 1 クロックあたり 72 サイクルある
 
-φM 生成用の PIO ([opm_clock.pio](../opm_clock.pio), 2 命令) と I2S 出力用の PIO
-([i2s.pio](../i2s.pio), 8 命令) とは別のステートマシンを使う。3 つとも
+φM 生成用の PIO ([opm_clock.pio](../src/opm_clock.pio), 2 命令) と I2S 出力用の PIO
+([i2s.pio](../src/i2s.pio), 8 命令) とは別のステートマシンを使う。3 つとも
 `pio_claim_free_sm_and_add_program()` で動的に確保するので、SM も命令メモリのオフセットも
 固定していない。合計 17 命令で、RP2350 には PIO ブロックが 3 つ（各 4 SM / 32 命令）
 あるので余裕がある。
@@ -563,7 +563,7 @@ bit 13..15 : L 指数 S0..S2   bit 29..31 : R 指数 S0..S2
 値域は **−32768**（m=0, E=7）〜 **+32704**（m=1023, E=7 = 511<<6）。
 正側が +32767 に届かないのは仕様どおりで、正規化してはいけない。
 
-実装は [ym3012.h](../ym3012.h) の `ym3012_word_to_pcm()`。
+実装は [ym3012.h](../src/ym3012.h) の `ym3012_word_to_pcm()`。
 
 MDX の ADPCM パートを鳴らしているあいだは、この変換の**直後**に ADPCM が加算される
 （[§10.7](#107-adpcm-pcm8-の再生)）。加算はカーソルによらず同じ結果になるので、
@@ -683,11 +683,11 @@ overrun するので、読み捨ては省けない。
 - `active` は `songend_is_active()`（[§11](#11-曲の終わり方-songend)）。**余韻が消えるまで
   true** なので、`p 2` の録り終わりは自動再生が次の曲へ送るのと必ず同じ時刻になる
 
-**[capture.c](../capture.c) は vgm / mdx / songend を include しない。** 判定を持ち込むと、
+**[capture.c](../src/capture.c) は vgm / mdx / songend を include しない。** 判定を持ち込むと、
 `storage host` の排他をコマンド層に置いたのと同じ理由で層が濁る。渡ってくるのは
 `bool` と番号だけ。
 
-呼び出しは [pico-opm-writer.c](../pico-opm-writer.c) の `service_all()` で、**シーケンサの
+呼び出しは [pico-opm-writer.c](../src/pico-opm-writer.c) の `service_all()` で、**シーケンサの
 間引き（`due()`）の外**に置く。比較が数回で済むうえ、間引くと待機から録り始めるまでの
 遅れがそのまま WAV の頭の欠けになる。
 
@@ -729,7 +729,7 @@ MDX の ADPCM パートは変換の直後に足されるので、I2S にも USB 
 
 ### 5.1 PIO プログラム
 
-[i2s.pio](../i2s.pio) の 8 命令。sideset 2bit に BCK / LRCK、OUT 1bit に DIN を割り当てる。
+[i2s.pio](../src/i2s.pio) の 8 命令。sideset 2bit に BCK / LRCK、OUT 1bit に DIN を割り当てる。
 **LRCK は BCK の次の GPIO でなければならない**（sideset は連続したピンにしか出せない）。
 
 ```
@@ -878,8 +878,8 @@ OPM を繋がずに動かした場合はソースが供給されないため、1
 [README §3.1](../README.md#31-接続)）。Pico SDK の `stdio_usb` は CDC を 1 本しか
 用意しないので、TinyUSB のディスクリプタと初期化はアプリ側で持つ。
 
-- `tinyusb_device` を追加でリンクし、[tusb_config.h](../tusb_config.h) と
-  [usb_descriptors.c](../usb_descriptors.c) を自前で用意する
+- `tinyusb_device` を追加でリンクし、[tusb_config.h](../src/tusb_config.h) と
+  [usb_descriptors.c](../src/usb_descriptors.c) を自前で用意する
 - `tud_task()` はメインループから回す
 - **CDC #0 をディスクリプタの先頭に置く。** こうするとコマンド側のデバイス名が
   1 ポート構成のときと変わらず、既存のホスト側スクリプトがそのまま動く。
@@ -938,8 +938,8 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   `build/opm_clock.pio.h` / `build/ym3012.pio.h` / `build/i2s.pio.h` を生成
 - `target_link_libraries` は `pico_stdlib` / `hardware_pio` / `hardware_dma` /
   `hardware_clocks` / `hardware_pll` / `hardware_flash` / `pico_flash` / `pico_rand` /
-  `tinyusb_device` / `fatfs` / `miniz`。`hardware_pll` は [clockmode.c](../clockmode.c) の
-  `pll_init()`、`pico_rand` は [autoplay.c](../autoplay.c) の `get_rand_32()` が要求する
+  `tinyusb_device` / `fatfs` / `miniz`。`hardware_pll` は [clockmode.c](../src/clockmode.c) の
+  `pll_init()`、`pico_rand` は [autoplay.c](../src/autoplay.c) の `get_rand_32()` が要求する
 - FatFs と miniz は `add_library(... STATIC ...)` の別ターゲットにする。`-Wall -Wextra` が
   `pico-opm-writer` に `PRIVATE` で付いているので、これで上流コードに波及せず、
   警告抑止も改変も要らなくなる（[§8](#8-ストレージ)）
@@ -949,32 +949,32 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 - キャッシュ変数 `OPM_CLOCK_MODE` を持ち、指定時のみ同名マクロを
   `target_compile_definitions` で渡す（φM プリセットの切り替え、[§2](#2-φm-の生成)）
 - キャッシュ変数 `I2S_ENABLED`（既定 1）は**常に**マクロとして渡す。
-  [ym3012.h](../ym3012.h) がこれを見て `YM3012_LOOPBACK_ENABLED` の既定値を決めるため、
+  [ym3012.h](../src/ym3012.h) がこれを見て `YM3012_LOOPBACK_ENABLED` の既定値を決めるため、
   未定義のままにできない（[§4.6](#46-起動時の自己診断)）
 - キャッシュ変数 `YM3012_LOOPBACK` は指定時のみ `YM3012_LOOPBACK_ENABLED` として渡し、
   上の自動判定を上書きする
 - キャッシュ変数 `VGM_VGZ_ENABLED`（既定 1）は**常に**マクロとして渡す。
-  [vgz.h](../vgz.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  [vgz.h](../src/vgz.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にすると展開器と約 84KiB のバッファがリンクされない。[§9.4](#94-vgz-のストリーム展開)）
 - キャッシュ変数 `MDX_ENABLED`（既定 1）は**常に**マクロとして渡す。
-  [mdx.h](../mdx.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  [mdx.h](../src/mdx.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にするとシーケンサと 64KiB のファイルバッファがリンクされず、`mdx` コマンドは
   すべて失敗する。[§10](#10-mdx-再生)）
 - キャッシュ変数 `PCM8_ENABLED` は指定時のみマクロとして渡す。空なら
-  [pcm8.h](../pcm8.h) の既定（`MDX_ENABLED` に従う）を使う
+  [pcm8.h](../src/pcm8.h) の既定（`MDX_ENABLED` に従う）を使う
   （0 にするとデコーダとミックスリング約 27KB がリンクされない。[§10.7](#107-adpcm-pcm8-の再生)）
 - キャッシュ変数 `AUTOPLAY_ENABLED`（既定 1）は**常に**マクロとして渡す。
-  [autoplay.h](../autoplay.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  [autoplay.h](../src/autoplay.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にするとプレイリスト約 26KB と状態機械がリンクされない。[§12](#12-自動連続再生-autoplay)）
 - キャッシュ変数 `BUTTON_ENABLED`（既定 1）は**常に**マクロとして渡す。
-  [button.h](../button.h) がこれで実装ごと切り替わるため、未定義のままにできない
+  [button.h](../src/button.h) がこれで実装ごと切り替わるため、未定義のままにできない
   （0 にすると GP21 / GP22 に一切触らない。[§13.7](#137-無効化)）
 - キャッシュ変数 `STATS_PROFILE`（既定 0）は**常に**マクロとして渡す。1 で `s` に
   `SVCTIME` 行が増える（[README §3.11.1](../README.md#3111-サービスの呼び出し間隔)）
 - FatFs 領域は `FLASH_FATFS_RESERVE_KB`（ファームウェアに残す KiB。既定 256）から
   オフセットとサイズを CMake 側で計算し、`FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` /
   `FLASH_FATFS_TAIL_RESERVE` を**常に**マクロとして渡す。後段のリンク後チェックが
-  領域の実値を必要とするため、[flash_disk.h](../flash_disk.h) 側の `#ifndef` 既定値は
+  領域の実値を必要とするため、[flash_disk.h](../src/flash_disk.h) 側の `#ifndef` 既定値は
   CMake を通さないビルドのための保険という位置づけ（[README §7.1](../README.md#71-領域の変え方)）。
   `FLASH_FATFS_OFFSET` / `FLASH_FATFS_SIZE` をバイトで名指しすることもでき、
   `FLASH_FATFS_OFFSET` と `FLASH_FATFS_RESERVE_KB` の同時指定は `FATAL_ERROR` にする。
@@ -985,8 +985,8 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
   （[§8.5](#85-領域がファームウェアと重ならないこと)）
 - `PICO_STDIO_USB_STDOUT_TIMEOUT_US=10000` を定義する（[§6](#6-usb-cdc-2-本と-msc-の実装)）
 - `pico_enable_stdio_usb 1` / `pico_enable_stdio_uart 0`
-- `target_include_directories` にリポジトリ直下を入れる。SDK の tusb_config.h は
-  `-isystem` で入るので、これで自前の [tusb_config.h](../tusb_config.h) が優先される
+- `target_include_directories` に `src/` を入れる。SDK の tusb_config.h は
+  `-isystem` で入るので、これで自前の [tusb_config.h](../src/tusb_config.h) が優先される
 - 配布用の `release` ターゲットを持つ。configure 時の値（SDK のパス、各キャッシュ変数の
   実効値）を [cmake/release_config.cmake.in](../cmake/release_config.cmake.in) から
   `build/release_config.cmake` へ焼き、`cmake -P` で走る
@@ -1026,16 +1026,16 @@ Pico VS Code 拡張が管理する「DO NOT EDIT」ブロック（`sdkVersion` /
 
 ### 8.1 `ffconf.h` をプロジェクト側に置く仕組み
 
-FatFs 本体は無改変で `external/fatfs/` に置く。設定だけをリポジトリ直下の
-[ffconf.h](../ffconf.h) に持たせるために、**上流のテンプレート `ffconf.h` を
+FatFs 本体は無改変で `external/fatfs/` に置く。設定だけを
+[ffconf.h](../src/ffconf.h) に持たせるために、**上流のテンプレート `ffconf.h` を
 `external/fatfs/` へ置かない**。
 
 `ff.h` の `#include "ffconf.h"` がツリー内で唯一の参照で（`ff.c` は `ff.h` と
 `diskio.h` しか include しない）、GCC は `"..."` をまず include 元のファイルがある
-ディレクトリから探す。そこに無ければ `-I` に入っているリポジトリ直下が拾われる。
+ディレクトリから探す。そこに無ければ `-I` に入っている `src/` が拾われる。
 
-事故を検出するため [ffconf.h](../ffconf.h) は `OPM_FFCONF_H` を定義し、
-[diskio_flash.c](../diskio_flash.c) が `#if !defined(OPM_FFCONF_H)` で `#error` にする。
+事故を検出するため [ffconf.h](../src/ffconf.h) は `OPM_FFCONF_H` を定義し、
+[diskio_flash.c](../src/diskio_flash.c) が `#if !defined(OPM_FFCONF_H)` で `#error` にする。
 `ff.h` 自身も `FF_DEFINED != FFCONF_DEF` をコンパイル時に弾くので、版のずれも検出される。
 
 出所・適用した公式パッチ・省いたファイルは [external/README.md](../external/README.md) に記録している。
@@ -1131,7 +1131,7 @@ LOEJ 処理を完全に無効にしても変わらないことを実機で確認
 ただし実行時の検査は焼いて起動するまで結果が分からないので、**その前に 2 段構えで
 落とす**。
 
-領域自体の妥当性は [flash_disk.c](../flash_disk.c) の `_Static_assert` でコンパイル時に
+領域自体の妥当性は [flash_disk.c](../src/flash_disk.c) の `_Static_assert` でコンパイル時に
 検査する。4096 バイト境界に揃っているか、末尾の予約セクタに食い込んでいないか、
 クラスタ数が FAT12 の上限（4085）を下回るか。
 
@@ -1162,7 +1162,7 @@ RP2350-E10 の absolute block 用。0x10FFFF00 狙いのブロックが 4MiB の
 読んで飛ばすと破綻する）。`.vgz` はシークできないので別扱いになる（[§9.4](#94-vgz-のストリーム展開)）。
 
 `vgm_play()` はヘッダ解析のあと `apply_file_clock()` を呼び、オフセット `0x30` が申告する
-YM2151 のクロックへ φM を寄せる（[clockmode.c](../clockmode.c) の
+YM2151 のクロックへ φM を寄せる（[clockmode.c](../src/clockmode.c) の
 `clockmode_follow_file()`。最寄りのプリセット、境界は 2 つの中点 3789772Hz）。
 これは `opm_clear()` と `s_start_us` の設定より前に済ませるので、切り替えに使った
 数百 µs が再生の起点に乗らない。寄せてもなお一致しないときだけ、残ったずれを警告する。
@@ -1235,7 +1235,7 @@ s_dma_total / s_fill_total ≡ リング内の添字 (mod I2S_RING_FRAMES)
 1. **HOST モード中は音声経路を止める。** `i2s_set_enabled(false)` で I2S はソースを
    読まず無音だけを詰める。リング全体が無音なので、停止中に DMA が古い内容を再生しても
    出てくるのは無音。BCK / LRCK と DMA は止めない（止めると PCM5102A がポップし、
-   [i2s.h](../i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
+   [i2s.h](../src/i2s.h) の「I2S 出力は常時動作し停止しない」前提も崩れる）
 2. **`capture_resync_after_blackout()` で基準点を張り直す。** 呼ぶのは 3 か所で、
    `flash_disk_flush_one()` の中（`storage format` は PLAYER モードで走るため必要）、
    `storage player` への遷移時、そして `button_boot_apply()` の末尾
@@ -1277,7 +1277,7 @@ gzip 圧縮された VGM を、一時ファイルを作らずに展開しなが�
 
 **圧縮の判定は拡張子ではなくファイル先頭のマジック（`1F 8B`）で行う。** 中身が gzip の
 `.vgm` も、`.vgm` そのままの `.vgz` も世の中にあるため。`vgm list` の絞り込み
-（[filelist.c](../filelist.c) の `has_ext()` と [vgm.c](../vgm.c) の `VGM_EXTS[]`）は
+（[filelist.c](../src/filelist.c) の `has_ext()` と [vgm.c](../src/vgm.c) の `VGM_EXTS[]`）は
 拡張子で拾うが、それは一覧に何を出すかの話であって展開するかどうかとは独立している。
 
 **出力リングが DEFLATE の履歴窓を兼ねる。** `tinfl` は出力バッファをリングとして扱い、
@@ -1344,7 +1344,7 @@ POD** で、出力リングを呼び出しごとに引数で渡す造りだか�
 壊れていれば `tinfl` の展開エラーか、VGM 側の未知オペコード
 （[§9.1](#91-コマンドの解釈)）として必ず捕まる。
 
-`VGM_VGZ_ENABLED=0` にすると [vgz.c](../vgz.c) は「常に失敗する」スタブだけになり、
+`VGM_VGZ_ENABLED=0` にすると [vgz.c](../src/vgz.c) は「常に失敗する」スタブだけになり、
 展開器も約 84KiB のバッファもリンクされない（[§7](#7-ビルド構成)）。
 `vgm_play()` は gzip のファイルを `bad file` で拒否し、理由を `# hint` 行で出す。
 
@@ -1352,7 +1352,7 @@ POD** で、出力リングを呼び出しごとに引数で渡す造りだか�
 
 VGM が「レジスタ書き込みのタイムスタンプ付きダンプ」なのに対し、MDX は
 **チャンネルごとに独立したシーケンサ**を持つバイナリ MML なので、音色・音量・ピッチ・
-LFO をこちらで解釈してはじめて YM2151 のレジスタ値になる。つまり [mdx.c](../mdx.c) は
+LFO をこちらで解釈してはじめて YM2151 のレジスタ値になる。つまり [mdx.c](../src/mdx.c) は
 MXDRV 相当の音源ドライバそのもの。
 
 利用者から見た仕様は [README §9](../README.md#9-mdx-再生)。
@@ -1361,7 +1361,7 @@ MXDRV 相当の音源ドライバそのもの。
 
 レジスタへの書き込み内容と順序は **MXDRV 2.06+17 Rel.X5-S / MXDRVg V2.00b** に
 合わせてある（一部の機能だけ **MXDRV 2.06+16 Rel.3+25**。[README §12](../README.md#12-ライセンス)）。
-[mdx.c](../mdx.c) の冒頭に、参照実装のチャンネルワーク `MXWORK_CH` のオフセット
+[mdx.c](../src/mdx.c) の冒頭に、参照実装のチャンネルワーク `MXWORK_CH` のオフセット
 （`S0000`〜`S004e`）と `mdx_ch_t` のフィールドの対応表を置いてある。整数の幅も
 参照実装に合わせ（符号なしで持ち、必要なところだけ符号付きへキャストする）、
 68000 での桁溢れの仕方まで同じ結果になるようにしている。
@@ -1432,7 +1432,7 @@ u64 に収まる。丸めは 1 tick あたり 15ps 未満で、1 時間で 4µs 
 `s_cursor` と `s_in_tick` が持つ。
 
 この予算の理由は `VGM_BUDGET_US` と同じで、メインループが 1 周回で標準入力を
-1 文字しか読まないため（[vgm.h](../vgm.h) の説明）。
+1 文字しか読まないため（[vgm.h](../src/vgm.h) の説明）。
 
 `MDX_RESYNC_LAG_US`（200ms）を超えて遅れたら、早送りせず時計を張り直す。
 
@@ -1480,7 +1480,7 @@ MXDRV の調律ぶん。ここへディチューン・ポルタメント・音�
 この 6 本の中だけ**にあり、`if (ch < 8)` を処理のあちこちに撒かなくて済む。
 
 FM チャンネルは 6 本すべてが OPM のレジスタを書く。ADPCM チャンネルは
-`snd_key_on()` / `snd_key_off()` だけが働き、[pcm8.c](../pcm8.c) を呼ぶ。
+`snd_key_on()` / `snd_key_off()` だけが働き、[pcm8.c](../src/pcm8.c) を呼ぶ。
 音色・パン・TL・KC/KF はレジスタに対応するものが無いので何もしない
 （PCM8 は発音のたびに音量・レート・定位を引数で渡す方式で、レジスタ相当の
 遅延書き込みが要らない）。
@@ -1496,7 +1496,7 @@ FM チャンネルは 6 本すべてが OPM のレジスタを書く。ADPCM チ
 ### 10.7 ADPCM (PCM8) の再生
 
 X68000 の ADPCM は MSM6258 という別のチップで、本機には載っていない。
-[pcm8.c](../pcm8.c) が **PCM8（江藤啓氏の ADPCM 多重再生ドライバ）相当の 8ch** を
+[pcm8.c](../src/pcm8.c) が **PCM8（江藤啓氏の ADPCM 多重再生ドライバ）相当の 8ch** を
 ソフトウェアでデコードし、YM3012 から取り込んだ FM の PCM に足す。
 利用者から見た仕様は [README §9.7](../README.md#97-adpcm-pcm8-の再生)。
 
@@ -1518,7 +1518,7 @@ X68000 の ADPCM は MSM6258 という別のチップで、本機には載って
 
 #### PCM8 の呼び出し方
 
-参照実装は `TRAP #2` で PCM8 を叩く。[pcm8.h](../pcm8.h) の API はその機能コードと
+参照実装は `TRAP #2` で PCM8 を叩く。[pcm8.h](../src/pcm8.h) の API はその機能コードと
 1 対 1 に対応させてある（`pcm8_key_on()` = `$000x`、`pcm8_set_mode()` = `$007x`、
 `pcm8_stop()` = `$000x` でデータ長 0、`pcm8_abort_all()` = `$0101`）。
 
@@ -1561,7 +1561,7 @@ X68000 の ADPCM は MSM6258 という別のチップで、本機には載って
 
 周波数（`0xED`）と定位（`p`）はどちらの経路でも同じ値を渡す。
 
-[pcm8.h](../pcm8.h) では IOCS 経路を `pcm8_iocs_out()` / `pcm8_iocs_mod()` として
+[pcm8.h](../src/pcm8.h) では IOCS 経路を `pcm8_iocs_out()` / `pcm8_iocs_mod()` として
 別の入口に分けてある（参照実装でも呼ぶベクタが違う）。MSM6258 は実機に 1 個しか
 無いので `pcm8_iocs_out()` は ch0 固定。
 
@@ -1637,7 +1637,7 @@ delta = step/8 + step/4·b0 + step/2·b1 + step·b2   （符号は b3）
 リング 1 周ぶんしか離れないため。
 
 加算は `ym3012_reader_read_pcm()` の変換直後の 1 箇所だけで行う
-（[ym3012.c](../ym3012.c) の `ym3012_mixer_t` フック）。ここが USB キャプチャと
+（[ym3012.c](../src/ym3012.c) の `ym3012_mixer_t` フック）。ここが USB キャプチャと
 I2S の唯一の合流点なので、1 箇所で両方に効く。禁止コード E=0 の計数は混ぜる前に
 済ませてあるので、統計は「取り込んだ信号の品質」のまま変わらない。
 
@@ -1671,7 +1671,7 @@ ADPCM が途切れる。これを防ぐため `ym3012_set_mix_ready()` で
 入る（[§4.4](#44-dma-リング)）ので、ADPCM だけが早く出ることになる。
 
 そこで **発音状態を変える前に、その瞬間のフレーム番号まで描き切る。**
-[pcm8.c](../pcm8.c) の `flush_now()` がこれを行い、`pcm8_key_on()` / `pcm8_stop()` /
+[pcm8.c](../src/pcm8.c) の `flush_now()` がこれを行い、`pcm8_key_on()` / `pcm8_stop()` /
 `pcm8_set_mode()` / `pcm8_abort_all()` / `pcm8_iocs_out()` / `pcm8_iocs_mod()` /
 `pcm8_set_enabled()` の入口から呼ばれる（`pcm8_close_pdx()` は `pcm8_abort_all()` 経由）。
 描く総量は変わらないので、費用は `pcm8_service()` から `mdx_service()` へ移るだけ。
@@ -1740,7 +1740,7 @@ MDX にもそのまま掛かる。MDX はファイルを丸ごと RAM に載せ�
 
 ## 11. 曲の終わり方 (songend)
 
-[songend.c](../songend.c) は「曲の一生」を 1 本の状態機械で持つ。ループ回数で打ち切るか、
+[songend.c](../src/songend.c) は「曲の一生」を 1 本の状態機械で持つ。ループ回数で打ち切るか、
 自然に終わるまで待つか、終わったあとの余韻をどこまで待つか — **その仕様も処理もここに
 しかない。** 利用者側の仕様は [README §3.22](../README.md#322-曲の終わり方)。
 
@@ -1790,14 +1790,14 @@ MDX にもそのまま掛かる。MDX はファイルを丸ごと RAM に載せ�
 
 ### 11.2 余韻の判定
 
-曲データが尽きたとき、[vgm.c](../vgm.c) / [mdx.c](../mdx.c) は **OPM に何も書かない**
+曲データが尽きたとき、[vgm.c](../src/vgm.c) / [mdx.c](../src/mdx.c) は **OPM に何も書かない**
 （[README §3.22](../README.md#322-曲の終わり方)）。最後の音は音色本来の RR で減衰するので、
 `RINGOUT` はそれが消えるのを待つ。MDX でそうするのは参照実装がそうだから
 （[§10.1](#101-参照実装への準拠)）で、VGM には対応する参照実装が無く、
 「終端で余韻を切り落とさない」という同じ扱いに揃えてある
 （[README §8.1](../README.md#81-対応範囲) の「終端」）。
 
-観測は [ym3012.c](../ym3012.c) が持つ。`ym3012_ring_poll()` が取り込んだフレームを
+観測は [ym3012.c](../src/ym3012.c) が持つ。`ym3012_ring_poll()` が取り込んだフレームを
 `ym3012_word_to_pcm()` で変換して `YM3012_QUIET_LEVEL` と比べ、超えた位置を
 `ym3012_last_loud_total()` に覚える。`ym3012_write_total()` との差がそのまま
 「無音が続いているフレーム数」で、`s` の `QUIET` 行に出る。
@@ -1889,7 +1889,7 @@ MDX は MXDRV 由来の TL フェード（`0xE7 0x01`）を別に持っている
 
 ## 12. 自動連続再生 (autoplay)
 
-[autoplay.c](../autoplay.c) は「曲が終わったら次を鳴らす」だけの薄い層で、**音を出す仕事も
+[autoplay.c](../src/autoplay.c) は「曲が終わったら次を鳴らす」だけの薄い層で、**音を出す仕事も
 曲を終わらせる仕事もしない。** 曲の終わり方は [§11](#11-曲の終わり方-songend) が持っていて、
 こちらは `songend_is_active()` が落ちるのを待って次の曲を `vgm_play()` / `mdx_play()` で
 始めるだけ。
@@ -1957,7 +1957,7 @@ autoplay の loop / fade の既定値は手動再生と違う（[§11.1](#111-�
 どちらも 1 行ごと（または 1 件ごと）に `service_all()` を tick として呼ぶので、
 立てておかないと集計や出力の最中に曲送りが走ってプレイリストの並びが変わる。
 `vgm list` / `mdx list` は `s_busy` に触らない。曲送りが走っても
-[filelist.c](../filelist.c) の走査バッファは壊れない（`vgm_play()` はそこを触らない）が、
+[filelist.c](../src/filelist.c) の走査バッファは壊れない（`vgm_play()` はそこを触らない）が、
 一覧の途中に `# autoplay:` の行が挟まりうる。
 
 ### 12.3 他のモジュールとの関係
@@ -1977,9 +1977,9 @@ GP21 (SW1) と GP22 (SW2) の 2 個。SW3 は RUN 端子に繋がっていてハ
 
 ### 13.1 検出と消化を分ける
 
-[button.c](../button.c) は **autoplay も storage も include しない**。GPIO を読んで
+[button.c](../src/button.c) は **autoplay も storage も include しない**。GPIO を読んで
 短押し / 長押しのイベントに変えるところまでを持ち、何をするかは
-[pico-opm-writer.c](../pico-opm-writer.c) の `button_dispatch()` が決める。
+[pico-opm-writer.c](../src/pico-opm-writer.c) の `button_dispatch()` が決める。
 
 分ける理由は `service_all()` の呼ばれ方（[§1.1](#11-メインループ)）。`d` の待機・
 `p 0` のドレイン待ち・一覧出力の行ごとの tick から**コマンド処理の途中で再入的に
@@ -2040,7 +2040,7 @@ tick からも呼ばれるので、そこから行を吐くと出力の途中に
 
 ### 13.5 LED の一時表示と起動待ち
 
-[led.c](../led.c) の一時表示（オーバーレイ）はポインタ + 長さ + 位置の 3 変数で持ち、
+[led.c](../src/led.c) の一時表示（オーバーレイ）はポインタ + 長さ + 位置の 3 変数で持ち、
 `overlay_start()` で差し込む。非アクティブはポインタが `NULL` なので番兵の値は要らない。
 種類を問わず後から来たものが勝つ。
 
@@ -2051,8 +2051,8 @@ tick からも呼ばれるので、そこから行を吐くと出力の途中に
 起動待ちは基本状態 `LED_STATE_BOOT` を 1 つだけ足し、点滅回数ごとのパターンは
 `led_boot_pattern()` がポインタで選ぶ。3 つの状態には割っていない。
 
-`LED_STATE_HOST` の張り替えは [storage.c](../storage.c) が持つ
-（[capture.c](../capture.c) が `LED_STATE_CAPTURE` を持つのと同じ作法）。コマンド経由・
+`LED_STATE_HOST` の張り替えは [storage.c](../src/storage.c) が持つ
+（[capture.c](../src/capture.c) が `LED_STATE_CAPTURE` を持つのと同じ作法）。コマンド経由・
 ボタン経由・PC の eject 経由（`storage_host_ejected()`）の 3 つが必ず
 `storage_set_host()` / `storage_set_player()` を通るので、1 箇所で揃う。
 
@@ -2089,8 +2089,8 @@ HOST 中に拒否され、`storage host` はキャプチャ中に拒否される
 
 ### 13.7 無効化
 
-`BUTTON_ENABLED=0` では [button.c](../button.c) が全部空の実装になり、GP21 / GP22 には
+`BUTTON_ENABLED=0` では [button.c](../src/button.c) が全部空の実装になり、GP21 / GP22 には
 一切触らない。`button_take_event()` が常に `false` を返すので、
-**[pico-opm-writer.c](../pico-opm-writer.c) の消化側に `#if` は要らない**
-（autoplay と同じ流儀）。[led.c](../led.c) の追加分は数十バイトなので常にリンクする
+**[pico-opm-writer.c](../src/pico-opm-writer.c) の消化側に `#if` は要らない**
+（autoplay と同じ流儀）。[led.c](../src/led.c) の追加分は数十バイトなので常にリンクする
 （`LED_STATE_HOST` はボタンとは独立に `storage host` で使う）。

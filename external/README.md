@@ -2,7 +2,7 @@
 
 外部のソースコードをそのまま置く場所。**ここのファイルは改変しない。**
 
-自前のコードはリポジトリ直下に置く（`ffconf.h` / `flash_disk.c` / `diskio_flash.c` など）。
+自前のコードは `src/` に置く（`ffconf.h` / `flash_disk.c` / `diskio_flash.c` など）。
 
 ## fatfs — FatFs R0.16
 
@@ -36,10 +36,10 @@ ff.c  ff.h  ffunicode.c  diskio.h  00readme.txt  00history.txt  LICENSE.txt
 
 `ff.h` の `#include "ffconf.h"` がツリー内で唯一の参照（`ff.c` は `ff.h` と `diskio.h` しか
 include しない）。GCC は `"..."` を**まず include 元のファイルがあるディレクトリ**から探すため、
-`external/fatfs/` に `ffconf.h` が無ければ、`-I` に入っているリポジトリ直下の `ffconf.h` が拾われる。
+`external/fatfs/` に `ffconf.h` が無ければ、`-I` に入っている `src/ffconf.h` が拾われる。
 
 **ここに `ffconf.h` を置くと黙って上流のテンプレートが勝つ。** 事故防止として
-リポジトリ直下の `ffconf.h` は `OPM_FFCONF_H` を定義し、`diskio_flash.c` がそれを
+`src/ffconf.h` は `OPM_FFCONF_H` を定義し、`diskio_flash.c` がそれを
 `#error` で検査している。
 
 `ff.h` は `FF_DEFINED != FFCONF_DEF` をコンパイル時に弾くので、版と設定のずれも検出される。

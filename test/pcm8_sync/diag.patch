@@ -1,7 +1,7 @@
-diff --git a/pcm8.c b/pcm8.c
+diff --git a/src/pcm8.c b/src/pcm8.c
 index 34a32d1..2e1eae5 100644
---- a/pcm8.c
-+++ b/pcm8.c
+--- a/src/pcm8.c
++++ b/src/pcm8.c
 @@ -130,6 +130,38 @@ static uint32_t s_reads;
  static uint32_t s_keyon;
  static uint32_t s_miss;
@@ -60,10 +60,10 @@ index 34a32d1..2e1eae5 100644
  }
  
  void pcm8_set_enabled(bool on)
-diff --git a/pcm8.h b/pcm8.h
+diff --git a/src/pcm8.h b/src/pcm8.h
 index d6660f3..9193c9d 100644
---- a/pcm8.h
-+++ b/pcm8.h
+--- a/src/pcm8.h
++++ b/src/pcm8.h
 @@ -136,6 +136,9 @@ uint32_t pcm8_read_count(void); /* PDX を読んだ回数 */
  uint32_t pcm8_keyon_count(void); /* 発音を開始した回数 */
  uint32_t pcm8_miss_count(void);  /* 波形が無い / 音量 0 で鳴らせなかった回数 */
@@ -74,10 +74,10 @@ index d6660f3..9193c9d 100644
  /* keyon / miss / reads を 0 に戻す（`s 0` から呼ぶ。PDX は閉じない） */
  void pcm8_reset_counters(void);
  
-diff --git a/pico-opm-writer.c b/pico-opm-writer.c
+diff --git a/src/pico-opm-writer.c b/src/pico-opm-writer.c
 index 40ea48f..5418edf 100644
---- a/pico-opm-writer.c
-+++ b/pico-opm-writer.c
+--- a/src/pico-opm-writer.c
++++ b/src/pico-opm-writer.c
 @@ -413,6 +413,13 @@ static void print_stats(void)
             (unsigned)PCM8_CH_MAX, (unsigned)pcm8_active_mask(),
             (unsigned)pcm8_keyon_count(), (unsigned)pcm8_miss_count(),

@@ -44,14 +44,14 @@ pico_sdk_init()
 #
 # ffconf.h は external/fatfs には置かない。ff.h の #include "ffconf.h" は
 # まず ff.h 自身のあるディレクトリを探すので、そこに無いときだけ
-# リポジトリ直下の ffconf.h が拾われる。
+# src/ffconf.h が拾われる。
 add_library(fatfs STATIC
         external/fatfs/ff.c
         external/fatfs/ffunicode.c
         )
 target_include_directories(fatfs PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}/external/fatfs
-        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/src
         )
 
 # miniz も同じ理由で別ターゲットにする。使うのは展開器 tinfl だけなので、
@@ -73,28 +73,28 @@ target_compile_definitions(miniz PUBLIC
         )
 
 add_executable(pico-opm-writer
-        pico-opm-writer.c
-        opm.c
-        clockmode.c
-        ym3012.c
-        capture.c
-        i2s.c
-        usb_pcm.c
-        led.c
-        button.c
-        stats.c
-        flash_disk.c
-        diskio_flash.c
-        storage.c
-        filelist.c
-        songend.c
-        autoplay.c
-        vgm.c
-        vgz.c
-        mdx.c
-        pcm8.c
-        usb_msc.c
-        usb_descriptors.c
+        src/pico-opm-writer.c
+        src/opm.c
+        src/clockmode.c
+        src/ym3012.c
+        src/capture.c
+        src/i2s.c
+        src/usb_pcm.c
+        src/led.c
+        src/button.c
+        src/stats.c
+        src/flash_disk.c
+        src/diskio_flash.c
+        src/storage.c
+        src/filelist.c
+        src/songend.c
+        src/autoplay.c
+        src/vgm.c
+        src/vgz.c
+        src/mdx.c
+        src/pcm8.c
+        src/usb_msc.c
+        src/usb_descriptors.c
         )
 
 pico_set_program_name(pico-opm-writer "pico-opm-writer")
@@ -109,9 +109,9 @@ target_compile_definitions(pico-opm-writer PRIVATE
 target_compile_options(pico-opm-writer PRIVATE -Wall -Wextra)
 
 # Generate PIO header
-pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/opm_clock.pio)
-pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/ym3012.pio)
-pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/i2s.pio)
+pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/src/opm_clock.pio)
+pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/src/ym3012.pio)
+pico_generate_pio_header(pico-opm-writer ${CMAKE_CURRENT_LIST_DIR}/src/i2s.pio)
 
 # 起動時の φM プリセット（0 = 4MHz / 1 = 3.579545MHz）。未指定なら opm.h の既定値を使う。
 # 実行時は clock コマンドと VGM の追従でどちらへも切り替えられる。
@@ -234,7 +234,7 @@ target_link_libraries(pico-opm-writer
 
 # Add the standard include files to the build
 target_include_directories(pico-opm-writer PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
 # Add any user requested libraries

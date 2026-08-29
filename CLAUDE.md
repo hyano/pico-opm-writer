@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Raspberry Pi Pico 2 (RP2350 / `PICO_BOARD=pico2`) から YM2151 (OPM) 音源チップのレジスタを書き込むためのファームウェア。
 
-使い方・配線・コマンド仕様は [README.md](README.md) に、ファームウェアの内部設計と実装は [docs/pico-opm-writer.md](docs/pico-opm-writer.md) に記載されている。ファームウェアの主要ファイル：
+使い方・配線・コマンド仕様は [README.md](README.md) に、ファームウェアの内部設計と実装は [docs/pico-opm-writer.md](docs/pico-opm-writer.md) に記載されている。ファームウェアの主要ファイル（`external/` の 2 行以外は `src/` 以下）：
 
 | ファイル | 役割 |
 | --- | --- |
@@ -376,4 +376,4 @@ I2S の分周比は `i2s_init()` が **φM の分周値（256 倍固定小数）
 
 ## Git
 
-`.gitignore` が除外するのはビルド生成物（`build` / `build-*` / `__pycache__` / `*.wav` / `*.bin`）、KiCad と FreeCAD のロックファイル・自動保存・バックアップ（`*.kicad_*.lck` / `_autosave*` / `board/pico-opm-writer-backups/` / `board/base/*.FCBak`）、基板の製造用出力（`board/production/` と `board/fabrication-toolkit-options.json` / `board/temp-freerouting.dsn`）、そして同梱しない参照資料と試聴用データ（`reference/`。MXDRV / PCM8 の資料と VGM / MDX のファイル置き場）。**`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash / `launch.json` のデバッグ構成、`settings.json` の PATH 設定を共有するため）。`*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は git の管理対象に入る。
+`.gitignore` が除外するのはビルド生成物（`build` / `build-*` / `__pycache__` / `*.wav` / `*.bin`）、macOS の `.DS_Store`、KiCad と FreeCAD のロックファイル・自動保存・バックアップ（`*.kicad_*.lck` / `_autosave*` / `board/pico-opm-writer-backups/` / `board/base/*.FCBak`）、基板の製造用出力（`board/production/` と `board/fabrication-toolkit-options.json` / `board/temp-freerouting.dsn`）、そして同梱しない参照資料と試聴用データ（`reference/`。MXDRV / PCM8 の資料と VGM / MDX のファイル置き場）。**`.vscode/` は意図的に git 管理する**（`tasks.json` の Flash / `launch.json` のデバッグ構成、`settings.json` の PATH 設定を共有するため）。`*.wav.zst` は除外していないので、`test/lfo_noise/wav/` のキャプチャ結果は git の管理対象に入る。

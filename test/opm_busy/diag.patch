@@ -39,10 +39,10 @@ index 0a69ad7..eefc6e4 100644
          "YM3012_LOOPBACK"          "@YM3012_LOOPBACK@"
          "FLASH_TOTAL_BYTES"        "@FLASH_TOTAL_BYTES@"
          "FLASH_FATFS_OFFSET"       "@fatfs_offset@ (@fatfs_offset_hex@)"
-diff --git a/opm.c b/opm.c
+diff --git a/src/opm.c b/src/opm.c
 index 60b82eb..1177259 100644
---- a/opm.c
-+++ b/opm.c
+--- a/src/opm.c
++++ b/src/opm.c
 @@ -36,6 +36,8 @@ static uint32_t s_clock_hz_actual;
  /* OPM_T_SETUP_NS 相当のシステムクロックサイクル数 */
  static uint32_t s_setup_cycles;
@@ -441,10 +441,10 @@ index 60b82eb..1177259 100644
 +    return clock_get_hz(clk_sys);
 +}
 +#endif /* OPM_DIAG */
-diff --git a/opm.h b/opm.h
+diff --git a/src/opm.h b/src/opm.h
 index f504678..804cf7d 100644
---- a/opm.h
-+++ b/opm.h
+--- a/src/opm.h
++++ b/src/opm.h
 @@ -49,12 +49,26 @@
  #define OPM_PIN_PHIM 15 /* マスタークロック（PIO 出力） */
  #define OPM_PIN_IRQ  16 /* 割り込み要求（負論理）。入力・レベル参照のみ */
@@ -507,10 +507,10 @@ index f504678..804cf7d 100644
 +#endif /* OPM_DIAG */
 +
  #endif /* OPM_H */
-diff --git a/pico-opm-writer.c b/pico-opm-writer.c
+diff --git a/src/pico-opm-writer.c b/src/pico-opm-writer.c
 index 40ea48f..30c7f9f 100644
---- a/pico-opm-writer.c
-+++ b/pico-opm-writer.c
+--- a/src/pico-opm-writer.c
++++ b/src/pico-opm-writer.c
 @@ -1849,6 +1849,272 @@ static void cmd_selftest(void)
  }
  

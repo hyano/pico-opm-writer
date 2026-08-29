@@ -1,6 +1,6 @@
 # FM と ADPCM の発音タイミングのずれ
 
-FM（YM2151 → YM3012 → PIO キャプチャ）と ADPCM（[pcm8.c](../../pcm8.c) のソフトデコード）は
+FM（YM2151 → YM3012 → PIO キャプチャ）と ADPCM（[pcm8.c](../../src/pcm8.c) のソフトデコード）は
 `ym3012_reader_read_pcm()` の中でフレーム番号を突き合わせて足され、I2S と USB CDC #1 へ出る。
 MDX が両者を**同じ tick でキーオン**したとき、出力の中で立ち上がりが揃うかを実測した。
 
@@ -24,7 +24,7 @@ MDX が両者を**同じ tick でキーオン**したとき、出力の中で立
 
 キャプチャリングのフレーム番号 N は実時刻 N/62500 に固定されている。DMA の書き込み位置と
 `s_write_total` が `s_write_total ≡ 書き込み添字 (mod 4096)` で結ばれていて
-（[ym3012.c](../../ym3012.c) の `ym3012_ring_poll()`）、途中で位相がずれない。したがって
+（[ym3012.c](../../src/ym3012.c) の `ym3012_ring_poll()`）、途中で位相がずれない。したがって
 `opm_write()` した瞬間の FM の音は、その瞬間のフレーム番号に入る。
 
 ADPCM 側はフレーム番号を自分で選ぶ。`pcm8_service()` が描くのは
@@ -41,22 +41,22 @@ ADPCM 側はフレーム番号を自分で選ぶ。`pcm8_service()` が描くの
 
 | 仕組み | 値 | 効き方 |
 | --- | --- | --- |
-| `PCM8_BATCH_FRAMES`（[pcm8.c](../../pcm8.c)） | 64 フレーム | **発音中だけ**、64 フレーム溜まるまで描かない |
-| `AUDIO_SERVICE_INTERVAL_US`（[pico-opm-writer.c](../../pico-opm-writer.c)） | 500µs = 31 フレーム | リング位置の取り込みと描画を 500µs ごとにまとめる |
+| `PCM8_BATCH_FRAMES`（[pcm8.c](../../src/pcm8.c)） | 64 フレーム | **発音中だけ**、64 フレーム溜まるまで描かない |
+| `AUDIO_SERVICE_INTERVAL_US`（[pico-opm-writer.c](../../src/pico-opm-writer.c)） | 500µs = 31 フレーム | リング位置の取り込みと描画を 500µs ごとにまとめる |
 
 31 フレームずつ進む `w` に対して束ねの閾値が 64 なので、発音中は 3 回に 1 回しか描かない。
 前線の遅れは 0〜93 フレームを往復し、そこへメインループが長く止まった回が加わる。
 
 ### 2.3 実機 X68000 とは向きも逆だった
 
-MXDRV は FM のレジスタを書いてから ADPCM を叩く。[mdx.c](../../mdx.c) の tick ループも
+MXDRV は FM のレジスタを書いてから ADPCM を叩く。[mdx.c](../../src/mdx.c) の tick ループも
 チャンネル番号順（FM 0-7 → ADPCM 8-15）に処理するので、**キーオンの発行順は FM が先**。
 実機では ADPCM がわずかに遅れるはずのところ、pcm8 が過去へ描くせいで先行に転じていた。
 
 ### 2.4 直し方
 
 **発音状態を変える前に、その瞬間のフレーム番号まで描き切る。**
-[pcm8.c](../../pcm8.c) の `flush_now()` がこれを行い、`pcm8_key_on()` /
+[pcm8.c](../../src/pcm8.c) の `flush_now()` がこれを行い、`pcm8_key_on()` /
 `pcm8_stop()` / `pcm8_set_mode()` / `pcm8_abort_all()` / `pcm8_iocs_out()` /
 `pcm8_iocs_mod()` / `pcm8_set_enabled()` の入口から呼ばれる
 （`pcm8_close_pdx()` は `pcm8_abort_all()` 経由）。
@@ -152,7 +152,7 @@ FM と ADPCM が同じ tick でキーオンするだけの曲を作り、**FM �
 差分も相互相関も要らず、同じキャプチャの中で立ち上がりを直接比べられる。
 
 - FM は OPM の `0x20+ch` の `RL` で片側だけに出す。反対側のスロットには何も加算されない。
-- ADPCM は [pcm8.c](../../pcm8.c) の `render_block()` が `pan & 1` で L、`pan & 2` で R に
+- ADPCM は [pcm8.c](../../src/pcm8.c) の `render_block()` が `pan & 1` で L、`pan & 2` で R に
   振り分ける。ミックスリングの段階で片側は 0 のまま。**PCM8 の定位は全チャネル共通**なので、
   鳴らすチャンネルはすべて `p1` にしてある。
 

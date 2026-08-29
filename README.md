@@ -59,8 +59,8 @@ I2S の MCLK は使わないので、DAC へ出すのは GP26-GP28 の 3 本だ�
 SO / φ1 / SH1 / SH2 は **GP17 から連続していること**。キャプチャ用の PIO がこの 4 本を
 in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-writer.md#42-pio-によるビット取り込み)）。
 
-ピン番号の定義は [opm.h](opm.h) の `OPM_PIN_*`、[ym3012.h](ym3012.h) の `YM3012_PIN_*`、
-[button.h](button.h) の `BUTTON_PIN_*` にまとまっている。
+ピン番号の定義は [opm.h](src/opm.h) の `OPM_PIN_*`、[ym3012.h](src/ym3012.h) の `YM3012_PIN_*`、
+[button.h](src/button.h) の `BUTTON_PIN_*` にまとまっている。
 
 ### 1.2 GPIO を割り当てない OPM 端子
 
@@ -89,7 +89,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
   | 対象は **GPIO 0-25 のみ**。GP26-GP29 は ADC 兼用で対象外 | 5V を受けるのは GP2-GP9 (D0-D7) / GP16 (/IRQ) / GP17-GP20 (SO・φ1・SH1・SH2) だけで、すべて範囲内 |
   | 5V が掛かっている間 **IOVDD が 3.3V で給電されている**こと。無給電のまま 5V を掛けるとパッドが壊れる | OPM の 5V は Pico の VBUS から取るので、5V があるときは必ず Pico の 3.3V も生きている |
 
-  絶対最大定格は任意のピンで 5.5V。/IRQ は [opm.c](opm.c) が内部プルアップを張るので、
+  絶対最大定格は任意のピンで 5.5V。/IRQ は [opm.c](src/opm.c) が内部プルアップを張るので、
   外付け抵抗は要らない。
 
   **GP26-GP28（I2S の BCK / LRCK / DIN）に 5V デバイスを繋いではいけない。**
@@ -1840,7 +1840,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2 \
 検査は 3 段構えになっている。
 
 1. **コンパイル時** — 境界の 4096 バイト揃え、末尾予約への食い込み、FAT12 の
-   クラスタ数上限を [flash_disk.c](flash_disk.c) の `_Static_assert` で見る。
+   クラスタ数上限を [flash_disk.c](src/flash_disk.c) の `_Static_assert` で見る。
 2. **リンク後** — `__flash_binary_end` を読んでファームウェアと領域が重なって
    いないかを見る。重なっていればビルドが失敗する。余裕は毎回表示される。
 
