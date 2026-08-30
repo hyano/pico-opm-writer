@@ -18,6 +18,9 @@ board_pcba/pico-opm-writer_pcba-backups/
 board/production/
 board/base/*.FCBak
 
+board_pcba/fabrication-toolkit-options.json
+board_pcba/production/
+
 reference/
 
 # KiCad GUI が出す ERC レポート
