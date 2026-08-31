@@ -2,7 +2,7 @@
 """ターゲットの CDC #0 へコマンドを送り、OK / ERR の行が出るまで読む。"""
 import os, select, sys, time
 
-DEV = "/dev/cu.usbmodem112101"
+DEV = "/dev/cu.usbmodem11201"
 
 
 def run(cmds, timeout=60.0, settle=0.4):

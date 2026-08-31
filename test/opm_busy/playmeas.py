@@ -2,7 +2,7 @@
 """曲を再生し、統計をリセットしてから一定時間走らせて `s` を読む。"""
 import os, select, sys, time
 
-DEV = "/dev/cu.usbmodem112101"
+DEV = "/dev/cu.usbmodem11201"
 
 
 def main(song, settle=6.0, window=20.0):

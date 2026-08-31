@@ -2,8 +2,8 @@
 """CDC#1 から PCM を取り込む。曲の頭から取れるよう、再生開始前にストリームを開く。"""
 import os, select, sys, time
 
-CMD = "/dev/cu.usbmodem112101"
-PCM = "/dev/cu.usbmodem112103"
+CMD = "/dev/cu.usbmodem11201"
+PCM = "/dev/cu.usbmodem11203"
 
 
 def capture(song, out, seconds=3.0):

@@ -276,8 +276,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 
 ### シリアル (stdio) の読み取り
 
-コマンドと `printf` の出力先は **`/dev/cu.usbmodem112101`**（CDC #0）。PCM は
-`/dev/cu.usbmodem112103`（CDC #1）。デバイス名は USB のポート位置に依存するので、
+コマンドと `printf` の出力先は **`/dev/cu.usbmodem11201`**（CDC #0）。PCM は
+`/dev/cu.usbmodem11203`（CDC #1）。デバイス名は USB のポート位置に依存するので、
 変わったら README §6.5 の手順で引き直す。
 
 - **`/dev/tty.*` ではなく `/dev/cu.*` を使う。** `tty.*` は DCD 待ちで open がブロックする。
@@ -291,7 +291,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico2
 ```bash
 python3 - <<'EOF'
 import os, select, time
-dev = "/dev/cu.usbmodem112101"
+dev = "/dev/cu.usbmodem11201"
 for _ in range(40):                 # 書き込み後の再列挙を待つ
     if os.path.exists(dev): break
     time.sleep(0.5)

@@ -172,8 +172,8 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 
   | | 用途 | macOS でのデバイス名の例 |
   | --- | --- | --- |
-  | CDC #0 | コマンド。Pico SDK の `stdio_usb` がそのまま使う | `/dev/cu.usbmodem112101` |
-  | CDC #1 | PCM データ出力（[§4](#4-pcm-出力)） | `/dev/cu.usbmodem112103` |
+  | CDC #0 | コマンド。Pico SDK の `stdio_usb` がそのまま使う | `/dev/cu.usbmodem11201` |
+  | CDC #1 | PCM データ出力（[§4](#4-pcm-出力)） | `/dev/cu.usbmodem11203` |
 
   CDC #0 をディスクリプタの先頭に置いているので、コマンド側のデバイス名は 1 ポート構成の
   ときと変わらない。CDC #1 は末尾の番号が増えたものになる。
@@ -181,7 +181,7 @@ in_base からのオフセットで参照する（[docs §4.2](docs/pico-opm-wri
 - CDC を 2 本にする都合で **`picotool load -fx`（BOOTSEL 不要の書き込み）は使えない**
   （[§6.4](#64-書き込み代替経路)）。
 - ボーレート・パリティ等の設定は無視される（USB CDC のため何を指定しても動作する）。
-- macOS 例: `screen /dev/cu.usbmodem112101 115200`。
+- macOS 例: `screen /dev/cu.usbmodem11201 115200`。
   **`/dev/tty.*` ではなく `/dev/cu.*` を使う**（`tty.*` は DCD 待ちで open がブロックする）。
   デバイス名の引き直し方は [§6.5](#65-シリアル-stdio-の読み取り) を参照。
 - 接続を検出した時点で起動バナーを出力する（接続前の出力は捨てられるため）。
@@ -1709,9 +1709,9 @@ CDC を 2 本にするため TinyUSB のディスクリプタを自前で持っ�
 
 | デバイス | 中身 |
 | --- | --- |
-| `/dev/cu.usbmodem112101` | **ターゲット pico2 の USB CDC #0** = コマンド / `printf` の出力先 |
-| `/dev/cu.usbmodem112103` | **ターゲット pico2 の USB CDC #1** = PCM データ出力（[§4](#4-pcm-出力)） |
-| `/dev/cu.usbmodem112202` | PicoProbe 側の CDC-UART ブリッジ（現状の設定では未使用） |
+| `/dev/cu.usbmodem11201` | **ターゲット pico2 の USB CDC #0** = コマンド / `printf` の出力先 |
+| `/dev/cu.usbmodem11203` | **ターゲット pico2 の USB CDC #1** = PCM データ出力（[§4](#4-pcm-出力)） |
+| `/dev/cu.usbmodem114302` | PicoProbe 側の CDC-UART ブリッジ（現状の設定では未使用） |
 
 これに加えて USB マスストレージのインタフェースが 1 本ある。`storage host` のあいだだけ
 メディアが入っている状態になり、PC にリムーバブルディスクとして現れる（[§7](#7-ストレージ)）。
